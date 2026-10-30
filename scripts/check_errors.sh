@@ -201,9 +201,31 @@ fn main() {
     }
 }'
 
+# More than MAX_COMPONENTS (512) components: 600 leaves under one root. Reported by the
+# plan's constant evaluation, so only `cargo build` sees it.
+CMD[too_many_components]=build
+PATTERN[too_many_components]='E0080|too many components'
+BODY[too_many_components]=$(python3 - <<'PY'
+# 30 groups of 20 leaves: 600 leaves + 30 groups + the root = 631 components.
+G, K = 30, 20
+out = []
+def comp(name, subs):
+    attr = "#[subscribe(%s)] " % ", ".join(f"s{i}: {d}" for i, d in enumerate(subs)) if subs else ""
+    out.append(f"#[derive(ComponentSubscription)] {attr}pub struct {name};")
+    out.append(f"impl Component for {name} {{ type Config = (); type Output = u64; fn new((): ()) -> Self {{ {name} }} fn update(&mut self, _: Self::Input<'_>) -> u64 {{ 0 }} }}")
+for g in range(G):
+    for k in range(K):
+        comp(f"L{g}_{k}", [])
+    comp(f"G{g}", [f"L{g}_{k}" for k in range(K)])
+comp("A", [f"G{g}" for g in range(G)])
+out.append("fn main() { let _ = Pipeline::<A>::build(Configs::new()); }")
+print("\n".join(out))
+PY
+)
+
 ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        self_cycle
-       duplicate_dep_via_alias root_not_a_component generic_missing_root_bound
+       duplicate_dep_via_alias too_many_components root_not_a_component generic_missing_root_bound
        generic_root_bound_ok keep_input_reference
        name_input_struct_outside unused_config)
 
