@@ -185,13 +185,13 @@ fn main() { let _ = Pipeline::<A>::build(Configs::new()); }'
 
 # The root is an ordinary component; anything else is not a root.
 CMD[root_not_a_component]=check
-PATTERN[root_not_a_component]='E0277.*(Root|Component)|(Root|Component).*not (satisfied|implemented)'
+PATTERN[root_not_a_component]='E0277.*can.t be the root of a .Pipeline.'
 BODY[root_not_a_component]='
 fn main() { let _ = Pipeline::<String>::build(Configs::new()); }'
 
 # Generic code over the root needs the `Root` bound (and nothing else).
 CMD[generic_missing_root_bound]=check
-PATTERN[generic_missing_root_bound]='E0277.*Root|Root.*not (satisfied|implemented)|Root.*not satisfied'
+PATTERN[generic_missing_root_bound]='E0277.*can.t be the root of a .Pipeline.'
 BODY[generic_missing_root_bound]='
 fn drive<A: Component>(p: &mut Pipeline<A>) -> A::Output { p.run() }
 fn main() {}'

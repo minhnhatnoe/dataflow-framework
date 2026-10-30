@@ -22,8 +22,8 @@ timeout 120 cargo test -p dataflow-flat --features cycle-diagnostics   # the opt
 
 1. **No dynamic dispatch while running.** No `dyn`, downcasts or lookups in `run` or the walk. Type-erased maps are only allowed in `Pipeline::build`.
 2. **Compile-time constants contain no references** beyond the existing one-level `SeqList`. `Seq` and `Plan` are plain arrays. A graph of `&'static` constants made incremental builds exponential.
-3. **Use `#[inline]`, never `#[inline(always)]`, on the walk and lookup chain** (`Walk::walk`, `FindB`, `GetB`, `Gather`, `PushAll`, `Refs::shorten`). Forced inlining in debug builds expands every path through the graph, and it gave no gain in release.
-4. **Each component is constructed, run and dropped exactly once.** This now holds structurally: the typed `Tree` stores each component once (at the edge where `Edge::FIRST` is true), construction is `Branch::make`, and drop is compiler drop glue. `tests/graphs.rs` and `tests/runtime.rs` check it.
+3. **Use `#[inline]`, never `#[inline(always)]`, on the walk and lookup chain** (`Walk::walk`, `Find`, `Get`, `GatherInputs`, `Context::shorten`). Forced inlining in debug builds expands every path through the graph, and it gave no gain in release.
+4. **Each component is constructed, run and dropped exactly once.** This now holds structurally: the typed `Tree` stores each component once (at the edge where `Edge::FIRST` is true), construction is `Tree::make`, and drop is compiler drop glue. `tests/graphs.rs` and `tests/runtime.rs` check it.
 5. **`#![forbid(unsafe_code)]` stays.** The old raw-pointer soundness argument is gone; do not reintroduce `unsafe`. If a design needs it, discuss first.
 6. **Execution order is a guarantee**: depth-first post-order in subscription listing order (documented on `Component` and `Pipeline`, and in the README). `dataflow-flat/tests/order.rs` enforces it; change those tests only on purpose.
 7. **GCE is confined to the library.** `generic_const_exprs` is a feature of `dataflow-flat` only. User crates need no feature gate and generic user code needs exactly one bound, `Root`. `tests/generic_user.rs` and `check_errors.sh generic_root_bound_ok` enforce it.
@@ -34,7 +34,13 @@ timeout 120 cargo test -p dataflow-flat --features cycle-diagnostics   # the opt
 
 | Path | What |
 |---|---|
-| `dataflow-flat/src/lib.rs` | Traits (`ComponentSubscription`, `Component`, `Root`), the compile-time plan (`Seq`, `Plan`, `Described`, `Edge`), the typed storage (`Tree`, `If`/`Branch`, `StorageList`), finished outputs and lookups (`Done`, `GetB`, `FindB`, `Refs`, `PushAll`, `Gather`), the fold (`Walk`), `DepList`, cycle traits, `Configs`, `Pipeline`, the `plan_trace` test |
+| `dataflow-flat/src/lib.rs` | Crate docs (the four stages, top-down), feature gates, module list, re-exports |
+| `dataflow-flat/src/component.rs` | `ComponentSubscription`, `Component`, `DepList` (the nested list the derive builds) |
+| `dataflow-flat/src/plan.rs` | The compile-time plan: `Seq`/`SeqList`, `Described`, `Plan`, `Planned`, `Edge`, and the `plan_trace` test |
+| `dataflow-flat/src/storage.rs` | The typed states tree: `Tree`, `If`/`Slot`, `DepStorage`, `Placed` |
+| `dataflow-flat/src/lookup.rs` | Finished outputs and lookups: `Done`, `Pending`, `Top`/`TopHolds`/`IsSame`, `Get`, `Context`, `Find`, `GatherInputs` |
+| `dataflow-flat/src/walk.rs` | The fold (`Walk`) and the `Root` bound |
+| `dataflow-flat/src/build.rs`, `pipeline.rs`, `cycle.rs` | `Configs` and the two startup passes; `Pipeline`; the opt-in cycle check |
 | `dataflow-flat/tests/` | `runtime.rs` (run/drop/by-value guarantees), `graphs.rs` (lifecycle on diamond and example graphs, Send, panics, alignment), `order.rs` (execution order), `generic_user.rs` (one-bound generic code) |
 | `dataflow-macros/src/lib.rs` | `#[derive(ComponentSubscription)]` + `#[subscribe(...)]` |
 | `example/`, `diamond/` | Usage examples with a root `App` / `Sum`; `diamond` is for reading MIR/IR/asm |
