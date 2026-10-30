@@ -1,0 +1,3 @@
+# dataflow-flat needs nightly (feature `const_type_name`).
+[toolchain]
+channel = "nightly"
