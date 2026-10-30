@@ -1,3 +1,5 @@
 # dataflow-flat needs nightly (feature `const_type_name`).
+# Pinned so compile-time numbers are reproducible and upgrades are deliberate;
+# bump the date to upgrade.
 [toolchain]
-channel = "nightly"
+channel = "nightly-2026-10-30"
