@@ -7,7 +7,7 @@ edition = "2021"
 dataflow-macros = { path = "../dataflow-macros" }
 
 [features]
-# Reject dependency cycles where they are written (E0275 naming
-# `NoDependencyCycle`) instead of as E0391 on the plan's constants. Costs
-# about +30% from-scratch debug build time on a 400-component graph.
+# No longer needed: a dependency cycle is always reported readably (E0275 naming
+# a component of the cycle). Kept so existing `--features cycle-diagnostics`
+# commands keep working.
 cycle-diagnostics = []

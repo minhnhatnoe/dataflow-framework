@@ -4,7 +4,7 @@
 use crate::build::ConstructPass;
 use crate::component::Component;
 use crate::lookup::{Context, Done, GatherInputs, Pending};
-use crate::plan::Planned;
+use crate::plan::{Planned, Upstream};
 use crate::storage::{DepsDone, DepsStored, If, Placed, Slot, Tree};
 
 /// Run a (piece of a) states tree under context `T`, producing its finished
@@ -104,6 +104,7 @@ pub trait Root: Component {
 
 impl<A: Component> Root for A
 where
+    A::Deps: const Upstream,
     A: Placed<A>,
     Tree<A, A>: Walk<A, (), Out = Done<A, A>>,
 {

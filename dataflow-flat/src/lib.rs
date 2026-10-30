@@ -14,13 +14,13 @@
 //!
 //! Four stages, one module each, read in this order:
 //!
-//! 1. **Plan** (`plan`, constant evaluation). For every component, `SEQ` is
-//!    the order in which a depth-first walk first reaches each component
-//!    upstream of it, with the parent it was reached from. Merging these
-//!    bottom-up gives the root's plan: for every edge `(parent, dependency)`,
-//!    whether this is the edge that *first* reaches the dependency
-//!    (`Edge::FIRST`), and which components each storage subtree holds
-//!    (`Plan::holds`).
+//! 1. **Plan** (`plan`, constant evaluation). The depth-first walk from the
+//!    root runs once inside constant evaluation (a `const fn` that calls trait
+//!    methods, `const_trait_impl`) and records every component with the
+//!    parent it was first reached from. That gives, for every edge
+//!    `(parent, dependency)`, whether this is the edge that *first* reaches
+//!    the dependency (`Edge::FIRST`), and which components each storage
+//!    subtree holds (`Plan::holds`).
 //! 2. **States tree** (`storage`, types via `generic_const_exprs`).
 //!    `Tree<R, C>` holds a component `C` and, for each of its subscriptions,
 //!    either the subtree of that dependency (if this edge is the first one
@@ -41,8 +41,8 @@
 //!    code, as for a hand-written struct.
 //!
 //! The rest: `component` (the traits and the dependency list the derive
-//! builds), `cycle` (opt-in cycle diagnostics), `build` (configs and the two
-//! startup passes, the only runtime lookups) and `pipeline`.
+//! builds), `build` (configs and the two startup passes, the only runtime
+//! lookups) and `pipeline`.
 //!
 //! The price of being `unsafe`-free is that this needs `generic_const_exprs`,
 //! which is confined to this crate: user crates need no feature gate.
@@ -61,16 +61,19 @@
 //!   maps are used only in `Pipeline::build`).
 //!
 //! Checked at compile time: every dependency is a component, `update`'s inputs
-//! match the upstream outputs, the graph is acyclic (a cycle is an error either
-//! way; the cargo feature `cycle-diagnostics` makes the message readable, see
-//! [`NoDependencyCycle`]), no component lists the same dependency twice, and
-//! the graph fits [`MAX_COMPONENTS`].
+//! match the upstream outputs, the graph is acyclic (a cycle is E0275 "overflow
+//! evaluating the requirement `(B, ()): Upstream`", naming a component of the
+//! cycle), no component lists the same dependency twice, and the graph fits
+//! [`MAX_COMPONENTS`].
 //! Checked when the pipeline is built: no config is supplied for a component
 //! outside the graph.
 
 #![forbid(unsafe_code)]
 // The plan's constants are hashed from type names.
 #![feature(const_type_name)]
+// The plan runs the dependency walk in constant evaluation, which calls trait
+// methods from a `const fn`.
+#![feature(const_trait_impl)]
 // The plan's constants select types (`If<{ Edge::FIRST }>`). Incomplete, but
 // confined to this crate: users of `Pipeline` need no feature gate.
 #![feature(generic_const_exprs)]
@@ -81,7 +84,6 @@ extern crate self as dataflow_flat;
 
 mod build;
 mod component;
-mod cycle;
 mod lookup;
 mod pipeline;
 mod plan;
@@ -90,7 +92,6 @@ mod walk;
 
 pub use build::{BuildError, Configs};
 pub use component::{Component, ComponentSubscription, DepList};
-pub use cycle::NoDependencyCycle;
 pub use pipeline::Pipeline;
 pub use plan::MAX_COMPONENTS;
 pub use walk::Root;

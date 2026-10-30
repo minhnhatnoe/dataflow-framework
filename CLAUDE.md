@@ -36,11 +36,11 @@ timeout 120 cargo test -p dataflow-flat --features cycle-diagnostics   # the opt
 |---|---|
 | `dataflow-flat/src/lib.rs` | Crate docs (the four stages, top-down), feature gates, module list, re-exports |
 | `dataflow-flat/src/component.rs` | `ComponentSubscription`, `Component`, `DepList` (the nested list the derive builds) |
-| `dataflow-flat/src/plan.rs` | The compile-time plan: `Seq`/`SeqList`, `Described`, `Plan`, `Planned`, `Edge`, and the `plan_trace` test |
+| `dataflow-flat/src/plan.rs` | The compile-time plan: `Described`, the const dependency walk (`visit`, `Upstream`), `Plan`, `Planned`, `Edge`, and the `plan_trace` test |
 | `dataflow-flat/src/storage.rs` | The typed states tree: `Tree`, `If`/`Slot`, `DepStorage`, `Placed` |
 | `dataflow-flat/src/lookup.rs` | Finished outputs and lookups: `Done`, `Pending`, `Top`/`TopHolds`/`IsSame`, `Get`, `Context`, `Find`, `GatherInputs` |
 | `dataflow-flat/src/walk.rs` | The fold (`Walk`) and the `Root` bound |
-| `dataflow-flat/src/build.rs`, `pipeline.rs`, `cycle.rs` | `Configs` and the two startup passes; `Pipeline`; the opt-in cycle check |
+| `dataflow-flat/src/build.rs`, `pipeline.rs` | `Configs` and the two startup passes; `Pipeline` |
 | `dataflow-flat/tests/` | `runtime.rs` (run/drop/by-value guarantees), `graphs.rs` (lifecycle on diamond and example graphs, Send, panics, alignment), `order.rs` (execution order), `generic_user.rs` (one-bound generic code) |
 | `dataflow-macros/src/lib.rs` | `#[derive(ComponentSubscription)]` + `#[subscribe(...)]` |
 | `example/`, `diamond/` | Usage examples with a root `App` / `Sum`; `diamond` is for reading MIR/IR/asm |

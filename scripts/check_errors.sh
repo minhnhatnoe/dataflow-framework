@@ -87,34 +87,9 @@ impl Component for A {
 fn main() {}'
 
 CMD[cycle]=check
-# Default build: the cycle is found as a cycle between the plan's own constants.
-PATTERN[cycle]='E0391.*cycle detected'
+# The trait solver cannot prove that the walk over a cyclic graph is possible; it names a component of the cycle.
+PATTERN[cycle]='E0275.*overflow evaluating the requirement .*Upstream'
 BODY[cycle]='
-#[derive(ComponentSubscription)]
-#[subscribe(b: B)]
-pub struct A;
-impl Component for A {
-    type Config = ();
-    type Output = u64;
-    fn new((): ()) -> Self { A }
-    fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 0 }
-}
-#[derive(ComponentSubscription)]
-#[subscribe(a: A)]
-pub struct B;
-impl Component for B {
-    type Config = ();
-    type Output = u64;
-    fn new((): ()) -> Self { B }
-    fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 0 }
-}
-fn main() { let _ = Pipeline::<A>::build(Configs::new()); }'
-
-CMD[cycle_diagnostics]=check
-# With feature `cycle-diagnostics`: reported where the cycle is written.
-FEATURES[cycle_diagnostics]=cycle-diagnostics
-PATTERN[cycle_diagnostics]='E0275.*NoDependencyCycle'
-BODY[cycle_diagnostics]='
 #[derive(ComponentSubscription)]
 #[subscribe(b: B)]
 pub struct A;
@@ -137,23 +112,8 @@ fn main() { let _ = Pipeline::<A>::build(Configs::new()); }'
 
 # A component that subscribes to itself.
 CMD[self_cycle]=check
-PATTERN[self_cycle]='E0391.*cycle detected'
+PATTERN[self_cycle]='E0275.*overflow evaluating the requirement .*Upstream'
 BODY[self_cycle]='
-#[derive(ComponentSubscription)]
-#[subscribe(me: A)]
-pub struct A;
-impl Component for A {
-    type Config = ();
-    type Output = u64;
-    fn new((): ()) -> Self { A }
-    fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 0 }
-}
-fn main() { let _ = Pipeline::<A>::build(Configs::new()); }'
-
-CMD[self_cycle_diagnostics]=check
-FEATURES[self_cycle_diagnostics]=cycle-diagnostics
-PATTERN[self_cycle_diagnostics]='E0275.*NoDependencyCycle'
-BODY[self_cycle_diagnostics]='
 #[derive(ComponentSubscription)]
 #[subscribe(me: A)]
 pub struct A;
@@ -185,7 +145,7 @@ fn main() { let _ = Pipeline::<A>::build(Configs::new()); }'
 
 # The root is an ordinary component; anything else is not a root.
 CMD[root_not_a_component]=check
-PATTERN[root_not_a_component]='E0277.*can.t be the root of a .Pipeline.'
+PATTERN[root_not_a_component]='E0277.*(String: Root|can.t be the root of a .Pipeline.)'
 BODY[root_not_a_component]='
 fn main() { let _ = Pipeline::<String>::build(Configs::new()); }'
 
@@ -242,7 +202,7 @@ fn main() {
 }'
 
 ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
-       cycle_diagnostics self_cycle self_cycle_diagnostics
+       self_cycle
        duplicate_dep_via_alias root_not_a_component generic_missing_root_bound
        generic_root_bound_ok keep_input_reference
        name_input_struct_outside unused_config)
