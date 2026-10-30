@@ -213,9 +213,12 @@ impl Seq {
     const fn merge(owner: Option<Entry>, mut deps: &'static SeqList) -> Seq {
         let mut out = Seq::empty();
         let mut seen = [0u64; SET_CAP];
+        let mut n = 0;
         let parent = match owner {
             Some(e) => {
-                out.push(e);
+                out.ids[0] = e.id;
+                out.parents[0] = e.parent;
+                n = 1;
                 let mut s = (e.id as usize) & (SET_CAP - 1);
                 while seen[s] != 0 {
                     s = (s + 1) & (SET_CAP - 1);
@@ -227,27 +230,51 @@ impl Seq {
         };
         let mut direct = IdSet::new();
         while let SeqList::Cons(dep, rest) = deps {
+            deps = rest;
             let head = dep.ids[0];
             if direct.contains(head) {
                 panic!("a component lists the same dependency twice");
             }
             direct.insert(head);
-            let mut i = 0;
-            while i < dep.len {
-                let id = dep.ids[i];
+            // The component reached so far is closed under "upstream of", so a
+            // dependency that is already reached contributes nothing.
+            let mut s = (head as usize) & (SET_CAP - 1);
+            while seen[s] != 0 && seen[s] != head {
+                s = (s + 1) & (SET_CAP - 1);
+            }
+            if seen[s] != 0 {
+                continue;
+            }
+            seen[s] = head;
+            if n == MAX_COMPONENTS {
+                panic!("too many components: raise dataflow_flat::MAX_COMPONENTS");
+            }
+            out.ids[n] = head;
+            out.parents[n] = parent;
+            n += 1;
+            let (ids, parents, len) = (&dep.ids, &dep.parents, dep.len);
+            let mut i = 1;
+            while i < len {
+                let id = ids[i];
                 let mut s = (id as usize) & (SET_CAP - 1);
-                while seen[s] != 0 && seen[s] != id {
+                let mut v = seen[s];
+                while v != 0 && v != id {
                     s = (s + 1) & (SET_CAP - 1);
+                    v = seen[s];
                 }
-                if seen[s] == 0 {
+                if v == 0 {
                     seen[s] = id;
-                    let p = dep.parents[i];
-                    out.push(Entry { id, parent: if p == OWNER { parent } else { p } });
+                    if n == MAX_COMPONENTS {
+                        panic!("too many components: raise dataflow_flat::MAX_COMPONENTS");
+                    }
+                    out.ids[n] = id;
+                    out.parents[n] = parents[i];
+                    n += 1;
                 }
                 i += 1;
             }
-            deps = rest;
         }
+        out.len = n;
         out
     }
 }
