@@ -4,36 +4,40 @@ Read `README.md` first. It covers the requirements, the full design, why each al
 
 ## Toolchain and commands
 
-`rust-toolchain.toml` selects nightly. Without rustup, use `RUSTC_BOOTSTRAP=1`.
+`rust-toolchain.toml` pins `nightly-2026-10-30`. Without rustup, use `RUSTC_BOOTSTRAP=1`. `dataflow-flat` enables `const_type_name` and `generic_const_exprs`; the library prints a "not supported with the next-generation trait solver ... reverted" warning (and uses `#![allow(incomplete_features)]`). That is expected. User crates (`example`, `diamond`, `bench`, the tests, the error cases) must not need any `#![feature]`.
 
 Always run cargo under a timeout: `timeout 120 cargo ...`. Large graphs compile slowly, and past bugs made builds exponential. Run long checks one at a time and write results to a file, rather than chaining many slow commands in one shell call.
 
 ```sh
-timeout 120 cargo test                           # plan assertions + runtime guarantees
+timeout 120 cargo test                           # plan assertions + runtime guarantees + execution order
 timeout 300 scripts/check_errors.sh              # or pass case names to run a subset
 timeout 120 cargo run -p example
-python3 bench/gen_bench.py flat 20 && timeout 200 cargo run --release -p bench
+python3 bench/gen_bench.py full 20 && timeout 200 cargo run --release -p bench
+timeout 120 cargo test -p dataflow-flat --features cycle-diagnostics   # the opt-in cycle check
 ```
 
-`bench` is excluded from default members because its release build takes 30 to 70 s. `python3 bench/gen_bench.py <full|flat|hand> [layers]` regenerates `bench/src/main.rs`.
+`bench` is excluded from default members because its release build takes about 10 s. `python3 bench/gen_bench.py <full|flat|hand> [layers]` regenerates `bench/src/main.rs` (`flat` has only the framework side, `hand` only the baseline). Regenerate with `full 20` before committing; the committed file should be what the generator produces.
 
 ## Invariants: don't break these without discussing
 
-1. **No dynamic dispatch while running.** No `dyn`, downcasts or lookups in `run`, `outputs`, or the walk. Type-erased maps are only allowed in `Pipeline::build`.
-2. **Compile-time constants contain no references.** `Seq` and `Plan` are plain arrays. A graph of `&'static` constants made incremental builds exponential.
-3. **Use `#[inline]`, never `#[inline(always)]`, on the walk** (`DepList::eval`, `inputs`, `eval_node`). Forced inlining in debug builds expands every path through the graph.
-4. **Each component is constructed, run and dropped exactly once.** All three walks (`construct`, `eval`, `destroy`) must use the same `Edge::FIRST` flags.
-5. **Soundness of the raw-pointer walk** relies on: an acyclic graph (`AcyclicList` bound), `run(&mut self)`, `outputs(&self)`, and `'static` components and outputs. Keep the `// SAFETY:` comments accurate when touching it.
-6. **Keep `scripts/check_errors.sh` passing**, and add a case for every new class of user mistake. Match on error codes and on our own panic messages, not on full compiler output.
+1. **No dynamic dispatch while running.** No `dyn`, downcasts or lookups in `run` or the walk. Type-erased maps are only allowed in `Pipeline::build`.
+2. **Compile-time constants contain no references** beyond the existing one-level `SeqList`. `Seq` and `Plan` are plain arrays. A graph of `&'static` constants made incremental builds exponential.
+3. **Use `#[inline]`, never `#[inline(always)]`, on the walk and lookup chain** (`Walk::walk`, `FindB`, `GetB`, `Gather`, `PushAll`, `Refs::shorten`). Forced inlining in debug builds expands every path through the graph, and it gave no gain in release.
+4. **Each component is constructed, run and dropped exactly once.** This now holds structurally: the typed `Tree` stores each component once (at the edge where `Edge::FIRST` is true), construction is `Branch::make`, and drop is compiler drop glue. `tests/graphs.rs` and `tests/runtime.rs` check it.
+5. **`#![forbid(unsafe_code)]` stays.** The old raw-pointer soundness argument is gone; do not reintroduce `unsafe`. If a design needs it, discuss first.
+6. **Execution order is a guarantee**: depth-first post-order in subscription listing order (documented on `Component` and `Pipeline`, and in the README). `dataflow-flat/tests/order.rs` enforces it; change those tests only on purpose.
+7. **GCE is confined to the library.** `generic_const_exprs` is a feature of `dataflow-flat` only. User crates need no feature gate and generic user code needs exactly one bound, `Root`. `tests/generic_user.rs` and `check_errors.sh generic_root_bound_ok` enforce it.
+8. **`run` returns the root's output by value and nothing is stored between runs.** No `outputs()`, no `ran` flag, no `Option` per output.
+9. **Keep `scripts/check_errors.sh` passing**, and add a case for every new class of user mistake. Match on error codes and on our own panic messages, not on full compiler output.
 
 ## Map of the code
 
 | Path | What |
 |---|---|
-| `dataflow-flat/src/lib.rs` | Traits (`ComponentSubscription`, `Component`), `DepList` (the nested list and walks), compile-time plan (`Seq`, `Plan`, `Described`, `Edge`, `Offset`), `Configs`, `Pipeline`, `plan_trace` test |
-| `dataflow-flat/tests/runtime.rs` | Runtime guarantees |
+| `dataflow-flat/src/lib.rs` | Traits (`ComponentSubscription`, `Component`, `Root`), the compile-time plan (`Seq`, `Plan`, `Described`, `Edge`), the typed storage (`Tree`, `If`/`Branch`, `StorageList`), finished outputs and lookups (`Done`, `GetB`, `FindB`, `Refs`, `PushAll`, `Gather`), the fold (`Walk`), `DepList`, cycle traits, `Configs`, `Pipeline`, the `plan_trace` test |
+| `dataflow-flat/tests/` | `runtime.rs` (run/drop/by-value guarantees), `graphs.rs` (lifecycle on diamond and example graphs, Send, panics, alignment), `order.rs` (execution order), `generic_user.rs` (one-bound generic code) |
 | `dataflow-macros/src/lib.rs` | `#[derive(ComponentSubscription)]` + `#[subscribe(...)]` |
-| `example/`, `diamond/` | Usage examples; `diamond` is for reading MIR/IR/asm |
+| `example/`, `diamond/` | Usage examples with a root `App` / `Sum`; `diamond` is for reading MIR/IR/asm |
 | `bench/` | Generated benchmark; `gen_bench.py` is the source of truth |
 
-Suggested next steps are at the end of `README.md`. The first is named roots: `#[derive(Roots)]` making `outputs()` return a named struct.
+Suggested next steps are at the end of `README.md`. The first is per-run external input.

@@ -1,8 +1,8 @@
 //! Smallest interesting graph, used to inspect compiler output (MIR, LLVM IR,
 //! asm; see README "Inspecting compiler output").
 //!
-//! Diamond:  Src -> Double, Src -> Square, (Double, Square) -> Sum
-use dataflow_flat::{deps, Component, ComponentSubscription, Configs, Deps, Pipeline};
+//! Diamond:  Src -> Double, Src -> Square, (Double, Square) -> Sum (the root)
+use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline};
 
 #[derive(ComponentSubscription)]
 pub struct Src {
@@ -57,14 +57,12 @@ impl Component for Sum {
     }
 }
 
-pub type Roots = Deps![Sum];
-
+/// `Sum` is the root: nothing subscribes to it, and `run` returns its output.
 #[inline(never)]
-pub fn run_once(p: &mut Pipeline<Roots>) { p.run() }
+pub fn run_once(p: &mut Pipeline<Sum>) -> u64 { p.run() }
 
 fn main() {
-    let mut p = Pipeline::<Roots>::build(Configs::new().with::<Src>(10)).unwrap();
-    run_once(&mut p);
-    let deps!(sum) = p.outputs().unwrap();
+    let mut p = Pipeline::<Sum>::build(Configs::new().with::<Src>(10)).unwrap();
+    let sum = run_once(&mut p);
     println!("order {:?}, sum = {sum}", p.order());   // n=11: 22 + 121 = 143
 }

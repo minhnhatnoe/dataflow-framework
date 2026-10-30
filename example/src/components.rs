@@ -185,3 +185,34 @@ impl Component for Report {
         )
     }
 }
+
+// --- App: the root. Nothing subscribes to it; `Pipeline::run` returns its output
+
+/// What the program wants from one run.
+#[derive(Debug)]
+pub struct Summary {
+    pub report: String,
+    pub token_count: usize,
+}
+
+#[derive(ComponentSubscription)]
+#[subscribe(
+    report: Report,
+    token_count: Len<Tokenize>,
+)]
+pub struct App;
+
+impl Component for App {
+    type Config = ();
+    type Output = Summary;
+
+    fn new((): ()) -> Self {
+        App
+    }
+
+    fn update(&mut self, input: Self::Input<'_>) -> Summary {
+        // Inputs are only borrowed for this call; the root's output is owned
+        // and is handed to the caller of `run`.
+        Summary { report: input.report.clone(), token_count: *input.token_count }
+    }
+}

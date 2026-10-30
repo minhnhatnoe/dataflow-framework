@@ -3,7 +3,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 mod flat {
-use dataflow_flat::{Component, ComponentSubscription, Deps};
+use dataflow_flat::{Component, ComponentSubscription};
 #[derive(ComponentSubscription)]
 pub struct C0_0(pub u64);
 impl Component for C0_0 {
@@ -3984,7 +3984,16 @@ impl Component for C19_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(608) }
 }
-pub type Roots = Deps![C19_0, C19_1, C19_2, C19_3, C19_4, C19_5, C19_6, C19_7, C19_8, C19_9, C19_10, C19_11, C19_12, C19_13, C19_14, C19_15, C19_16, C19_17, C19_18, C19_19];
+#[derive(ComponentSubscription)]
+#[subscribe(r0: C19_0, r1: C19_1, r2: C19_2, r3: C19_3, r4: C19_4, r5: C19_5, r6: C19_6, r7: C19_7, r8: C19_8, r9: C19_9, r10: C19_10, r11: C19_11, r12: C19_12, r13: C19_13, r14: C19_14, r15: C19_15, r16: C19_16, r17: C19_17, r18: C19_18, r19: C19_19)]
+pub struct App;
+impl Component for App {
+    type Config = ();
+    type Output = u64;
+    fn new((): ()) -> Self { App }
+    #[inline]
+    fn update(&mut self, input: Self::Input<'_>) -> u64 { *input.r0 ^ *input.r1 ^ *input.r2 ^ *input.r3 ^ *input.r4 ^ *input.r5 ^ *input.r6 ^ *input.r7 ^ *input.r8 ^ *input.r9 ^ *input.r10 ^ *input.r11 ^ *input.r12 ^ *input.r13 ^ *input.r14 ^ *input.r15 ^ *input.r16 ^ *input.r17 ^ *input.r18 ^ *input.r19 }
+}
 }
 mod hand_components {
 pub struct C0_0(pub u64);
@@ -7590,11 +7599,12 @@ impl Hand {
 const RUNS: u32 = 200_000;
 fn ns(d: std::time::Duration) -> f64 { d.as_nanos() as f64 / RUNS as f64 }
 #[inline(never)]
-fn run_flat(p: &mut dataflow_flat::Pipeline<flat::Roots>) { p.run() }
+fn run_flat(p: &mut dataflow_flat::Pipeline<flat::App>) -> u64 { p.run() }
 fn main() {
-    let mut b = dataflow_flat::Pipeline::<flat::Roots>::build(dataflow_flat::Configs::new()).unwrap();
-    let t = Instant::now(); for _ in 0..RUNS { run_flat(&mut b); }
-    let dataflow_flat::deps!(r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16, r17, r18, r19) = b.outputs().unwrap(); let xb = *r0 ^ *r1 ^ *r2 ^ *r3 ^ *r4 ^ *r5 ^ *r6 ^ *r7 ^ *r8 ^ *r9 ^ *r10 ^ *r11 ^ *r12 ^ *r13 ^ *r14 ^ *r15 ^ *r16 ^ *r17 ^ *r18 ^ *r19; black_box(xb);
+    let mut b = dataflow_flat::Pipeline::<flat::App>::build(dataflow_flat::Configs::new()).unwrap();
+    let mut xb = 0;
+    let t = Instant::now(); for _ in 0..RUNS { xb = run_flat(&mut b); }
+    black_box(xb);
     println!("flat:         {:>6.0} ns/run  ({} components)", ns(t.elapsed()), b.len());
     let mut h = Hand::new();
     let t = Instant::now(); for _ in 0..RUNS { h.run(); }

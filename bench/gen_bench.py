@@ -1,4 +1,6 @@
 # usage: python3 bench/gen_bench.py full|flat|hand [layers=20]  -> writes bench/src/main.rs
+# `flat` generates one root component `App` (subscribes to the last layer, returns the XOR
+# checksum as u64); `full` also generates the hand-written baseline and asserts the results agree.
 import random, sys
 mode = sys.argv[1]
 random.seed(1)
@@ -35,7 +37,7 @@ impl {nm} {{
 
 def components_flat():
     # Nightly `dataflow-flat` crate: derive syntax.
-    out=["use dataflow_flat::{Component, ComponentSubscription, Deps};"]
+    out=["use dataflow_flat::{Component, ComponentSubscription};"]
     for n, ds in deps.items():
         nm = name(n)
         subs = ", ".join(f"s{i}: {name(d)}" for i, d in enumerate(ds))
@@ -49,15 +51,25 @@ impl Component for {nm} {{
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 {{ {body_of(n, [f"input.s{i}" for i in range(len(ds))])} }}
 }}""")
-    out.append(f"pub type Roots = Deps![{', '.join(name(r) for r in roots)}];")
+    # The single root: subscribes to the last layer; its output is the XOR checksum.
+    subs = ", ".join(f"r{i}: {name(r)}" for i, r in enumerate(roots))
+    xor_in = " ^ ".join(f"*input.r{i}" for i in range(len(roots)))
+    out.append(f"""#[derive(ComponentSubscription)]
+#[subscribe({subs})]
+pub struct App;
+impl Component for App {{
+    type Config = ();
+    type Output = u64;
+    fn new((): ()) -> Self {{ App }}
+    #[inline]
+    fn update(&mut self, input: Self::Input<'_>) -> u64 {{ {xor_in} }}
+}}""")
     return "\n".join(out)
 
 def nest(xs):
     s = "()"
     for x in reversed(xs): s = f"({x}, {s})"
     return s
-pat = ", ".join(f"r{i}" for i in range(len(roots)))
-xor = " ^ ".join(f"*r{i}" for i in range(len(roots)))
 out = ["#![allow(non_snake_case, unused_imports, dead_code)]", "use std::hint::black_box;", "use std::time::Instant;", ""]
 use_flat = mode in ("full", "flat")
 use_hand = mode in ("full", "hand")
@@ -74,17 +86,18 @@ if use_hand:
 out.append("const RUNS: u32 = 200_000;")
 out.append("fn ns(d: std::time::Duration) -> f64 { d.as_nanos() as f64 / RUNS as f64 }")
 body = ["fn main() {"]
-if use_flat: body.append(f"""    let mut b = dataflow_flat::Pipeline::<flat::Roots>::build(dataflow_flat::Configs::new()).unwrap();
-    let t = Instant::now(); for _ in 0..RUNS {{ run_flat(&mut b); }}
-    let dataflow_flat::deps!({pat}) = b.outputs().unwrap(); let xb = {xor}; black_box(xb);
-    println!("flat:         {{:>6.0}} ns/run  ({{}} components)", ns(t.elapsed()), b.len());""")
-if use_hand: body.append(f"""    let mut h = Hand::new();
-    let t = Instant::now(); for _ in 0..RUNS {{ h.run(); }}
+if use_flat: body.append("""    let mut b = dataflow_flat::Pipeline::<flat::App>::build(dataflow_flat::Configs::new()).unwrap();
+    let mut xb = 0;
+    let t = Instant::now(); for _ in 0..RUNS { xb = run_flat(&mut b); }
+    black_box(xb);
+    println!("flat:         {:>6.0} ns/run  ({} components)", ns(t.elapsed()), b.len());""")
+if use_hand: body.append("""    let mut h = Hand::new();
+    let t = Instant::now(); for _ in 0..RUNS { h.run(); }
     let xh = h.roots(); black_box(xh);
-    println!("hand-written: {{:>6.0}} ns/run", ns(t.elapsed()));""")
+    println!("hand-written: {:>6.0} ns/run", ns(t.elapsed()));""")
 if use_flat and use_hand: body.append('    assert_eq!(xb, xh); println!("results agree");')
 body.append("}")
-if use_flat: out.append("#[inline(never)]\nfn run_flat(p: &mut dataflow_flat::Pipeline<flat::Roots>) { p.run() }")
+if use_flat: out.append("#[inline(never)]\nfn run_flat(p: &mut dataflow_flat::Pipeline<flat::App>) -> u64 { p.run() }")
 out += body
 open(__import__("os").path.join(__import__("os").path.dirname(__file__), "src", "main.rs"),"w").write("\n".join(out))
 print(f"mode={mode}: {len(order)} components, {sum(len(deps[n]) for n in order)} edges")

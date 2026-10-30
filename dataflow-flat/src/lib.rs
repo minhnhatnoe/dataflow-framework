@@ -1,51 +1,93 @@
-//! Dataflow components, flat layout, everything planned at compile time.
-//! Requires nightly (`const_type_name`). This is the main runtime; see the
-//! workspace README for the design and its history.
+//! Dataflow components wired at compile time, safe runtime. Requires nightly.
+//! See the workspace README for the full design and its history.
 //!
-//! A component declares what it reads with `#[derive(ComponentSubscription)]`
-//! and `#[subscribe(name: Type, ...)]`, and implements `Component` (owned
-//! config, one `update` that receives `Self::Input<'_>` with named references).
-//! You name only the roots; the rest of the graph is discovered.
+//! A program is one *root* component, `App`, plus everything it subscribes to,
+//! directly or indirectly. Each component declares what it reads with
+//! `#[derive(ComponentSubscription)]` and `#[subscribe(name: Type, ...)]` and
+//! implements [`Component`] (owned config, one `update` that receives
+//! `Self::Input<'_>` with named references). `Pipeline::<App>::build(configs)`
+//! discovers the graph, constructs every component once, and
+//! [`Pipeline::run`] updates each of them once, in a fixed order, and returns
+//! the root's output by value.
 //!
-//! How the graph is stored and run:
+//! # How it works
 //!
-//! * Constant evaluation walks the graph of the roots during compilation
-//!   and produces a plan: every component's byte offset in one buffer, and for
-//!   every edge whether it is the first time the walk reaches that
-//!   component.
-//! * The pipeline is one allocation. Component `C` lives at a constant
-//!   offset, so reading an upstream output is `base + CONST`, just like a
-//!   struct field.
-//! * `run` is a depth-first walk of monomorphized calls. An edge that is not
-//!   a first visit is skipped by an `if false` the compiler removes, so each
-//!   component is called exactly once per run, in topological order, with no
-//!   runtime bookkeeping.
+//! 1. **Plan** (constant evaluation). For every component, `Described::SEQ` is
+//!    the order in which a depth-first walk first reaches each component
+//!    upstream of it, with the parent it was reached from. Merging these
+//!    bottom-up gives `Planned::PLAN` for the root: for every edge
+//!    `(parent, dependency)`, whether this is the edge that *first* reaches the
+//!    dependency (`Edge::FIRST`), and the first-parent chain of every component
+//!    (`Plan::holds`). Constants are plain arrays without nested references,
+//!    so incremental compilation stays cheap.
+//! 2. **States tree** (types, via `generic_const_exprs`). `Tree<R, C>` holds
+//!    a component `C` and, for each of its subscriptions, either the subtree of
+//!    that dependency (if this edge is the first one reaching it:
+//!    `If<{ Edge::FIRST }>` selects `Tree<..>`) or `()`. So every component is
+//!    stored exactly once, constructing it is ordinary safe code, and dropping
+//!    the pipeline is compiler drop glue.
+//! 3. **Fold** (`Walk`). `run` walks the states tree structurally. Walking a
+//!    subtree runs the dependencies' subtrees first, calls `update` through a
+//!    plain `&mut` reborrow of the component field, and returns
+//!    `Done { deps, out }`: the outputs by value. A later sibling reads the
+//!    outputs of finished earlier siblings through a *context*, a type-level
+//!    list of shared references to finished subtrees living in the enclosing
+//!    stack frames.
+//! 4. **Context lookups** (`FindB` / `GetB`). An input is found by following
+//!    the plan: at each context entry the constant `HeadHas` says whether the
+//!    entry's subtree holds the wanted component, and the impl for that
+//!    constant is chosen. Every step is a separately monomorphized function
+//!    and there are no steps for paths not taken, so after inlining a `run` is
+//!    straight-line code, as for a hand-written struct.
+//!
+//! The price of being `unsafe`-free is that this needs `generic_const_exprs`, which
+//! is confined to this crate: user crates need no feature gate.
+//!
+//! # Guarantees
+//!
+//! * **Singletons.** Each concrete component type is constructed once,
+//!   updated once per run, and dropped once. Generic instantiations are
+//!   different types.
+//! * **Execution order** (see [`Pipeline`]): depth-first post-order following
+//!   subscription listing order.
+//! * **No outputs are stored between runs.** Intermediate outputs live only
+//!   during `run` and are dropped before it returns; only the root's output
+//!   is returned.
+//! * `#![forbid(unsafe_code)]`, no `dyn`, no lookups at run time (the `TypeId`
+//!   maps are used only in `Pipeline::build`).
 //!
 //! Checked at compile time: every dependency is a component, `update`'s inputs
-//! match the upstream outputs, the graph is acyclic, no component lists the
-//! same dependency twice, and the graph fits the plan capacity.
-//! Checked when the pipeline is built: no config is supplied for a component outside the graph.
+//! match the upstream outputs, the graph is acyclic (a cycle is an error either
+//! way; the cargo feature `cycle-diagnostics` makes the message readable, see
+//! [`NoDependencyCycle`]), no component lists the same dependency twice, and
+//! the graph fits [`MAX_COMPONENTS`].
+//! Checked when the pipeline is built: no config is supplied for a component
+//! outside the graph.
 
+#![forbid(unsafe_code)]
 #![feature(const_type_name)]
-
-#![allow(stable_features)]
-#![feature(const_mut_refs)] // stable since 1.83; needed for older nightlies
+// The plan's constants select types (`If<{ Edge::FIRST }>`). Incomplete, but
+// confined to this crate: users of `Pipeline` need no feature gate.
+#![feature(generic_const_exprs)]
+#![allow(incomplete_features)]
 
 // Lets the derive's `::dataflow_flat::...` paths resolve inside this crate too.
 extern crate self as dataflow_flat;
 
-use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
-use std::mem::{align_of, size_of};
-use std::ptr::{addr_of, addr_of_mut};
+
+// ---------------------------------------------------------------------------
+// The user-facing traits
+// ---------------------------------------------------------------------------
 
 /// What a component subscribes to. Generated by
 /// `#[derive(ComponentSubscription)]` from `#[subscribe(name: Type, ...)]`.
 pub trait ComponentSubscription: 'static {
-    /// The subscriptions as a type-level list, walked by the runtime.
+    /// The subscriptions as a type-level list `(A, (B, ()))`, walked by the
+    /// runtime. The list order is the listing order in `#[subscribe(...)]`.
     type Deps: DepList;
     /// A struct with one named reference per subscription.
     type Input<'a>;
@@ -55,10 +97,27 @@ pub trait ComponentSubscription: 'static {
 
 pub use dataflow_macros::ComponentSubscription;
 
-pub trait Component: ComponentSubscription + Sized {
-    /// Owned configuration passed to `new`.
+/// A node of the dataflow graph.
+///
+/// # Execution order
+///
+/// The order in which `update` is called is part of the contract: a
+/// depth-first post-order that follows subscription listing order. For a
+/// component `C` subscribing to `[D1, .., Dn]` (in `#[subscribe]` order), the
+/// updates that happen during `C`'s walk come in `n` blocks followed by `C`
+/// itself. Block `i` is `Di` plus everything upstream of `Di` that has not
+/// already run in this `run`, itself in this same order. The blocks come in
+/// listing order, so a later-listed dependency that is upstream of an earlier
+/// one runs inside the earlier block. A component runs exactly once per run,
+/// after everything it subscribes to. `Pipeline::order` reports the
+/// *construction* order, which is the same order.
+pub trait Component: ComponentSubscription + NoDependencyCycleCheck + Sized {
+    /// Owned configuration passed to `new`. Components without an entry in
+    /// [`Configs`] get `Default::default()`.
     type Config: Default + 'static;
-    /// What `update` produces; subscribers receive `&Output`.
+    /// What `update` produces; subscribers receive `&Output`. Outputs of
+    /// non-root components are dropped when `run` finishes; the root's output
+    /// is returned to the caller of `run`.
     type Output: 'static;
 
     fn new(config: Self::Config) -> Self;
@@ -67,19 +126,14 @@ pub trait Component: ComponentSubscription + Sized {
     fn update(&mut self, input: Self::Input<'_>) -> Self::Output;
 }
 
-/// How one component is stored in the pipeline buffer.
-struct Node<C: Component> {
-    component: C,
-    output: Option<C::Output>,
-}
-
 // ---------------------------------------------------------------------------
 // Compile-time plan
 // ---------------------------------------------------------------------------
 //
-// Every constant here is a plain value with no references inside. (A graph
-// of `&'static` constants is hashed as a tree by incremental compilation,
-// which is exponential in graph depth.)
+// Every constant here is a plain value with no references inside, apart from
+// the one-level `SeqList` of already-computed constants. (A graph of nested
+// `&'static` constants is hashed as a tree by incremental compilation, which
+// is exponential in graph depth.)
 //
 // `SEQ` of a component is the order a depth-first walk from it first reaches
 // each component of its upstream graph, with the parent it was reached from.
@@ -95,20 +149,20 @@ const SET_CAP: usize = MAX_COMPONENTS * 2; // power of two
 /// Parent id meaning "whoever owns this dependency list"; replaced when a
 /// component (or the roots) adopts the list.
 const OWNER: u64 = 1;
-/// Parent id of the roots.
+/// Parent id of the roots list.
 const ROOT: u64 = 0;
 
+/// One component in a walk order.
 #[doc(hidden)]
 #[derive(Clone, Copy)]
 pub struct Entry {
     id: u64,
     parent: u64,
-    size: usize,
-    align: usize,
 }
 
-const EMPTY: Entry = Entry { id: 0, parent: 0, size: 0, align: 1 };
+const EMPTY: Entry = Entry { id: 0, parent: 0 };
 
+/// A walk order: fixed capacity so it is a plain constant.
 #[doc(hidden)]
 pub struct Seq {
     len: usize,
@@ -171,7 +225,7 @@ impl Seq {
         while let SeqList::Cons(dep, rest) = deps {
             let head = dep.items[0].id;
             if direct.contains(head) {
-                panic!("a component lists the same dependency twice (or a root is listed twice)");
+                panic!("a component lists the same dependency twice");
             }
             direct.insert(head);
             let mut i = 0;
@@ -218,27 +272,19 @@ const fn component_id(s: &str) -> u64 {
     }
 }
 
+/// The plan of one roots list: each component's first-reached parent, found
+/// by id through an open-addressing index.
 #[doc(hidden)]
 pub struct Plan {
     /// id -> index + 1 (0 = empty), open addressing on `keys`.
     keys: [u64; SET_CAP],
     index: [u32; SET_CAP],
     first_parent: [u64; MAX_COMPONENTS],
-    offsets: [usize; MAX_COMPONENTS],
-    size: usize,
-    align: usize,
 }
 
 impl Plan {
     const fn from_roots(roots: &Seq) -> Plan {
-        let mut plan = Plan {
-            keys: [0; SET_CAP],
-            index: [0; SET_CAP],
-            first_parent: [0; MAX_COMPONENTS],
-            offsets: [0; MAX_COMPONENTS],
-            size: 0,
-            align: 1,
-        };
+        let mut plan = Plan { keys: [0; SET_CAP], index: [0; SET_CAP], first_parent: [0; MAX_COMPONENTS] };
         let mut i = 0;
         while i < roots.len {
             let e = roots.items[i];
@@ -246,12 +292,6 @@ impl Plan {
             plan.keys[slot] = e.id;
             plan.index[slot] = i as u32 + 1;
             plan.first_parent[i] = e.parent;
-            let offset = (plan.size + e.align - 1) / e.align * e.align;
-            plan.offsets[i] = offset;
-            plan.size = offset + e.size;
-            if e.align > plan.align {
-                plan.align = e.align;
-            }
             i += 1;
         }
         plan
@@ -272,12 +312,23 @@ impl Plan {
         }
     }
 
-    const fn offset_of(&self, id: u64) -> usize {
-        self.offsets[self.index_of(id)]
-    }
-
     const fn first_parent_of(&self, id: u64) -> u64 {
         self.first_parent[self.index_of(id)]
+    }
+
+    /// Is `top` on the first-parent chain of `id` (inclusive)? Equivalently:
+    /// does the storage subtree of `top` hold `id`?
+    const fn holds(&self, top: u64, id: u64) -> bool {
+        let mut cur = id;
+        loop {
+            if cur == top {
+                return true;
+            }
+            if cur == ROOT {
+                return false;
+            }
+            cur = self.first_parent_of(cur);
+        }
     }
 }
 
@@ -290,15 +341,8 @@ pub trait Described {
 
 impl<C: Component> Described for C {
     const ID: u64 = component_id(type_name::<C>());
-    const SEQ: Seq = Seq::merge(
-        Some(Entry {
-            id: <C as Described>::ID,
-            parent: OWNER,
-            size: size_of::<Node<C>>(),
-            align: align_of::<Node<C>>(),
-        }),
-        <C::Deps as DepList>::HEADS,
-    );
+    const SEQ: Seq =
+        Seq::merge(Some(Entry { id: <C as Described>::ID, parent: OWNER }), <C::Deps as DepList>::HEADS);
 }
 
 /// The parent of an edge: a component, or `RootParent` for the roots list.
@@ -315,7 +359,7 @@ impl Parent for RootParent {
     const ID: u64 = ROOT;
 }
 
-/// The plan for a roots list, evaluated once per `Roots` type.
+/// The plan for a roots list, evaluated once per list type.
 #[doc(hidden)]
 pub trait Planned: DepList {
     const PLAN: Plan;
@@ -324,152 +368,543 @@ impl<L: DepList> Planned for L {
     const PLAN: Plan = Plan::from_roots(&Seq::merge(None, L::HEADS));
 }
 
-/// Per-component and per-edge constants, looked up in the plan.
-struct Offset<R, C>(PhantomData<(R, C)>);
-impl<R: Planned, C: Component> Offset<R, C> {
-    const OFFSET: usize = R::PLAN.offset_of(<C as Described>::ID);
-}
-
-struct Edge<R, P, H>(PhantomData<(R, P, H)>);
+/// Per-edge constant, looked up in the plan of roots list `R`.
+#[doc(hidden)]
+pub struct Edge<R, P, H>(PhantomData<(R, P, H)>);
 impl<R: Planned, P: Parent, H: Component> Edge<R, P, H> {
-    /// True if this edge is where the walk first reaches `H`.
-    const FIRST: bool = R::PLAN.first_parent_of(<H as Described>::ID) == P::ID;
-}
-
-struct Totals<R>(PhantomData<R>);
-impl<R: Planned> Totals<R> {
-    const SIZE: usize = R::PLAN.size;
-    const ALIGN: usize = R::PLAN.align;
+    /// True if the edge `P -> H` is where the walk first reaches `H`.
+    pub const FIRST: bool = R::PLAN.first_parent_of(<H as Described>::ID) == P::ID;
 }
 
 // ---------------------------------------------------------------------------
-// Type-level dependency list: the walks, monomorphized
+// Type-level dependency list
 // ---------------------------------------------------------------------------
 
-/// A cons list of component types: `(A, (B, ()))`. Use `Deps![A, B]`.
+/// A cons list of component types: `(A, (B, ()))`. The derive builds these
+/// from `#[subscribe(...)]`; user code never writes one.
 pub trait DepList: 'static {
+    /// The nested tuple of references `update` is handed, before the derive
+    /// names its fields.
     type Inputs<'a>;
     /// The `SEQ`s of this list's entries.
     #[doc(hidden)]
     const HEADS: &'static SeqList;
-
+    /// Build-time pass 1: visit every component, resolve configs.
     #[doc(hidden)]
     fn collect_configs(pass: &mut ConfigPass);
-    #[doc(hidden)]
-    unsafe fn construct<R: Planned, P: Parent>(base: *mut u8, pass: &mut ConstructPass);
-    #[doc(hidden)]
-    unsafe fn eval<R: Planned, P: Parent>(base: *mut u8);
-    #[doc(hidden)]
-    unsafe fn inputs<'a, R: Planned>(base: *const u8) -> Self::Inputs<'a>;
-    #[doc(hidden)]
-    unsafe fn destroy<R: Planned, P: Parent>(base: *mut u8);
 }
 
 impl DepList for () {
     type Inputs<'a> = ();
     const HEADS: &'static SeqList = &SeqList::Nil;
-
     fn collect_configs(_: &mut ConfigPass) {}
-    unsafe fn construct<R: Planned, P: Parent>(_: *mut u8, _: &mut ConstructPass) {}
-    #[inline]
-    unsafe fn eval<R: Planned, P: Parent>(_: *mut u8) {}
-    #[inline]
-    unsafe fn inputs<'a, R: Planned>(_: *const u8) -> Self::Inputs<'a> {}
-    unsafe fn destroy<R: Planned, P: Parent>(_: *mut u8) {}
 }
 
 impl<H: Component, T: DepList> DepList for (H, T) {
     type Inputs<'a> = (&'a H::Output, T::Inputs<'a>);
     const HEADS: &'static SeqList = &SeqList::Cons(&<H as Described>::SEQ, T::HEADS);
-
     fn collect_configs(pass: &mut ConfigPass) {
         pass.visit::<H>();
         T::collect_configs(pass);
     }
-
-    unsafe fn construct<R: Planned, P: Parent>(base: *mut u8, pass: &mut ConstructPass) {
-        if Edge::<R, P, H>::FIRST {
-            <H::Deps as DepList>::construct::<R, H>(base, pass);
-            let config = pass.take_config::<H>();
-            let node = base.add(Offset::<R, H>::OFFSET) as *mut Node<H>;
-            node.write(Node { component: H::new(config), output: None });
-            pass.order.push(type_name::<H>());
-        }
-        T::construct::<R, P>(base, pass);
-    }
-
-    #[inline]
-    unsafe fn eval<R: Planned, P: Parent>(base: *mut u8) {
-        // A constant: the compiler deletes the branch for non-first edges.
-        if Edge::<R, P, H>::FIRST {
-            eval_node::<R, H>(base);
-        }
-        T::eval::<R, P>(base);
-    }
-
-    #[inline]
-    unsafe fn inputs<'a, R: Planned>(base: *const u8) -> Self::Inputs<'a> {
-        let node = base.add(Offset::<R, H>::OFFSET) as *const Node<H>;
-        let output = match &*addr_of!((*node).output) {
-            Some(out) => out,
-            // Upstream components always run before downstream ones.
-            None => std::hint::unreachable_unchecked(),
-        };
-        (output, T::inputs::<R>(base))
-    }
-
-    unsafe fn destroy<R: Planned, P: Parent>(base: *mut u8) {
-        if Edge::<R, P, H>::FIRST {
-            <H::Deps as DepList>::destroy::<R, H>(base);
-            std::ptr::drop_in_place(base.add(Offset::<R, H>::OFFSET) as *mut Node<H>);
-        }
-        T::destroy::<R, P>(base);
-    }
 }
 
-/// Run `C`: its upstream first (first visits only), then `update`.
+/// A component whose upstream graph has no cycle. Never written by hand: it
+/// is implemented for every `ComponentSubscription`, and the *proof* is what
+/// matters (a cycle makes the proof depend on itself, which the trait solver
+/// rejects).
 ///
-/// SAFETY: `base` is a constructed buffer for plan `R`, accessed only by this
-/// walk. Inputs are shared references into other nodes' outputs; the only
-/// mutable accesses are to `C`'s own component and output, which are
-/// disjoint from every input because the graph is acyclic.
-#[inline]
-unsafe fn eval_node<R: Planned, C: Component>(base: *mut u8) {
-    <C::Deps as DepList>::eval::<R, C>(base);
-    let raw = <C::Deps as DepList>::inputs::<R>(base);
-    let node = base.add(Offset::<R, C>::OFFSET) as *mut Node<C>;
-    let out = (*addr_of_mut!((*node).component)).update(C::input(raw));
-    *addr_of_mut!((*node).output) = Some(out);
-}
+/// By default nothing requires the proof, and a cycle shows up as E0391
+/// "cycle detected when simplifying constant ... `DepList>::HEADS`", from
+/// the plan's own constants. With the cargo feature `cycle-diagnostics`
+/// every [`Component`] must satisfy it, so a cycle is reported where it is
+/// written, as "overflow evaluating the requirement `A: NoDependencyCycle`",
+/// before any plan constant is evaluated. The price is compile time: about
+/// +30% for a from-scratch debug build of the 396-component benchmark. (The
+/// check cannot be made once per pipeline instead: a bound on `Pipeline`,
+/// `Root` or `build` is evaluated after, or concurrently with, the plan's
+/// constants, which hit E0391 first, and a bound on the plan's trait works
+/// but re-proves the whole graph at every use and is slower still.)
+pub trait NoDependencyCycle {}
+impl<C: ComponentSubscription> NoDependencyCycle for C where C::Deps: NoDependencyCycles {}
 
-/// Pass the roots through `Planned` so a cycle is reported by the trait
-/// solver (E0275 during `cargo check`) before const evaluation runs.
-pub trait Acyclic {}
-impl<C: Component> Acyclic for C where C::Deps: AcyclicList {}
-
+/// The supertrait of [`Component`] that switches the cycle check on: see
+/// [`NoDependencyCycle`]. Implemented for every type; with the feature
+/// `cycle-diagnostics` it additionally requires `NoDependencyCycle`.
 #[doc(hidden)]
-pub trait AcyclicList {}
-impl AcyclicList for () {}
-impl<H: Acyclic, T: AcyclicList> AcyclicList for (H, T) {}
+#[cfg(feature = "cycle-diagnostics")]
+pub trait NoDependencyCycleCheck: NoDependencyCycle {}
+#[cfg(feature = "cycle-diagnostics")]
+impl<C: NoDependencyCycle> NoDependencyCycleCheck for C {}
+#[doc(hidden)]
+#[cfg(not(feature = "cycle-diagnostics"))]
+pub trait NoDependencyCycleCheck {}
+#[cfg(not(feature = "cycle-diagnostics"))]
+impl<C> NoDependencyCycleCheck for C {}
 
-/// Type position: `Deps![A, B, C]` is `(A, (B, (C, ())))`.
-#[macro_export]
-macro_rules! Deps {
-    () => { () };
-    ($head:ty $(, $tail:ty)* $(,)?) => { ($head, $crate::Deps!($($tail),*)) };
+/// A dependency list in which every component is [`NoDependencyCycle`]. A
+/// cycle makes the proof depend on itself, which the trait solver rejects.
+#[doc(hidden)]
+pub trait NoDependencyCycles {}
+impl NoDependencyCycles for () {}
+impl<H: NoDependencyCycle, T: NoDependencyCycles> NoDependencyCycles for (H, T) {}
+
+// ---------------------------------------------------------------------------
+// States tree: every component stored once, where the walk first reaches it
+// ---------------------------------------------------------------------------
+
+/// The storage of component `C` as reached from roots list `R`: one entry per
+/// subscription (the subtree of that dependency on the edge that first
+/// reaches it, `()` on every other edge), then `C` itself. Field order is
+/// construction order, and drop glue drops in the same order.
+#[doc(hidden)]
+pub struct Tree<R: Planned, C: Component>
+where
+    C::Deps: StorageList<R, C>,
+{
+    deps: <C::Deps as StorageList<R, C>>::S,
+    node: C,
 }
 
-/// Pattern position: `deps!(a, b, c)` is `(a, (b, (c, ())))`.
-#[macro_export]
-macro_rules! deps {
-    () => { () };
-    ($head:pat $(, $tail:pat)* $(,)?) => { ($head, $crate::deps!($($tail),*)) };
+/// Type-level `if`: selects between the two `Branch` impls with a constant
+/// computed from the plan.
+#[doc(hidden)]
+pub struct If<const B: bool>;
+
+/// What an edge to `H` stores: `Tree<R, H>` when `If<true>`, `()` otherwise.
+#[doc(hidden)]
+pub trait Branch<R: Planned, H: Component> {
+    /// The stored subtree.
+    type Out;
+    /// What walking `Out` produces.
+    type Fin: 'static;
+    fn make(pass: &mut ConstructPass) -> Self::Out;
+}
+impl<R: Planned, H: Component> Branch<R, H> for If<true>
+where
+    H::Deps: StorageList<R, H>,
+{
+    type Out = Tree<R, H>;
+    type Fin = Done<R, H>;
+    fn make(pass: &mut ConstructPass) -> Tree<R, H> {
+        // Dependencies first, so construction order is topological.
+        let deps = <H::Deps as StorageList<R, H>>::make(pass);
+        let config = pass.take_config::<H>();
+        let node = H::new(config);
+        pass.order.push(type_name::<H>());
+        Tree { deps, node }
+    }
+}
+impl<R: Planned, H: Component> Branch<R, H> for If<false> {
+    type Out = ();
+    type Fin = ();
+    fn make(_: &mut ConstructPass) {}
+}
+
+/// The storage of a dependency list `Self` owned by parent `P`, as a nested
+/// tuple that mirrors the list.
+#[doc(hidden)]
+pub trait StorageList<R: Planned, P: Parent>: DepList {
+    /// The stored subtrees.
+    type S;
+    /// The finished outputs of `S`.
+    type O: 'static;
+    fn make(pass: &mut ConstructPass) -> Self::S;
+}
+impl<R: Planned, P: Parent> StorageList<R, P> for () {
+    type S = ();
+    type O = ();
+    fn make(_: &mut ConstructPass) {}
+}
+impl<R: Planned, P: Parent, H: Component, T: DepList> StorageList<R, P> for (H, T)
+where
+    H::Deps: StorageList<R, H>,
+    T: StorageList<R, P>,
+    If<{ Edge::<R, P, H>::FIRST }>: Branch<R, H>,
+{
+    type S = (<If<{ Edge::<R, P, H>::FIRST }> as Branch<R, H>>::Out, <T as StorageList<R, P>>::S);
+    type O = (<If<{ Edge::<R, P, H>::FIRST }> as Branch<R, H>>::Fin, <T as StorageList<R, P>>::O);
+    fn make(pass: &mut ConstructPass) -> Self::S {
+        let first = <If<{ Edge::<R, P, H>::FIRST }> as Branch<R, H>>::make(pass);
+        let rest = <T as StorageList<R, P>>::make(pass);
+        (first, rest)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Finished outputs and typed access into them
+// ---------------------------------------------------------------------------
+//
+// Every lookup step is ONE function: the branch is a const parameter of the
+// trait (`GetB<R, H, B>`), with one impl for `true` and one for `false`, and
+// the next step is required at the constant computed for it.
+
+/// The outputs of a finished subtree: `C`'s own and its first-reached deps'.
+#[doc(hidden)]
+pub struct Done<R: Planned, C: Component>
+where
+    C::Deps: StorageList<R, C>,
+{
+    deps: DoneDeps<R, C>,
+    out: C::Output,
+}
+type DoneDeps<R, C> = <<C as ComponentSubscription>::Deps as StorageList<R, C>>::O;
+
+impl<R: Planned, C: Component> Done<R, C>
+where
+    C::Deps: StorageList<R, C>,
+{
+    /// Keep the output, drop the finished outputs of the dependencies.
+    #[inline]
+    fn into_output(self) -> C::Output {
+        let Done { deps, out } = self;
+        drop(deps);
+        out
+    }
+}
+
+/// The id of the component at the head of a tuple of finished pieces
+/// (storage tuples and contexts alike); `NONE` for `()` heads and the end.
+#[doc(hidden)]
+pub trait Head {
+    const TOP: u64;
+}
+const NONE: u64 = ROOT;
+impl Head for () {
+    const TOP: u64 = NONE;
+}
+impl<B> Head for ((), B) {
+    const TOP: u64 = NONE;
+}
+impl<R: Planned, C: Component, B> Head for (Done<R, C>, B)
+where
+    C::Deps: StorageList<R, C>,
+{
+    const TOP: u64 = <C as Described>::ID;
+}
+
+/// Does the head of tuple `L` hold `H`? Picks the branch of `GetB`/`FindB`.
+#[doc(hidden)]
+pub struct HeadHas<R, L, H>(PhantomData<(R, L, H)>);
+impl<R: Planned, L: Head, H: Component> HeadHas<R, L, H> {
+    pub const YES: bool = L::TOP != NONE && R::PLAN.holds(L::TOP, <H as Described>::ID);
+}
+
+/// Is component `C` the component `H`? Picks the branch of `GetB` at a node.
+#[doc(hidden)]
+pub struct Same<C, H>(PhantomData<(C, H)>);
+impl<C: Component, H: Component> Same<C, H> {
+    pub const YES: bool = <C as Described>::ID == <H as Described>::ID;
+}
+
+/// `H`'s output inside this finished storage; `B` says which way to go.
+#[doc(hidden)]
+pub trait GetB<R, H: Component, const B: bool> {
+    fn get(&self) -> &H::Output;
+}
+impl<R: Planned, H: Component> GetB<R, H, true> for Done<R, H>
+where
+    H::Deps: StorageList<R, H>,
+{
+    #[inline]
+    fn get(&self) -> &H::Output {
+        &self.out
+    }
+}
+impl<R: Planned, C: Component, H: Component> GetB<R, H, false> for Done<R, C>
+where
+    C::Deps: StorageList<R, C>,
+    DoneDeps<R, C>: Head + GetB<R, H, { HeadHas::<R, DoneDeps<R, C>, H>::YES }>,
+{
+    #[inline]
+    fn get(&self) -> &H::Output {
+        self.deps.get()
+    }
+}
+impl<R: Planned, H: Component, C: Component, B> GetB<R, H, true> for (Done<R, C>, B)
+where
+    C::Deps: StorageList<R, C>,
+    Done<R, C>: GetB<R, H, { Same::<C, H>::YES }>,
+{
+    #[inline]
+    fn get(&self) -> &H::Output {
+        self.0.get()
+    }
+}
+impl<R: Planned, H: Component, A, B: Head> GetB<R, H, false> for (A, B)
+where
+    B: GetB<R, H, { HeadHas::<R, B, H>::YES }>,
+{
+    #[inline]
+    fn get(&self) -> &H::Output {
+        self.1.get()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Context: finished subtrees visible to the rest of the walk
+// ---------------------------------------------------------------------------
+
+/// A type-level list of finished storage pieces; its value is references.
+#[doc(hidden)]
+pub trait Refs: Head + 'static {
+    type Refs<'a>: Copy;
+    /// `Refs` is covariant, but the compiler can't see through the GAT.
+    fn shorten<'s, 'a: 's>(r: Self::Refs<'a>) -> Self::Refs<'s>;
+}
+impl Refs for () {
+    type Refs<'a> = ();
+    #[inline]
+    fn shorten<'s, 'a: 's>(_: ()) {}
+}
+impl<R: Planned, C: Component, T: Refs> Refs for (Done<R, C>, T)
+where
+    C::Deps: StorageList<R, C>,
+{
+    type Refs<'a> = (&'a Done<R, C>, T::Refs<'a>);
+    #[inline]
+    fn shorten<'s, 'a: 's>(r: Self::Refs<'a>) -> Self::Refs<'s> {
+        (r.0, T::shorten(r.1))
+    }
+}
+
+/// `H`'s output, found in the context; `B` says whether it is in the head.
+#[doc(hidden)]
+pub trait FindB<R, H: Component, const B: bool>: Refs {
+    fn find<'a>(r: Self::Refs<'a>) -> &'a H::Output;
+}
+impl<R: Planned, H: Component, C: Component, T: Refs> FindB<R, H, true> for (Done<R, C>, T)
+where
+    C::Deps: StorageList<R, C>,
+    Done<R, C>: GetB<R, H, { Same::<C, H>::YES }>,
+{
+    #[inline]
+    fn find<'a>(r: Self::Refs<'a>) -> &'a H::Output {
+        r.0.get()
+    }
+}
+impl<R: Planned, H: Component, C: Component, T: Refs> FindB<R, H, false> for (Done<R, C>, T)
+where
+    C::Deps: StorageList<R, C>,
+    T: FindB<R, H, { HeadHas::<R, T, H>::YES }>,
+{
+    #[inline]
+    fn find<'a>(r: Self::Refs<'a>) -> &'a H::Output {
+        T::find(r.1)
+    }
+}
+
+/// Push every finished subtree of a deps tuple onto a context.
+#[doc(hidden)]
+pub trait PushAll<T: Refs> {
+    /// The extended context type.
+    type Out: Refs;
+    fn push<'a>(&'a self, rest: T::Refs<'a>) -> <Self::Out as Refs>::Refs<'a>;
+}
+impl<T: Refs> PushAll<T> for () {
+    type Out = T;
+    #[inline]
+    fn push<'a>(&'a self, rest: T::Refs<'a>) -> T::Refs<'a> {
+        rest
+    }
+}
+impl<T: Refs, B: PushAll<T>> PushAll<T> for ((), B) {
+    type Out = B::Out;
+    #[inline]
+    fn push<'a>(&'a self, rest: T::Refs<'a>) -> <Self::Out as Refs>::Refs<'a> {
+        self.1.push(rest)
+    }
+}
+impl<R: Planned, T: Refs, C: Component, B: PushAll<(Done<R, C>, T)>> PushAll<T> for (Done<R, C>, B)
+where
+    C::Deps: StorageList<R, C>,
+{
+    type Out = B::Out;
+    #[inline]
+    fn push<'a>(&'a self, rest: T::Refs<'a>) -> <Self::Out as Refs>::Refs<'a> {
+        self.1.push((&self.0, rest))
+    }
+}
+
+/// The references `update` receives, found in context `T`: one `FindB` per
+/// entry of the dependency list.
+#[doc(hidden)]
+pub trait Gather<R, T: Refs>: DepList {
+    fn gather<'a>(r: T::Refs<'a>) -> Self::Inputs<'a>;
+}
+impl<R, T: Refs> Gather<R, T> for () {
+    #[inline]
+    fn gather<'a>(_: T::Refs<'a>) -> Self::Inputs<'a> {}
+}
+impl<R: Planned, T: Refs, H: Component, Rest: Gather<R, T>> Gather<R, T> for (H, Rest)
+where
+    T: FindB<R, H, { HeadHas::<R, T, H>::YES }>,
+{
+    #[inline]
+    fn gather<'a>(r: T::Refs<'a>) -> Self::Inputs<'a> {
+        (T::find(r), Rest::gather(r))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The run: a fold over the states tree
+// ---------------------------------------------------------------------------
+
+/// Run a (piece of a) states tree under context `T`, producing its finished
+/// outputs by value.
+#[doc(hidden)]
+pub trait Walk<R, T: Refs> {
+    type Out: 'static;
+    fn walk<'a>(&mut self, ctx: T::Refs<'a>) -> Self::Out;
+}
+impl<R, T: Refs> Walk<R, T> for () {
+    type Out = ();
+    #[inline]
+    fn walk<'a>(&mut self, _: T::Refs<'a>) {}
+}
+/// A non-first edge: nothing stored, nothing to run.
+impl<R, T: Refs, B: Walk<R, T>> Walk<R, T> for ((), B) {
+    type Out = ((), B::Out);
+    #[inline]
+    fn walk<'a>(&mut self, ctx: T::Refs<'a>) -> Self::Out {
+        ((), self.1.walk(ctx))
+    }
+}
+/// A first edge: run the subtree, then the later siblings with it in context.
+impl<R: Planned, C: Component, T: Refs, B> Walk<R, T> for (Tree<R, C>, B)
+where
+    C::Deps: StorageList<R, C>,
+    Tree<R, C>: Walk<R, T, Out = Done<R, C>>,
+    B: Walk<R, (Done<R, C>, T)>,
+{
+    type Out = (Done<R, C>, <B as Walk<R, (Done<R, C>, T)>>::Out);
+    #[inline]
+    fn walk<'a>(&mut self, ctx: T::Refs<'a>) -> Self::Out {
+        let a = self.0.walk(ctx);
+        // Later siblings may read anything first reached inside `a`.
+        let b = self.1.walk((&a, T::shorten(ctx)));
+        (a, b)
+    }
+}
+/// One component: upstream first, then `update` on the component field.
+impl<R: Planned, C: Component, T: Refs> Walk<R, T> for Tree<R, C>
+where
+    C::Deps: StorageList<R, C>,
+    <C::Deps as StorageList<R, C>>::S: Walk<R, T, Out = DoneDeps<R, C>>,
+    DoneDeps<R, C>: PushAll<T>,
+    C::Deps: Gather<R, <DoneDeps<R, C> as PushAll<T>>::Out>,
+{
+    type Out = Done<R, C>;
+    #[inline]
+    fn walk<'a>(&mut self, ctx: T::Refs<'a>) -> Self::Out {
+        // Upstream first; first-edge dependencies come back by value, the
+        // others are already finished somewhere in `ctx`.
+        let deps = self.deps.walk(ctx);
+        let out = {
+            let refs = deps.push(T::shorten(ctx));
+            self.node.update(C::input(<C::Deps as Gather<R, _>>::gather(refs)))
+        };
+        Done { deps, out }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The root
+// ---------------------------------------------------------------------------
+
+/// The storage and walk of a whole roots list `L`. Internally every pipeline
+/// has the single root `App` as the roots list `(App, ())`; this trait holds
+/// the bounds once, so that [`Root`] can be a one-line bound.
+#[doc(hidden)]
+pub trait Stored: Planned {
+    /// The states tree of the roots list.
+    type S;
+    /// Its finished outputs.
+    type O;
+    fn make(pass: &mut ConstructPass) -> Self::S;
+    fn run(states: &mut Self::S) -> Self::O;
+}
+type StatesOf<L> = <L as StorageList<L, RootParent>>::S;
+type OutsOf<L> = <L as StorageList<L, RootParent>>::O;
+impl<L> Stored for L
+where
+    L: Planned + StorageList<L, RootParent>,
+    StatesOf<L>: Walk<L, (), Out = OutsOf<L>>,
+{
+    type S = StatesOf<L>;
+    type O = OutsOf<L>;
+    fn make(pass: &mut ConstructPass) -> Self::S {
+        <L as StorageList<L, RootParent>>::make(pass)
+    }
+    #[inline]
+    fn run(states: &mut Self::S) -> Self::O {
+        states.walk(())
+    }
+}
+
+/// A component that can be the root of a [`Pipeline`]: the single component
+/// the application asks for, whose `update` receives what the program wants
+/// and whose output is what [`Pipeline::run`] returns.
+///
+/// Implemented automatically for every [`Component`] whose graph can be
+/// stored and walked, which is every component in a crate that compiles. You
+/// only write `Root` as a bound, in code that is generic over the root:
+///
+/// ```
+/// use dataflow_flat::{Pipeline, Root};
+///
+/// fn drive<A: Root>(p: &mut Pipeline<A>) -> A::Output {
+///     p.run()
+/// }
+/// ```
+pub trait Root: Component {
+    /// The states tree.
+    #[doc(hidden)]
+    type States;
+    #[doc(hidden)]
+    fn make(pass: &mut ConstructPass) -> Self::States;
+    #[doc(hidden)]
+    fn run(states: &mut Self::States) -> Self::Output;
+}
+impl<A: Component> Root for A
+where
+    (A, ()): Stored,
+    A::Deps: StorageList<(A, ()), A>,
+    <(A, ()) as Stored>::O: IntoRoot<A>,
+{
+    type States = <(A, ()) as Stored>::S;
+    fn make(pass: &mut ConstructPass) -> Self::States {
+        <(A, ()) as Stored>::make(pass)
+    }
+    #[inline]
+    fn run(states: &mut Self::States) -> A::Output {
+        <(A, ()) as Stored>::run(states).into_root()
+    }
+}
+
+/// `(Done<(A, ()), A>, ())`: take the root's output out of the finished tree.
+#[doc(hidden)]
+pub trait IntoRoot<A: Component> {
+    fn into_root(self) -> A::Output;
+}
+impl<A: Component> IntoRoot<A> for (Done<(A, ()), A>, ())
+where
+    A::Deps: StorageList<(A, ()), A>,
+    (A, ()): Planned,
+{
+    #[inline]
+    fn into_root(self) -> A::Output {
+        self.0.into_output()
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Configs and build passes (build time only)
 // ---------------------------------------------------------------------------
 
+/// Owned configs, keyed by component type (not config type), so two
+/// components or two instantiations of one generic component never share a
+/// config by accident.
 #[derive(Default)]
 pub struct Configs {
     map: HashMap<TypeId, (Box<dyn Any>, &'static str)>,
@@ -486,6 +921,8 @@ impl Configs {
     }
 }
 
+/// Build pass 1: walk the graph, detect identity collisions, resolve each
+/// component's config (supplied or default).
 #[doc(hidden)]
 pub struct ConfigPass {
     supplied: HashMap<TypeId, (Box<dyn Any>, &'static str)>,
@@ -517,6 +954,7 @@ impl ConfigPass {
     }
 }
 
+/// Build pass 2: hands each constructor its config and records the order.
 #[doc(hidden)]
 pub struct ConstructPass {
     configs: HashMap<TypeId, Box<dyn Any>>,
@@ -534,8 +972,10 @@ impl ConstructPass {
     }
 }
 
+/// Why [`Pipeline::build`] failed.
 #[derive(Debug)]
 pub struct BuildError {
+    /// Components that were given a config but are not in the graph.
     pub unused: Vec<&'static str>,
 }
 
@@ -554,27 +994,35 @@ impl std::error::Error for BuildError {}
 // Pipeline
 // ---------------------------------------------------------------------------
 
-pub struct Pipeline<Roots: DepList> {
-    base: *mut u8,
-    ran: bool,
+/// The root component `A` and everything it depends on, constructed and ready
+/// to run.
+///
+/// # Execution order
+///
+/// `run` updates components in a depth-first post-order that follows the
+/// subscription listing order, exactly as documented on [`Component`]: for
+/// each component, its dependencies' blocks in listing order, then the
+/// component. The order is guaranteed and checked by `tests/order.rs`.
+///
+/// # Lifetime of outputs
+///
+/// Nothing subscribes to the root, so its output is never stored: `run`
+/// returns it. The outputs of all other components live only during `run` and
+/// are dropped before it returns. Components keep their own state between runs.
+pub struct Pipeline<A: Root> {
+    states: A::States,
     order: Vec<&'static str>,
-    _roots: PhantomData<Roots>,
+    _root: PhantomData<A>,
 }
 
-impl<Roots: DepList + AcyclicList> Pipeline<Roots> {
-    const LAYOUT: Layout = match Layout::from_size_align(Totals::<Roots>::SIZE, Totals::<Roots>::ALIGN) {
-        Ok(l) => l,
-        Err(_) => panic!("invalid pipeline layout"),
-    };
-
-    /// Build everything upstream of `Roots`. Only the roots are named.
+impl<A: Root> Pipeline<A> {
+    /// Construct the root and everything upstream of it, each component once,
+    /// dependencies first. Components without a config entry get
+    /// `Config::default()`; a config supplied for a component outside the
+    /// graph is a [`BuildError`].
     pub fn build(configs: Configs) -> Result<Self, BuildError> {
-        let mut pass1 = ConfigPass {
-            supplied: configs.map,
-            resolved: HashMap::new(),
-            ids: HashMap::new(),
-        };
-        Roots::collect_configs(&mut pass1);
+        let mut pass1 = ConfigPass { supplied: configs.map, resolved: HashMap::new(), ids: HashMap::new() };
+        <(A, ()) as DepList>::collect_configs(&mut pass1);
 
         let mut unused: Vec<_> = pass1.supplied.values().map(|(_, name)| *name).collect();
         unused.sort_unstable();
@@ -582,52 +1030,27 @@ impl<Roots: DepList + AcyclicList> Pipeline<Roots> {
             return Err(BuildError { unused });
         }
 
-        let base = if Self::LAYOUT.size() == 0 {
-            Self::LAYOUT.align() as *mut u8 // dangling but aligned; never read
-        } else {
-            // SAFETY: non-zero size.
-            let p = unsafe { alloc(Self::LAYOUT) };
-            if p.is_null() {
-                handle_alloc_error(Self::LAYOUT)
-            }
-            p
-        };
-
         let mut pass2 = ConstructPass { configs: pass1.resolved, order: Vec::new() };
-        // SAFETY: `base` has the plan's size and alignment; each node is
-        // written once at its own offset. If a constructor panics, the
-        // buffer leaks (nothing is read or dropped twice).
-        unsafe { Roots::construct::<Roots, RootParent>(base, &mut pass2) };
-
-        Ok(Pipeline { base, ran: false, order: pass2.order, _roots: PhantomData })
+        let states = A::make(&mut pass2);
+        Ok(Pipeline { states, order: pass2.order, _root: PhantomData })
     }
 }
 
-impl<Roots: DepList> Pipeline<Roots> {
-    /// Invoke every component once, in topological order.
+impl<A: Root> Pipeline<A> {
+    /// Update every component once, in the documented order, and return the
+    /// root's output.
     #[inline]
-    pub fn run(&mut self) {
-        // SAFETY: the buffer was fully constructed in `build`; `&mut self`
-        // guarantees no outstanding references into it.
-        unsafe { Roots::eval::<Roots, RootParent>(self.base) };
-        self.ran = true;
+    pub fn run(&mut self) -> A::Output {
+        A::run(&mut self.states)
     }
 
-    /// The roots' outputs from the last `run`, in the order they're listed.
-    /// `None` before the first run.
-    pub fn outputs(&self) -> Option<Roots::Inputs<'_>> {
-        if !self.ran {
-            return None;
-        }
-        // SAFETY: every node ran; `&self` blocks `run` while these live.
-        Some(unsafe { Roots::inputs::<Roots>(self.base) })
-    }
-
-    /// Component names in invocation order.
+    /// Component names in construction order (which is also the order of
+    /// each run's first updates: dependencies before dependents).
     pub fn order(&self) -> &[&'static str] {
         &self.order
     }
 
+    /// Number of components, the root included.
     pub fn len(&self) -> usize {
         self.order.len()
     }
@@ -637,23 +1060,9 @@ impl<Roots: DepList> Pipeline<Roots> {
     }
 }
 
-impl<Roots: DepList> Drop for Pipeline<Roots> {
-    fn drop(&mut self) {
-        // SAFETY: every node was constructed exactly once in `build`.
-        unsafe {
-            Roots::destroy::<Roots, RootParent>(self.base);
-            let layout = Layout::from_size_align_unchecked(Totals::<Roots>::SIZE, Totals::<Roots>::ALIGN);
-            if layout.size() != 0 {
-                dealloc(self.base, layout);
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod plan_trace {
     use super::*;
-    use crate::Deps;
     use std::marker::PhantomData;
 
     macro_rules! comp {
@@ -685,14 +1094,17 @@ mod plan_trace {
         fn new((): ()) -> Self { Len(PhantomData) }
         fn update(&mut self, input: Self::Input<'_>) -> usize { input.items.len() }
     }
-    type Roots = Deps![Report, Len<Tokenize>];
+
+    comp!(App, [report: Report, count: Len<Tokenize>], ());
+    /// The internal roots list of `Pipeline<App>`.
+    type Roots = (App, ());
 
     fn names() -> HashMap<u64, &'static str> {
         let mut m = HashMap::new();
         m.insert(ROOT, "ROOT");
         m.insert(OWNER, "OWNER");
         macro_rules! n { ($($t:ty),*) => { $( m.insert(<$t as Described>::ID, type_name::<$t>().rsplit("::").next().unwrap()); )* } }
-        n!(Source, Tokenize, WordCount, TopWords, Longest, Report);
+        n!(Source, Tokenize, WordCount, TopWords, Longest, Report, App);
         m.insert(<Len<Tokenize> as Described>::ID, "Len<Tokenize>");
         m
     }
@@ -715,21 +1127,20 @@ mod plan_trace {
         show("SEQ(Longest)", &<Longest as Described>::SEQ, &n);
         show("SEQ(Report)", &<Report as Described>::SEQ, &n);
         show("SEQ(Len<Tok>)", &<Len<Tokenize> as Described>::SEQ, &n);
+        show("SEQ(App)", &<App as Described>::SEQ, &n);
 
         let plan = &<Roots as Planned>::PLAN;
-        println!("\nplan: size {} bytes, align {}", plan.size, plan.align);
         let roots = Seq::merge(None, <Roots as DepList>::HEADS);
+        println!("\nplan (first-reached order, with the parent each was first reached from):");
         for i in 0..roots.len {
             let e = roots.items[i];
-            println!("  slot {i}  {:<14} reached from {:<10} offset {:>3}  (node size {:>3}, align {})",
-                n[&e.id], n[&plan.first_parent_of(e.id)], plan.offset_of(e.id), e.size, e.align);
+            println!("  slot {i}  {:<14} reached from {}", n[&e.id], n[&plan.first_parent_of(e.id)]);
         }
 
-        // Walk order (first reached) and where each was first reached from.
         let expected = [
-            ("Report", "ROOT"), ("TopWords", "Report"), ("WordCount", "TopWords"),
+            ("App", "ROOT"), ("Report", "App"), ("TopWords", "Report"), ("WordCount", "TopWords"),
             ("Tokenize", "WordCount"), ("Source", "Tokenize"), ("Longest", "Report"),
-            ("Len<Tokenize>", "ROOT"),
+            ("Len<Tokenize>", "App"),
         ];
         assert_eq!(roots.len, expected.len());
         for (i, (who, from)) in expected.iter().enumerate() {
@@ -743,8 +1154,9 @@ mod plan_trace {
             println!("  {:<10} -> {:<14} FIRST = {}", $pn, $hn, got);
             assert_eq!(got, $want, "{} -> {}", $pn, $hn);
         } }
-        edge!(RootParent, Report, "ROOT", "Report", true);
-        edge!(RootParent, Len<Tokenize>, "ROOT", "Len<Tokenize>", true);
+        edge!(RootParent, App, "ROOT", "App", true);
+        edge!(App, Report, "App", "Report", true);
+        edge!(App, Len<Tokenize>, "App", "Len<Tokenize>", true);
         edge!(Report, TopWords, "Report", "TopWords", true);
         edge!(Report, Longest, "Report", "Longest", true);
         edge!(Report, Source, "Report", "Source", false);
@@ -753,5 +1165,14 @@ mod plan_trace {
         edge!(Longest, Tokenize, "Longest", "Tokenize", false);
         edge!(Tokenize, Source, "Tokenize", "Source", true);
         edge!(Len<Tokenize>, Tokenize, "Len<Tok>", "Tokenize", false);
+
+        // `holds`: the storage subtree of Report holds TopWords..Source and
+        // Longest, but not Len<Tokenize> or App.
+        let id = |i: u64| i;
+        assert!(plan.holds(id(<Report as Described>::ID), id(<Source as Described>::ID)));
+        assert!(plan.holds(id(<Report as Described>::ID), id(<Longest as Described>::ID)));
+        assert!(!plan.holds(id(<Report as Described>::ID), id(<Len<Tokenize> as Described>::ID)));
+        assert!(!plan.holds(id(<Report as Described>::ID), id(<App as Described>::ID)));
+        assert!(plan.holds(id(<Tokenize as Described>::ID), id(<Source as Described>::ID)));
     }
 }
