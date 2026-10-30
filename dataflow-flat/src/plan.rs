@@ -21,7 +21,7 @@
 //! That is reported as "overflow evaluating the requirement `(B, ()): Upstream`",
 //! naming a component of the cycle. (The walk would also catch it, as a const
 //! panic, but never gets to run.) The proof is as deep as the graph, so graphs
-//! deeper than about 15 layers of 4 dependencies make the compiler's recursion
+//! deeper than about 17 layers of 4 dependencies make the compiler's recursion
 //! limit (128) a cost, and much deeper ones need `#![recursion_limit = "256"]`
 //! in the user's crate.
 //!
