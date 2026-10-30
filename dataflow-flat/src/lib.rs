@@ -709,6 +709,24 @@ where
     }
 }
 
+/// Context entry for the component being walked: its dependencies, finished
+/// but not yet wrapped in a `Done`. The value is a reference to the tuple.
+#[doc(hidden)]
+pub struct Pending<R, C>(PhantomData<(R, C)>);
+impl<R: Planned, C: Component, B> Head for (Pending<R, C>, B) {
+    const TOP: u64 = <C as Described>::ID;
+}
+impl<R: Planned, C: Component, T: Refs> Refs for (Pending<R, C>, T)
+where
+    C::Deps: StorageList<R, C>,
+{
+    type Refs<'a> = (&'a DoneDeps<R, C>, T::Refs<'a>);
+    #[inline]
+    fn shorten<'s, 'a: 's>(r: Self::Refs<'a>) -> Self::Refs<'s> {
+        (r.0, T::shorten(r.1))
+    }
+}
+
 /// `H`'s output, found in the context; `B` says whether it is in the head.
 #[doc(hidden)]
 pub trait FindB<R, H: Component, const B: bool>: Refs {
@@ -735,35 +753,24 @@ where
     }
 }
 
-/// Push every finished subtree of a deps tuple onto a context.
-#[doc(hidden)]
-pub trait PushAll<T: Refs> {
-    /// The extended context type.
-    type Out: Refs;
-    fn push<'a>(&'a self, rest: T::Refs<'a>) -> <Self::Out as Refs>::Refs<'a>;
-}
-impl<T: Refs> PushAll<T> for () {
-    type Out = T;
-    #[inline]
-    fn push<'a>(&'a self, rest: T::Refs<'a>) -> T::Refs<'a> {
-        rest
-    }
-}
-impl<T: Refs, B: PushAll<T>> PushAll<T> for ((), B) {
-    type Out = B::Out;
-    #[inline]
-    fn push<'a>(&'a self, rest: T::Refs<'a>) -> <Self::Out as Refs>::Refs<'a> {
-        self.1.push(rest)
-    }
-}
-impl<R: Planned, T: Refs, C: Component, B: PushAll<(Done<R, C>, T)>> PushAll<T> for (Done<R, C>, B)
+impl<R: Planned, H: Component, C: Component, T: Refs> FindB<R, H, true> for (Pending<R, C>, T)
 where
     C::Deps: StorageList<R, C>,
+    DoneDeps<R, C>: Head + GetB<R, H, { HeadHas::<R, DoneDeps<R, C>, H>::YES }>,
 {
-    type Out = B::Out;
     #[inline]
-    fn push<'a>(&'a self, rest: T::Refs<'a>) -> <Self::Out as Refs>::Refs<'a> {
-        self.1.push((&self.0, rest))
+    fn find<'a>(r: Self::Refs<'a>) -> &'a H::Output {
+        r.0.get()
+    }
+}
+impl<R: Planned, H: Component, C: Component, T: Refs> FindB<R, H, false> for (Pending<R, C>, T)
+where
+    C::Deps: StorageList<R, C>,
+    T: FindB<R, H, { HeadHas::<R, T, H>::YES }>,
+{
+    #[inline]
+    fn find<'a>(r: Self::Refs<'a>) -> &'a H::Output {
+        T::find(r.1)
     }
 }
 
@@ -832,8 +839,7 @@ impl<R: Planned, C: Component, T: Refs> Walk<R, T> for Tree<R, C>
 where
     C::Deps: StorageList<R, C>,
     <C::Deps as StorageList<R, C>>::S: Walk<R, T, Out = DoneDeps<R, C>>,
-    DoneDeps<R, C>: PushAll<T>,
-    C::Deps: Gather<R, <DoneDeps<R, C> as PushAll<T>>::Out>,
+    C::Deps: Gather<R, (Pending<R, C>, T)>,
 {
     type Out = Done<R, C>;
     #[inline]
@@ -842,8 +848,8 @@ where
         // others are already finished somewhere in `ctx`.
         let deps = self.deps.walk(ctx);
         let out = {
-            let refs = deps.push(T::shorten(ctx));
-            self.node.update(C::input(<C::Deps as Gather<R, _>>::gather(refs)))
+            let refs = (&deps, T::shorten(ctx));
+            self.node.update(C::input(<C::Deps as Gather<R, (Pending<R, C>, T)>>::gather(refs)))
         };
         Done { deps, out }
     }
