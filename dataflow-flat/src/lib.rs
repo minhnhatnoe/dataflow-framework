@@ -160,13 +160,12 @@ pub struct Entry {
     parent: u64,
 }
 
-const EMPTY: Entry = Entry { id: 0, parent: 0 };
-
 /// A walk order: fixed capacity so it is a plain constant.
 #[doc(hidden)]
 pub struct Seq {
     len: usize,
-    items: [Entry; MAX_COMPONENTS],
+    ids: [u64; MAX_COMPONENTS],
+    parents: [u64; MAX_COMPONENTS],
 }
 
 /// Open-addressing set of ids (0 = empty slot; ids are never 0 or 1).
@@ -196,14 +195,15 @@ impl IdSet {
 
 impl Seq {
     const fn empty() -> Seq {
-        Seq { len: 0, items: [EMPTY; MAX_COMPONENTS] }
+        Seq { len: 0, ids: [0; MAX_COMPONENTS], parents: [0; MAX_COMPONENTS] }
     }
 
     const fn push(&mut self, e: Entry) {
         if self.len == MAX_COMPONENTS {
             panic!("too many components: raise dataflow_flat::MAX_COMPONENTS");
         }
-        self.items[self.len] = e;
+        self.ids[self.len] = e.id;
+        self.parents[self.len] = e.parent;
         self.len += 1;
     }
 
@@ -212,31 +212,37 @@ impl Seq {
     /// are attached to it; otherwise (the roots) they get parent ROOT.
     const fn merge(owner: Option<Entry>, mut deps: &'static SeqList) -> Seq {
         let mut out = Seq::empty();
-        let mut seen = IdSet::new();
+        let mut seen = [0u64; SET_CAP];
         let parent = match owner {
             Some(e) => {
                 out.push(e);
-                seen.insert(e.id);
+                let mut s = (e.id as usize) & (SET_CAP - 1);
+                while seen[s] != 0 {
+                    s = (s + 1) & (SET_CAP - 1);
+                }
+                seen[s] = e.id;
                 e.id
             }
             None => ROOT,
         };
         let mut direct = IdSet::new();
         while let SeqList::Cons(dep, rest) = deps {
-            let head = dep.items[0].id;
+            let head = dep.ids[0];
             if direct.contains(head) {
                 panic!("a component lists the same dependency twice");
             }
             direct.insert(head);
             let mut i = 0;
             while i < dep.len {
-                let mut e = dep.items[i];
-                if !seen.contains(e.id) {
-                    if e.parent == OWNER {
-                        e.parent = parent;
-                    }
-                    seen.insert(e.id);
-                    out.push(e);
+                let id = dep.ids[i];
+                let mut s = (id as usize) & (SET_CAP - 1);
+                while seen[s] != 0 && seen[s] != id {
+                    s = (s + 1) & (SET_CAP - 1);
+                }
+                if seen[s] == 0 {
+                    seen[s] = id;
+                    let p = dep.parents[i];
+                    out.push(Entry { id, parent: if p == OWNER { parent } else { p } });
                 }
                 i += 1;
             }
@@ -280,19 +286,34 @@ pub struct Plan {
     keys: [u64; SET_CAP],
     index: [u32; SET_CAP],
     first_parent: [u64; MAX_COMPONENTS],
+    /// Components are in first-reached (depth-first pre-)order, so the
+    /// storage subtree of entry `i` is the range `i..end[i]`.
+    end: [u32; MAX_COMPONENTS],
 }
 
 impl Plan {
     const fn from_roots(roots: &Seq) -> Plan {
-        let mut plan = Plan { keys: [0; SET_CAP], index: [0; SET_CAP], first_parent: [0; MAX_COMPONENTS] };
+        let mut plan = Plan { keys: [0; SET_CAP], index: [0; SET_CAP], first_parent: [0; MAX_COMPONENTS], end: [0; MAX_COMPONENTS] };
         let mut i = 0;
         while i < roots.len {
-            let e = roots.items[i];
-            let slot = plan.slot(e.id);
-            plan.keys[slot] = e.id;
+            let slot = plan.slot(roots.ids[i]);
+            plan.keys[slot] = roots.ids[i];
             plan.index[slot] = i as u32 + 1;
-            plan.first_parent[i] = e.parent;
+            plan.first_parent[i] = roots.parents[i];
+            plan.end[i] = i as u32 + 1;
             i += 1;
+        }
+        // Children come after their parent: grow each parent's range, last first.
+        let mut i = roots.len;
+        while i > 0 {
+            i -= 1;
+            let p = plan.first_parent[i];
+            if p != ROOT {
+                let pi = plan.index_of(p);
+                if plan.end[i] > plan.end[pi] {
+                    plan.end[pi] = plan.end[i];
+                }
+            }
         }
         plan
     }
@@ -319,16 +340,9 @@ impl Plan {
     /// Is `top` on the first-parent chain of `id` (inclusive)? Equivalently:
     /// does the storage subtree of `top` hold `id`?
     const fn holds(&self, top: u64, id: u64) -> bool {
-        let mut cur = id;
-        loop {
-            if cur == top {
-                return true;
-            }
-            if cur == ROOT {
-                return false;
-            }
-            cur = self.first_parent_of(cur);
-        }
+        let t = self.index_of(top);
+        let i = self.index_of(id);
+        t <= i && i < self.end[t] as usize
     }
 }
 
@@ -362,10 +376,10 @@ impl Parent for RootParent {
 /// The plan for a roots list, evaluated once per list type.
 #[doc(hidden)]
 pub trait Planned: DepList {
-    const PLAN: Plan;
+    const PLAN: &'static Plan;
 }
 impl<L: DepList> Planned for L {
-    const PLAN: Plan = Plan::from_roots(&Seq::merge(None, L::HEADS));
+    const PLAN: &'static Plan = &Plan::from_roots(&Seq::merge(None, L::HEADS));
 }
 
 /// Per-edge constant, looked up in the plan of roots list `R`.
@@ -1111,7 +1125,7 @@ mod plan_trace {
 
     fn show(label: &str, s: &Seq, n: &HashMap<u64, &str>) {
         let items: Vec<String> = (0..s.len)
-            .map(|i| format!("{}←{}", n[&s.items[i].id], n[&s.items[i].parent]))
+            .map(|i| format!("{}←{}", n[&s.ids[i]], n[&s.parents[i]]))
             .collect();
         println!("{label:<16} [{}]", items.join(", "));
     }
@@ -1129,12 +1143,12 @@ mod plan_trace {
         show("SEQ(Len<Tok>)", &<Len<Tokenize> as Described>::SEQ, &n);
         show("SEQ(App)", &<App as Described>::SEQ, &n);
 
-        let plan = &<Roots as Planned>::PLAN;
+        let plan = <Roots as Planned>::PLAN;
         let roots = Seq::merge(None, <Roots as DepList>::HEADS);
         println!("\nplan (first-reached order, with the parent each was first reached from):");
         for i in 0..roots.len {
-            let e = roots.items[i];
-            println!("  slot {i}  {:<14} reached from {}", n[&e.id], n[&plan.first_parent_of(e.id)]);
+            let id = roots.ids[i];
+            println!("  slot {i}  {:<14} reached from {}", n[&id], n[&plan.first_parent_of(id)]);
         }
 
         let expected = [
@@ -1144,8 +1158,8 @@ mod plan_trace {
         ];
         assert_eq!(roots.len, expected.len());
         for (i, (who, from)) in expected.iter().enumerate() {
-            let e = roots.items[i];
-            assert_eq!((n[&e.id], n[&plan.first_parent_of(e.id)]), (*who, *from), "slot {i}");
+            let id = roots.ids[i];
+            assert_eq!((n[&id], n[&plan.first_parent_of(id)]), (*who, *from), "slot {i}");
         }
 
         println!("\nedges:");
