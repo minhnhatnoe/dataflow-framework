@@ -46,7 +46,7 @@ pub(crate) const ROOT: u64 = 0;
 const RESERVED: u64 = 1;
 
 /// FNV-1a of the type name: a compile-time identity for each component.
-/// Collisions are caught when the pipeline is built (see `ConfigPass`).
+/// Collisions are caught when the pipeline is built (see `ConstructPass`).
 const fn component_id(s: &str) -> u64 {
     let bytes = s.as_bytes();
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -267,6 +267,11 @@ impl Plan {
             i = (i + 1) & (SET_CAP - 1);
         }
         i
+    }
+
+    /// Is the component with this id in the plan?
+    pub(crate) const fn contains(&self, id: u64) -> bool {
+        id != 0 && self.keys[self.slot(id)] == id
     }
 
     const fn index_of(&self, id: u64) -> usize {

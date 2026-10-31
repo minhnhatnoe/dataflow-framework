@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
 
-use crate::build::{BuildError, ConfigPass, ConstructPass, Configs};
+use crate::build::{BuildError, Configs, ConstructPass};
 use crate::walk::Root;
 
 /// The root component `A` and everything it depends on, constructed and ready
@@ -34,18 +34,18 @@ impl<A: Root> Pipeline<A> {
     /// `Config::default()`; a config supplied for a component outside the
     /// graph is a [`BuildError`].
     pub fn build(configs: Configs) -> Result<Self, BuildError> {
-        let mut pass1 = ConfigPass { supplied: configs.map, resolved: HashMap::new(), ids: HashMap::new() };
-        pass1.visit::<A>();
-
-        let mut unused: Vec<_> = pass1.supplied.values().map(|(_, name)| *name).collect();
+        // Configs for components outside the graph are reported before any
+        // constructor runs: the plan of the root says which ids are in it.
+        let mut unused: Vec<_> =
+            configs.map.iter().filter(|(id, _)| !A::in_plan(**id)).map(|(_, e)| e.name()).collect();
         unused.sort_unstable();
         if !unused.is_empty() {
             return Err(BuildError { unused });
         }
 
-        let mut pass2 = ConstructPass { configs: pass1.resolved, order: Vec::new() };
-        let states = A::make(&mut pass2);
-        Ok(Pipeline { states, order: pass2.order, _root: PhantomData })
+        let mut pass = ConstructPass { configs: configs.map, ids: HashMap::new(), order: Vec::new() };
+        let states = A::make(&mut pass);
+        Ok(Pipeline { states, order: pass.order, _root: PhantomData })
     }
 
     /// Update every component once, in the documented order, and return the

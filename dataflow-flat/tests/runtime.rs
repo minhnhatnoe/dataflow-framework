@@ -294,3 +294,54 @@ fn non_root_outputs_are_dropped_by_the_end_of_each_run() {
         assert_eq!(OUT_DROPPED.load(Ordering::SeqCst), 3 * run);
     }
 }
+
+// An unused config is reported before any constructor runs.
+static BUILT: AtomicUsize = AtomicUsize::new(0);
+
+#[derive(ComponentSubscription)]
+pub struct Counted1;
+impl Component for Counted1 {
+    type Config = ();
+    type Output = ();
+    fn new((): ()) -> Self {
+        BUILT.fetch_add(1, Ordering::SeqCst);
+        Counted1
+    }
+    fn update(&mut self, _: Self::Input<'_>) {}
+}
+
+#[derive(ComponentSubscription)]
+#[subscribe(a: Counted1)]
+pub struct CountedApp;
+impl Component for CountedApp {
+    type Config = ();
+    type Output = ();
+    fn new((): ()) -> Self {
+        BUILT.fetch_add(1, Ordering::SeqCst);
+        CountedApp
+    }
+    fn update(&mut self, _: Self::Input<'_>) {}
+}
+
+#[derive(ComponentSubscription)]
+pub struct Stranger;
+impl Component for Stranger {
+    type Config = ();
+    type Output = ();
+    fn new((): ()) -> Self {
+        Stranger
+    }
+    fn update(&mut self, _: Self::Input<'_>) {}
+}
+
+#[test]
+fn unused_config_is_reported_before_any_constructor_runs() {
+    BUILT.store(0, Ordering::SeqCst);
+    let err = Pipeline::<CountedApp>::build(Configs::new().with::<Counted1>(()).with::<Stranger>(()))
+        .err()
+        .expect("Stranger is not in the graph");
+    assert_eq!(err.unused.len(), 1);
+    assert_eq!(BUILT.load(Ordering::SeqCst), 0, "no constructor ran");
+    Pipeline::<CountedApp>::build(Configs::new().with::<Counted1>(())).unwrap();
+    assert_eq!(BUILT.load(Ordering::SeqCst), 2);
+}
