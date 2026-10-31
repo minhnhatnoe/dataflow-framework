@@ -16,13 +16,13 @@ python3 bench/gen_bench.py full 20 && timeout 200 cargo run --release -p bench
 timeout 120 cargo test -p dataflow-flat --features cycle-diagnostics   # the feature is a no-op now (cycles are always diagnosed); kept so old commands work
 ```
 
-`bench` is excluded from default members because its release build takes about 10 s. `python3 bench/gen_bench.py <full|flat|hand> [layers]` regenerates `bench/src/main.rs` (`flat` has only the framework side, `hand` only the baseline). Regenerate with `full 20` before committing; the committed file should be what the generator produces.
+`bench` is excluded from default members because its release build takes about 5 s. `python3 bench/gen_bench.py <full|flat|hand> [layers] [wide]` (`wide`: the root subscribes to the last 5 layers, 100 components, to exercise a very wide subscription list) regenerates `bench/src/main.rs` (`flat` has only the framework side, `hand` only the baseline). Regenerate with `full 20` before committing; the committed file should be what the generator produces.
 
 ## Invariants: don't break these without discussing
 
 1. **No dynamic dispatch while running.** No `dyn`, downcasts or lookups in `run` or the walk. Type-erased maps are only allowed in `Pipeline::build`.
 2. **Compile-time constants contain no references.** `Plan` is a plain value of integer arrays (`Planned::PLAN` is one `&'static Plan` to it). A graph of `&'static` constants made incremental builds exponential. Keep constant arrays as integer arrays, not arrays of structs (validation is per field).
-3. **Use `#[inline]`, never `#[inline(always)]`, on the walk and lookup chain** (`Walk::walk`, `Find`, `Get`, `GatherInputs`, `Context::shorten`). Forced inlining in debug builds expands every path through the graph, and it gave no gain in release.
+3. **Use `#[inline]`, never `#[inline(always)]`, on the walk and lookup chain** (`Walk::walk`/`after`, `Find`, `Get`, `GatherInputs`, `Context::shorten`). Forced inlining in debug builds expands every path through the graph, and it gave no gain in release.
 4. **Each component is constructed, run and dropped exactly once.** This now holds structurally: the typed `Tree` stores each component once (at the edge where `Edge::FIRST` is true), construction is `Tree::make`, and drop is compiler drop glue. `tests/graphs.rs` and `tests/runtime.rs` check it.
 5. **`#![forbid(unsafe_code)]` stays.** The old raw-pointer soundness argument is gone; do not reintroduce `unsafe`. If a design needs it, discuss first.
 6. **Execution order is a guarantee**: depth-first post-order in subscription listing order (documented on `Component` and `Pipeline`, and in the README). `dataflow-flat/tests/order.rs` enforces it; change those tests only on purpose.
@@ -35,17 +35,17 @@ timeout 120 cargo test -p dataflow-flat --features cycle-diagnostics   # the fea
 | Path | What |
 |---|---|
 | `dataflow-flat/src/lib.rs` | Crate docs (the four stages, top-down), feature gates, module list, re-exports |
-| `dataflow-flat/src/component.rs` | `ComponentSubscription`, `Component`, `DepList` (the nested list the derive builds) |
+| `dataflow-flat/src/component.rs` | `ComponentSubscription`, `Component`, `DepList` (the subscription tree the derive builds: `()`, leaves of 1-4 entries, inner nodes of 4 entries and 4 children) |
 | `dataflow-flat/src/plan.rs` | The compile-time plan: `Described`, the const dependency walk (`visit`, `Upstream`), `Plan`, `Planned`, `Edge`, and the `plan_trace` test |
-| `dataflow-flat/src/storage.rs` | The typed states tree: `Tree`, `If`/`Slot`, `DepStorage`, `Placed` |
-| `dataflow-flat/src/lookup.rs` | Finished outputs and lookups: `Done`, `Pending`, `Top`/`TopHolds`/`IsSame`, `Get`, `Context`, `Find`, `GatherInputs` |
-| `dataflow-flat/src/walk.rs` | The fold (`Walk`) and the `Root` bound |
-| `dataflow-flat/src/build.rs`, `pipeline.rs` | `Configs` and the two startup passes; `Pipeline` |
-| `dataflow-flat/tests/` | `runtime.rs` (run/drop/by-value guarantees), `graphs.rs` (lifecycle on diamond and example graphs, Send, panics, alignment), `order.rs` (execution order), `generic_user.rs` (one-bound generic code) |
+| `dataflow-flat/src/storage.rs` | The typed states tree: `Tree`, `MaskN`/`StoredN` (only first-edge entries are stored), `DepStorage`, `Placed` |
+| `dataflow-flat/src/lookup.rs` | Finished outputs and lookups: `Done`, `Node` (a finished tuple node as a context entry), `Span` (plan range of a finished piece), `Select`/`Get`, `Top`/`TopHolds`, `Context`, `Find`, `GatherInputs` |
+| `dataflow-flat/src/walk.rs` | The fold (`Walk`: `Out`, `After`, `walk`, `after` per piece) and the `Root` bound |
+| `dataflow-flat/src/build.rs`, `pipeline.rs` | `Configs` (keyed by compile-time id) and `ConstructPass` (configs, id collision check, order); `Pipeline` |
+| `dataflow-flat/tests/` | `runtime.rs` (run/drop/by-value guarantees), `graphs.rs` (lifecycle on diamond and example graphs, Send, panics, alignment), `order.rs` (execution order), `generic_user.rs` (one-bound generic code), `wide.rs` (lifecycle and values for 22 and 100 subscriptions) |
 | `dataflow-macros/src/lib.rs` | `#[derive(ComponentSubscription)]` + `#[subscribe(...)]` |
 | `example/`, `diamond/` | Usage examples with a root `App` / `Sum`; `diamond` is for reading MIR/IR/asm |
 | `bench/` | Generated benchmark; `gen_bench.py` is the source of truth |
 
 Suggested next steps are at the end of `README.md`. The first is per-run external input.
 
-Compile-time notes: the plan's `Upstream` bound is proved recursively by the trait solver, so graph depth costs solver depth (README, "Graph depth"); keep that proof two levels per layer (a bound on `C::Deps` rather than a trait on components) and keep the chunked `Upstream` impls. Profile with `-Zself-profile` and `summarize` (README, "Inspecting compiler output") before changing anything for speed.
+Compile-time notes: the plan's `Upstream` bound is proved recursively by the trait solver, so graph depth costs solver depth (README, "Graph depth"); keep that proof two levels per layer (a bound on `C::Deps` rather than a trait on components) and keep `Upstream` implemented per tree node (a component's subscriptions must stay a 4-ary tree, not a list: the cons list overflowed the recursion limit at 20 subscriptions). Profile with `-Zself-profile` and `summarize` (README, "Inspecting compiler output") before changing anything for speed.
