@@ -29,9 +29,12 @@ enum Shape {
 }
 
 impl Shape {
-    /// Capacity of a tree of depth `d` (a leaf has depth 1).
+    /// Capacity of a tree of depth `d` (a leaf has depth 0).
     fn capacity(d: u32) -> usize {
-        if d <= 1 { 4 } else { 4 + 4 * Self::capacity(d - 1) }
+        match d {
+            0 => 4,
+            _ => 4 + 4 * Self::capacity(d - 1),
+        }
     }
 
     /// Fill nodes left to right in the shallowest tree that holds everything.
@@ -42,7 +45,7 @@ impl Shape {
         if items.len() <= 4 {
             return Shape::Leaf(items.to_vec());
         }
-        let mut depth = 2;
+        let mut depth = 1;
         while Self::capacity(depth) < items.len() {
             depth += 1;
         }
@@ -233,4 +236,97 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn old_capacity(d: u32) -> usize {
+        if d <= 1 { 4 } else { 4 + 4 * old_capacity(d - 1) }
+    }
+
+    fn old_build(items: &[usize]) -> Shape {
+        if items.is_empty() {
+            return Shape::Empty;
+        }
+        if items.len() <= 4 {
+            return Shape::Leaf(items.to_vec());
+        }
+        let mut depth = 2;
+        while old_capacity(depth) < items.len() {
+            depth += 1;
+        }
+        let child_cap = old_capacity(depth - 1);
+        let mut rest = &items[4..];
+        let mut children = Vec::new();
+        for _ in 0..4 {
+            let n = rest.len().min(child_cap);
+            children.push(old_build(&rest[..n]));
+            rest = &rest[n..];
+        }
+        assert!(rest.is_empty());
+        Shape::Inner(items[..4].to_vec(), children)
+    }
+
+    fn flatten(s: &Shape, out: &mut Vec<usize>) {
+        match s {
+            Shape::Empty => {}
+            Shape::Leaf(es) => out.extend(es),
+            Shape::Inner(es, cs) => {
+                out.extend(es);
+                for c in cs {
+                    flatten(c, out);
+                }
+            }
+        }
+    }
+
+    /// Check node sizes; returns the depth (empty and leaf are 0).
+    fn check(s: &Shape) -> u32 {
+        match s {
+            Shape::Empty => 0,
+            Shape::Leaf(es) => {
+                assert!((1..=4).contains(&es.len()));
+                0
+            }
+            Shape::Inner(es, cs) => {
+                assert_eq!(es.len(), 4);
+                assert_eq!(cs.len(), 4);
+                1 + cs.iter().map(check).max().unwrap()
+            }
+        }
+    }
+
+    #[test]
+    fn capacities() {
+        assert_eq!(Shape::capacity(0), 4);
+        assert_eq!(Shape::capacity(1), 20);
+        assert_eq!(Shape::capacity(2), 84);
+    }
+
+    #[test]
+    fn shapes() {
+        for n in (0..=100).chain([84, 85, 340, 341]) {
+            let items: Vec<usize> = (0..n).collect();
+            let shape = Shape::build(&items);
+
+            let mut flat = Vec::new();
+            flatten(&shape, &mut flat);
+            assert_eq!(flat, items, "n = {n}");
+
+            let depth = check(&shape);
+            if n > 0 {
+                let smallest = (0..).find(|&d| Shape::capacity(d) >= n).unwrap();
+                assert_eq!(depth, smallest, "n = {n}");
+            }
+
+            let leaf = |i: usize| quote!(#i);
+            assert_eq!(
+                shape.render(&leaf).to_string(),
+                old_build(&items).render(&leaf).to_string(),
+                "n = {n}"
+            );
+        }
+    }
 }
