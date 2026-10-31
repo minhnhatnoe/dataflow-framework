@@ -1,5 +1,5 @@
 [workspace]
 resolver = "2"
-members = ["dataflow-flat", "dataflow-macros", "example", "bench", "dataflow-flat/tests/samename/foo-v1", "dataflow-flat/tests/samename/foo-v2"]
+members = ["dataflow-flat", "dataflow-macros", "bench", "dataflow-flat/tests/samename/foo-v1", "dataflow-flat/tests/samename/foo-v2"]
 # `cargo build` / `cargo test` without -p: everything except the 400-component benchmark.
-default-members = ["dataflow-flat", "dataflow-macros", "example", "dataflow-flat/tests/samename/foo-v1", "dataflow-flat/tests/samename/foo-v2"]
+default-members = ["dataflow-flat", "dataflow-macros", "dataflow-flat/tests/samename/foo-v1", "dataflow-flat/tests/samename/foo-v2"]

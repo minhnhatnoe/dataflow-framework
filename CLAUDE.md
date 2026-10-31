@@ -4,14 +4,14 @@ Read `README.md` first. It covers the requirements, the full design, why each al
 
 ## Toolchain and commands
 
-`rust-toolchain.toml` pins `nightly-2026-10-30`. Without rustup, use `RUSTC_BOOTSTRAP=1`. `dataflow-flat` enables `const_type_name` (the name hash that only chooses where the plan's table starts probing), `const_trait_impl` and `const_cmp` (the plan's walk, and `TypeId ==` in a `const fn`; syntax is `const trait` / `const impl` / `[const]` bounds on this nightly) and `generic_const_exprs`; the library prints a "not supported with the next-generation trait solver ... reverted" warning (and uses `#![allow(incomplete_features)]`). That is expected. User crates (`example` and its `examples/diamond.rs`, `bench`, the tests, the error cases) must not need any `#![feature]`.
+`rust-toolchain.toml` pins `nightly-2026-10-30`. Without rustup, use `RUSTC_BOOTSTRAP=1`. `dataflow-flat` enables `const_type_name` (the name hash that only chooses where the plan's table starts probing), `const_trait_impl` and `const_cmp` (the plan's walk, and `TypeId ==` in a `const fn`; syntax is `const trait` / `const impl` / `[const]` bounds on this nightly) and `generic_const_exprs`; the library prints a "not supported with the next-generation trait solver ... reverted" warning (and uses `#![allow(incomplete_features)]`). That is expected. User crates (`dataflow-flat/examples/*`, `bench`, the tests, the error cases) must not need any `#![feature]`.
 
 Always run cargo under a timeout: `timeout 120 cargo ...`. Large graphs compile slowly, and past bugs made builds exponential. Run long checks one at a time and write results to a file, rather than chaining many slow commands in one shell call.
 
 ```sh
 timeout 120 cargo test                           # plan assertions + runtime guarantees + execution order
 timeout 300 scripts/check_errors.sh              # or pass case names to run a subset
-timeout 120 cargo run -p example
+timeout 120 cargo run -p dataflow-flat --example basic
 python3 bench/gen_bench.py full 20 && timeout 200 cargo run --release -p bench
 scripts/bench.sh [layers] [wide]       # robust benchmark: pinned, warm-up, 11 alternating rounds x 5 processes; restores `full 20`
 ```
@@ -45,7 +45,7 @@ scripts/bench.sh [layers] [wide]       # robust benchmark: pinned, warm-up, 11 a
 | `dataflow-flat/src/build.rs`, `pipeline.rs` | `Configs` (keyed by `TypeId`) and `ConstructPass` (configs, order); `Pipeline` |
 | `dataflow-flat/tests/` | `duplicates.rs` (the same dependency twice through an alias: constructed and updated once, `ptr::eq`), `runtime.rs` (run/drop/by-value guarantees), `graphs.rs` (lifecycle on diamond and example graphs, Send, panics, alignment), `order.rs` (execution order), `generic_user.rs` (one-bound generic code), `wide.rs` (lifecycle and values for 22 and 100 subscriptions), `same_type_name.rs` (two types with identical `type_name` are two components; uses the helper crates in `samename/foo-v1` and `foo-v2`, workspace members whose packages are `foo-v1`/`foo-v2` but whose library is `foo`) |
 | `dataflow-macros/src/lib.rs` | `#[derive(ComponentSubscription)]` + `#[subscribe(...)]` |
-| `example/` | Usage example with a root `App`; `examples/diamond.rs` (`cargo run -p example --example diamond`) is the small graph for reading MIR/IR/asm |
+| `dataflow-flat/examples/` | `basic/` (multi-file text pipeline with a root `App`; `cargo run -p dataflow-flat --example basic`) and `diamond.rs` (small graph for reading MIR/IR/asm; `cargo run -p dataflow-flat --example diamond`) |
 | `bench/` | Generated benchmark; `gen_bench.py` is the source of truth |
 
 Suggested next steps are at the end of `README.md`. The first is per-run external input.

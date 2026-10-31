@@ -28,13 +28,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "example"
-version = "0.1.0"
-dependencies = [
- "dataflow-flat",
-]
-
-[[package]]
 name = "foo-v1"
 version = "0.1.0"
 dependencies = [

@@ -1,7 +1,7 @@
 //! Smallest interesting graph, used to inspect compiler output (MIR, LLVM IR,
 //! asm; see README "Inspecting compiler output").
 //!
-//! Run with `cargo run -p example --example diamond`.
+//! Run with `cargo run -p dataflow-flat --example diamond`.
 //!
 //! Diamond:  Src -> Double, Src -> Square, (Double, Square) -> Sum (the root)
 use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline};

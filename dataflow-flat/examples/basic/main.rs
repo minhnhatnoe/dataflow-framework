@@ -1,3 +1,5 @@
+//! Run with `cargo run -p dataflow-flat --example basic`.
+//!
 //! Text pipeline: define one root component (`App`) that subscribes to what
 //! the program wants; everything it subscribes to, directly or indirectly, is
 //! found, built once, and run in order. `run` returns the root's output.
@@ -25,7 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("invocation order:");
     for (i, name) in pipeline.order().iter().enumerate() {
-        println!("  {i}. {}", name.replace("example::components::", ""));
+        println!("  {i}. {}", name.replace("basic::components::", ""));
     }
 
     for run in 1..=2 {

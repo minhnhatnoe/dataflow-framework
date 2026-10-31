@@ -39,8 +39,8 @@ These came from the person who asked for the framework, roughly in the order the
 ## Quick start
 
 ```sh
-cargo run -p example                     # text pipeline: 8 components under one root
-cargo run -p example --example diamond   # smallest interesting graph (4 components)
+cargo run -p dataflow-flat --example basic     # text pipeline: 8 components under one root
+cargo run -p dataflow-flat --example diamond   # smallest interesting graph (4 components)
 cargo test                               # plan assertions + runtime guarantees + execution order
 scripts/check_errors.sh                  # 15 cases: each mistake fails the documented way
 
@@ -59,7 +59,7 @@ cargo run --release -p bench             # flat runtime vs hand-written
 |---|---|---|
 | `dataflow-flat` | nightly | **The runtime.** Compile-time plan (`plan.rs`) with component identity (`identity.rs`, `table.rs`), typed storage tree (`storage.rs`), lookups (`lookup.rs`), safe fold (`walk.rs`), startup (`build.rs`, `pipeline.rs`). `#![forbid(unsafe_code)]`. |
 | `dataflow-macros` | any | `#[derive(ComponentSubscription)]` and `#[subscribe(...)]`. Re-exported by `dataflow-flat`. |
-| `example` | nightly | Text pipeline: `Source → Tokenize → {WordCount → TopWords, Longest, Len<Tokenize>} → Report → App`. `run` returns a `Summary`. `examples/diamond.rs` (`cargo run -p example --example diamond`): `Src → {Double, Square} → Sum` (the root), small enough to read its MIR, LLVM IR and assembly. |
+| `dataflow-flat/examples/` | nightly | `basic/`: text pipeline: `Source → Tokenize → {WordCount → TopWords, Longest, Len<Tokenize>} → Report → App`. `run` returns a `Summary`. `diamond.rs`: `Src → {Double, Square} → Sum` (the root), small enough to read its MIR, LLVM IR and assembly. |
 | `bench` | nightly | Generated 396-component, 1,504-edge layered graph plus a root, run through the flat runtime and a hand-written baseline. Not a default member. |
 | `dataflow-flat/tests/samename/{foo-v1,foo-v2}` | nightly | Helper crates for the `same_type_name` integration test: packages `foo-v1` and `foo-v2` (Cargo refuses two packages named `foo` in one workspace) whose library is named `foo`, so both have a component with `type_name` `foo::Foo`. They are workspace members and dev-dependencies of `dataflow-flat`; `cargo test` runs the test. |
 | `scripts/check_errors.sh` | | Compiles small crates that each contain one mistake and checks the error. |
@@ -525,14 +525,14 @@ Smaller decisions:
 
 ## Inspecting compiler output
 
-All of these were used during development; flag spellings may differ on newer nightlies. They run on the `diamond` example (`example/examples/diamond.rs`), where the output is small enough to read.
+All of these were used during development; flag spellings may differ on newer nightlies. They run on the `diamond` example (`dataflow-flat/examples/diamond.rs`), where the output is small enough to read.
 
 ```sh
-cargo rustc -p example --example diamond -- -Zunpretty=expanded                       # derive output
+cargo rustc -p dataflow-flat --example diamond -- -Zunpretty=expanded                       # derive output
 cargo rustc -p dataflow-flat --lib -- --emit=mir -o /tmp/flat.mir    # generic walk and lookups
-cargo rustc -p example --example diamond -- -Zprint-mono-items=yes                     # instances: one walk per Tree, one function per lookup step
-cargo rustc -p example --example diamond -- --emit=llvm-ir -o /tmp/d.ll
-cargo rustc --release -p example --example diamond -- --emit=asm \
+cargo rustc -p dataflow-flat --example diamond -- -Zprint-mono-items=yes                     # instances: one walk per Tree, one function per lookup step
+cargo rustc -p dataflow-flat --example diamond -- --emit=llvm-ir -o /tmp/d.ll
+cargo rustc --release -p dataflow-flat --example diamond -- --emit=asm \
     -C llvm-args=-x86-asm-syntax=intel -o /tmp/d.s                   # run_once: nine instructions, no calls, no branches
 CARGO_INCREMENTAL=0 cargo rustc -p bench -- -Ztime-passes            # where compile time goes
 # per-query self time: -Zself-profile=<dir> -Zself-profile-events=default,args, then `summarize summarize <dir>/*.mm_profdata`
