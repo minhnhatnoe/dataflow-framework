@@ -21,7 +21,7 @@
 //!    `TypeId` (`identity`, `table`). That gives, for every edge
 //!    `(parent, dependency)`, whether this is the edge that *first* reaches
 //!    the dependency (`Edge::FIRST`), and which components each storage
-//!    subtree holds (`Plan::holds`).
+//!    subtree covers (`Plan::range_of`).
 //! 2. **States tree** (`storage`, types via `generic_const_exprs`).
 //!    `Tree<R, C>` holds a component `C` and, for each of its subscriptions,
 //!    either the subtree of that dependency (if this edge is the first one

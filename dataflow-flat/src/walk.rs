@@ -136,7 +136,7 @@ where
     C::Deps: GatherInputs<R, (Node<R, DepsDone<R, C>>, T)>,
 {
     type Out = Done<R, C>;
-    type After = (Done<R, C>, T);
+    type After = (Node<R, Done<R, C>>, T);
     #[inline(always)]
     fn walk<'a>(&mut self, ctx: T::Refs<'a>) -> Self::Out {
         // Upstream first; first-edge dependencies come back by value, the

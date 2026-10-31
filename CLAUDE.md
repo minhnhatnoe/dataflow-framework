@@ -41,7 +41,7 @@ scripts/bench.sh [layers] [wide]       # robust benchmark: pinned, warm-up, 11 a
 | `dataflow-flat/src/plan.rs` | The compile-time plan: the const dependency walk (`visit`, `Upstream`), `Plan` (`TypeId`s by index, first parents and subtree ends as indices), `Planned`, `Edge`, and the `plan_trace` test |
 | `dataflow-flat/src/identity.rs`, `table.rs` | Component identity: `At::INDEX` (position of a component in a root's plan), `Hashed` (name hash used only as a probe start), the open-addressing `Table` confirmed by `TypeId ==` |
 | `dataflow-flat/src/storage.rs` | The typed states tree: `Tree`, `MaskN`/`StoredN` (only first-edge entries are stored), `DepStorage`, `Placed` |
-| `dataflow-flat/src/lookup.rs` | Finished outputs and lookups: `Done`, `Node` (a finished tuple node as a context entry), `Span` (plan range of a finished piece), `Select`/`Get`, `Top`/`TopHolds`, `Context`, `Find`, `GatherInputs` |
+| `dataflow-flat/src/lookup.rs` | Finished outputs and lookups: `Done`, `Node` (a finished tuple node as a context entry), `Span` (plan range of a finished piece), `Select`/`Get`, `Context` (also the span of its head entry), `TopHolds`, `Find`, `GatherInputs` |
 | `dataflow-flat/src/walk.rs` | The fold (`Walk`: `Out`, `After`, `walk`, `after` per piece) and the `Root` bound |
 | `dataflow-flat/src/build.rs`, `pipeline.rs` | `Configs` (keyed by `TypeId`) and `ConstructPass` (configs, order); `Pipeline` |
 | `dataflow-flat/tests/` | `runtime.rs` (run/drop/by-value guarantees), `graphs.rs` (lifecycle on diamond and example graphs, Send, panics, alignment), `order.rs` (execution order), `generic_user.rs` (one-bound generic code), `wide.rs` (lifecycle and values for 22 and 100 subscriptions) |

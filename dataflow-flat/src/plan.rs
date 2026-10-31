@@ -3,8 +3,8 @@
 //! The run needs one kind of fact: for every edge `parent -> dependency`,
 //! whether this is where the depth-first walk from the root *first* reaches
 //! the dependency ([`Edge::FIRST`]). Each component is stored (and later run)
-//! at that edge only. The plan also answers "does the storage subtree of `top`
-//! hold `id`?" ([`Plan::holds`]), which steers the input lookups.
+//! at that edge only. The plan also gives the range of plan indices each
+//! storage subtree covers ([`Plan::range_of`]), which steers the input lookups.
 //!
 //! The plan is computed by running the depth-first walk itself inside constant
 //! evaluation ([`visit`]): visiting a component records it, with the component
@@ -242,13 +242,6 @@ impl Plan {
     pub(crate) const fn range_of(&self, i: usize) -> (usize, usize) {
         (i, self.end[i] as usize)
     }
-
-    /// Does the storage subtree of entry `top` hold entry `i`? Equivalently:
-    /// is `top` on the first-parent chain of `i` (inclusive)?
-    #[cfg(test)]
-    pub(crate) const fn holds(&self, top: usize, i: usize) -> bool {
-        top <= i && i < self.end[top] as usize
-    }
 }
 
 /// A component that can be the root of a plan, evaluated once per root type.
@@ -377,15 +370,19 @@ mod trace {
         edge!(Tokenize, Source, "Tokenize", "Source", true);
         edge!(Len<Tokenize>, Tokenize, "Len<Tok>", "Tokenize", false);
 
-        // `holds`: the storage subtree of Report holds TopWords..Source and
-        // Longest, but not Len<Tokenize> or App.
+        // The storage subtree of Report holds TopWords..Source and Longest, but
+        // not Len<Tokenize> or App.
         let at = |id: TypeId| plan.ids[..plan.len].iter().position(|x| *x == id).unwrap();
         let (report, source) = (at(TypeId::of::<Report>()), at(TypeId::of::<Source>()));
-        assert!(plan.holds(report, source));
-        assert!(plan.holds(report, at(TypeId::of::<Longest>())));
-        assert!(!plan.holds(report, at(TypeId::of::<Len<Tokenize>>())));
-        assert!(!plan.holds(report, at(TypeId::of::<App>())));
-        assert!(plan.holds(at(TypeId::of::<Tokenize>()), source));
+        let holds = |top: usize, i: usize| {
+            let (lo, hi) = plan.range_of(top);
+            lo <= i && i < hi
+        };
+        assert!(holds(report, source));
+        assert!(holds(report, at(TypeId::of::<Longest>())));
+        assert!(!holds(report, at(TypeId::of::<Len<Tokenize>>())));
+        assert!(!holds(report, at(TypeId::of::<App>())));
+        assert!(holds(at(TypeId::of::<Tokenize>()), source));
         // A type that is not in the plan is not found.
         assert!(!plan.contains(TypeId::of::<u8>()));
         assert!(plan.contains(TypeId::of::<Longest>()));

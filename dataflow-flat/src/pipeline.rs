@@ -1,7 +1,5 @@
 //! The user-facing pipeline: build once, run many times.
 
-use std::marker::PhantomData;
-
 use crate::build::{BuildError, Configs, ConstructPass};
 use crate::walk::Root;
 
@@ -24,7 +22,6 @@ use crate::walk::Root;
 pub struct Pipeline<A: Root> {
     states: A::States,
     order: Vec<&'static str>,
-    _root: PhantomData<A>,
 }
 
 impl<A: Root> Pipeline<A> {
@@ -44,7 +41,7 @@ impl<A: Root> Pipeline<A> {
 
         let mut pass = ConstructPass { configs: configs.map, order: Vec::new() };
         let states = A::make(&mut pass);
-        Ok(Pipeline { states, order: pass.order, _root: PhantomData })
+        Ok(Pipeline { states, order: pass.order })
     }
 
     /// Update every component once, in the documented order, and return the

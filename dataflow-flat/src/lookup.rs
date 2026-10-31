@@ -113,10 +113,6 @@ span_impl!(A B C);
 span_impl!(A B C D);
 span_impl!(A B C D E);
 
-const fn plan_position<R: Planned, H: Component>() -> usize {
-    At::<R, H>::INDEX
-}
-
 // ---------------------------------------------------------------------------
 // Get: inside one finished piece
 // ---------------------------------------------------------------------------
@@ -136,7 +132,7 @@ macro_rules! select_impl {
     ($($g:ident $i:tt)+) => {
         impl<R: Planned, H: Component, $($g: Span<R>),+> Select<R, H> for ($($g,)+) {
             const POS: usize = {
-                let h = plan_position::<R, H>();
+                let h = At::<R, H>::INDEX;
                 $(if <$g as Span<R>>::LO <= h && h < <$g as Span<R>>::HI { $i } else)+
                 { panic!("component not in this node") }
             };
@@ -207,55 +203,36 @@ get_impl!((A B C D E) 4 E);
 // Context
 // ---------------------------------------------------------------------------
 
-/// The span of the head entry of a context; empty for `()`.
-#[doc(hidden)]
-pub trait Top {
-    const LO: usize;
-    const HI: usize;
-}
-impl Top for () {
-    const LO: usize = EMPTY_LO;
-    const HI: usize = 0;
-}
-impl<R: Planned, C: Placed<R>, B> Top for (Done<R, C>, B) {
-    const LO: usize = <Done<R, C> as Span<R>>::LO;
-    const HI: usize = <Done<R, C> as Span<R>>::HI;
-}
-impl<R: Planned, X: Span<R>, B> Top for (Node<R, X>, B) {
-    const LO: usize = <X as Span<R>>::LO;
-    const HI: usize = <X as Span<R>>::HI;
-}
-
 /// Does the head of context `L` hold `H`? Picks the branch of `Find`.
 #[doc(hidden)]
 pub struct TopHolds<R, L, H>(PhantomData<(R, L, H)>);
-impl<R: Planned, L: Top, H: Component> TopHolds<R, L, H> {
+impl<R: Planned, L: Context, H: Component> TopHolds<R, L, H> {
     pub const YES: bool = {
-        let h = plan_position::<R, H>();
+        let h = At::<R, H>::INDEX;
         L::LO <= h && h < L::HI
     };
 }
 
-/// A type-level list of finished pieces; its value is references.
+/// A type-level list of finished pieces; its value is references. `LO..HI` is
+/// the span of the head entry (empty for `()`).
 #[doc(hidden)]
-pub trait Context: Top + 'static {
+pub trait Context: 'static {
+    const LO: usize;
+    const HI: usize;
     type Refs<'a>: Copy;
     /// `Refs` is covariant, but the compiler can't see through the GAT.
     fn shorten<'s, 'a: 's>(r: Self::Refs<'a>) -> Self::Refs<'s>;
 }
 impl Context for () {
+    const LO: usize = EMPTY_LO;
+    const HI: usize = 0;
     type Refs<'a> = ();
     #[inline(always)]
     fn shorten<'s, 'a: 's>(_: ()) {}
 }
-impl<R: Planned, C: Placed<R>, T: Context> Context for (Done<R, C>, T) {
-    type Refs<'a> = (&'a Done<R, C>, T::Refs<'a>);
-    #[inline(always)]
-    fn shorten<'s, 'a: 's>(r: Self::Refs<'a>) -> Self::Refs<'s> {
-        (r.0, T::shorten(r.1))
-    }
-}
 impl<R: Planned, X: Span<R> + 'static, T: Context> Context for (Node<R, X>, T) {
+    const LO: usize = <X as Span<R>>::LO;
+    const HI: usize = <X as Span<R>>::HI;
     type Refs<'a> = (&'a X, T::Refs<'a>);
     #[inline(always)]
     fn shorten<'s, 'a: 's>(r: Self::Refs<'a>) -> Self::Refs<'s> {
@@ -273,17 +250,7 @@ impl<R: Planned, X: Span<R> + 'static, T: Context> Context for (Node<R, X>, T) {
 pub trait Find<R, H: Component, const HERE: bool>: Context {
     fn find<'a>(r: Self::Refs<'a>) -> &'a H::Output;
 }
-/// In a finished subtree.
-impl<R: Planned, H: Component, C: Placed<R>, T: Context> Find<R, H, true> for (Done<R, C>, T)
-where
-    Done<R, C>: Select<R, H> + Get<R, H, { <Done<R, C> as Select<R, H>>::POS }>,
-{
-    #[inline(always)]
-    fn find<'a>(r: Self::Refs<'a>) -> &'a H::Output {
-        r.0.get()
-    }
-}
-/// In a finished node.
+/// In a finished node or subtree (a context entry is always a `Node`).
 impl<R: Planned, H: Component, X: Span<R> + 'static, T: Context> Find<R, H, true> for (Node<R, X>, T)
 where
     X: Select<R, H> + Get<R, H, { <X as Select<R, H>>::POS }>,
@@ -294,15 +261,6 @@ where
     }
 }
 /// Further along the context.
-impl<R: Planned, H: Component, C: Placed<R>, T: Context> Find<R, H, false> for (Done<R, C>, T)
-where
-    T: Find<R, H, { TopHolds::<R, T, H>::YES }>,
-{
-    #[inline(always)]
-    fn find<'a>(r: Self::Refs<'a>) -> &'a H::Output {
-        T::find(r.1)
-    }
-}
 impl<R: Planned, H: Component, X: Span<R> + 'static, T: Context> Find<R, H, false> for (Node<R, X>, T)
 where
     T: Find<R, H, { TopHolds::<R, T, H>::YES }>,

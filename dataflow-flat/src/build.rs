@@ -66,10 +66,7 @@ pub struct BuildError {
 
 impl fmt::Display for BuildError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if !self.unused.is_empty() {
-            writeln!(f, "config supplied for components not in the graph: {}", self.unused.join(", "))?;
-        }
-        Ok(())
+        writeln!(f, "config supplied for components not in the graph: {}", self.unused.join(", "))
     }
 }
 
