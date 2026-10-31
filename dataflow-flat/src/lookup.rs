@@ -3,23 +3,26 @@
 //! `run` is a fold: walking a subtree returns its outputs by value as a
 //! [`Done`]. A later component reads the outputs of finished ones through a
 //! *context* ([`Context`]): a type-level list of finished pieces whose value
-//! is a tuple of shared references into the enclosing stack frames.
+//! is a tuple of shared references into the enclosing stack frames. A piece is
+//! one finished component with its subtree ([`Done`]) or one finished node of a
+//! subscription tree ([`Node`]), so the context grows with the *depth* of the
+//! subscription tree, not with the number of subscriptions.
 //!
-//! Lookups are monomorphized, not searched. The plan decides, at every step,
-//! whether the wanted component is in the head of a list or further on, and the
-//! decision is a const parameter of the trait (`HERE`), so each step is one
+//! Lookups are monomorphized, not searched. Every finished piece covers a
+//! contiguous range of the plan ([`Span`]), so the plan decides, at every step,
+//! which entry holds the wanted component (`HERE` for a context, [`Select`] for
+//! a piece). The decision is a const parameter of the trait, so each step is one
 //! function with one impl per answer, and there are no steps for paths not
 //! taken. After inlining, an input is a field access at a known path.
 //!
-//! * [`Get`] finds a component's output inside one finished piece
-//!   (`Done` or a tuple of them).
+//! * [`Get`] finds a component's output inside one finished piece.
 //! * [`Find`] finds it in a context.
-//! * [`GatherInputs`] does that for every entry of a dependency list.
+//! * [`GatherInputs`] does that for every entry of a subscription tree.
 
 use std::marker::PhantomData;
 
 use crate::component::{Component, DepList};
-use crate::plan::{Described, Planned, ROOT};
+use crate::plan::{Described, Planned};
 use crate::storage::{DepsDone, Placed};
 
 // ---------------------------------------------------------------------------
@@ -43,103 +46,202 @@ impl<R: Planned, C: Placed<R>> Done<R, C> {
     }
 }
 
-/// The component being walked, whose dependencies are finished but not yet
-/// wrapped in a `Done`. As a context entry its value is a reference to the
-/// tuple of its finished dependencies.
+/// A context entry for a finished node of a subscription tree (a tuple of
+/// [`Done`]s, `()`s and finished child nodes). The value is a reference to it.
+/// The node of the component being walked, whose own `Done` does not exist yet,
+/// is such an entry too.
 #[doc(hidden)]
-pub struct Pending<R, C>(PhantomData<(R, C)>);
+pub struct Node<R, X>(PhantomData<(R, X)>);
 
 // ---------------------------------------------------------------------------
-// Which way to go
+// Spans: which part of the plan a finished piece covers
 // ---------------------------------------------------------------------------
 
-/// The id of the component at the head of a tuple of finished pieces (storage
-/// tuples and contexts alike); `NO_TOP` for `()` heads and the end.
-#[doc(hidden)]
-pub trait Top {
-    const ID: u64;
-}
-const NO_TOP: u64 = ROOT;
-impl Top for () {
-    const ID: u64 = NO_TOP;
-}
-impl<B> Top for ((), B) {
-    const ID: u64 = NO_TOP;
-}
-impl<R: Planned, C: Placed<R>, B> Top for (Done<R, C>, B) {
-    const ID: u64 = <C as Described>::ID;
-}
-impl<R: Planned, C: Component, B> Top for (Pending<R, C>, B) {
-    const ID: u64 = <C as Described>::ID;
+const EMPTY_LO: usize = usize::MAX;
+
+const fn min_all(xs: &[usize]) -> usize {
+    let mut m = usize::MAX;
+    let mut i = 0;
+    while i < xs.len() {
+        if xs[i] < m {
+            m = xs[i];
+        }
+        i += 1;
+    }
+    m
 }
 
-/// Does the head of tuple `L` hold `H`? Picks the branch of `Get`/`Find`.
-#[doc(hidden)]
-pub struct TopHolds<R, L, H>(PhantomData<(R, L, H)>);
-impl<R: Planned, L: Top, H: Component> TopHolds<R, L, H> {
-    pub const YES: bool = L::ID != NO_TOP && R::PLAN.holds(L::ID, <H as Described>::ID);
+const fn max_all(xs: &[usize]) -> usize {
+    let mut m = 0;
+    let mut i = 0;
+    while i < xs.len() {
+        if xs[i] > m {
+            m = xs[i];
+        }
+        i += 1;
+    }
+    m
 }
 
-/// Is component `C` the component `H`? Picks the branch of `Get` at a node.
+/// The plan indices `LO..HI` covered by the components stored in a finished
+/// piece. The components stored under one node are consecutive in first-reached
+/// order (each stored subtree is followed directly by the next one), so a piece
+/// covers one contiguous range; an empty piece has `LO > HI`.
 #[doc(hidden)]
-pub struct IsSame<C, H>(PhantomData<(C, H)>);
-impl<C: Component, H: Component> IsSame<C, H> {
-    pub const YES: bool = <C as Described>::ID == <H as Described>::ID;
+pub trait Span<R> {
+    const LO: usize;
+    const HI: usize;
+}
+impl<R> Span<R> for () {
+    const LO: usize = EMPTY_LO;
+    const HI: usize = 0;
+}
+impl<R: Planned, C: Placed<R>> Span<R> for Done<R, C> {
+    const LO: usize = R::PLAN.range_of(<C as Described>::ID).0;
+    const HI: usize = R::PLAN.range_of(<C as Described>::ID).1;
+}
+
+macro_rules! span_impl {
+    ($($g:ident)+) => {
+        impl<R, $($g: Span<R>),+> Span<R> for ($($g,)+) {
+            const LO: usize = min_all(&[$(<$g as Span<R>>::LO),+]);
+            const HI: usize = max_all(&[$(<$g as Span<R>>::HI),+]);
+        }
+    };
+}
+span_impl!(A);
+span_impl!(A B);
+span_impl!(A B C);
+span_impl!(A B C D);
+span_impl!(A B C D K0 K1 K2 K3);
+
+const fn plan_position<R: Planned, H: Component>() -> usize {
+    R::PLAN.position(<H as Described>::ID)
 }
 
 // ---------------------------------------------------------------------------
 // Get: inside one finished piece
 // ---------------------------------------------------------------------------
 
-/// `H`'s output inside this finished storage. `HERE` says whether `H` is this
-/// node (or the head of this tuple) rather than further on.
+/// Which part of a finished piece holds `H`: for a [`Done`], 0 if it is the
+/// component itself and 1 if it is among its dependencies; for a tuple node,
+/// the index of the field (entry or child) that holds it.
 #[doc(hidden)]
-pub trait Get<R, H: Component, const HERE: bool> {
+pub trait Select<R, H: Component> {
+    const POS: usize;
+}
+impl<R: Planned, C: Placed<R>, H: Component> Select<R, H> for Done<R, C> {
+    const POS: usize = if <C as Described>::ID == <H as Described>::ID { 0 } else { 1 };
+}
+
+macro_rules! select_impl {
+    ($($g:ident $i:tt)+) => {
+        impl<R: Planned, H: Component, $($g: Span<R>),+> Select<R, H> for ($($g,)+) {
+            const POS: usize = {
+                let h = plan_position::<R, H>();
+                $(if <$g as Span<R>>::LO <= h && h < <$g as Span<R>>::HI { $i } else)+
+                { panic!("component not in this node") }
+            };
+        }
+    };
+}
+select_impl!(A 0);
+select_impl!(A 0 B 1);
+select_impl!(A 0 B 1 C 2);
+select_impl!(A 0 B 1 C 2 D 3);
+select_impl!(A 0 B 1 C 2 D 3 K0 4 K1 5 K2 6 K3 7);
+
+/// `H`'s output inside this finished piece, which holds it at position `P`
+/// (see [`Select`]).
+#[doc(hidden)]
+pub trait Get<R, H: Component, const P: usize> {
     fn get(&self) -> &H::Output;
 }
-/// The node itself.
-impl<R: Planned, H: Placed<R>> Get<R, H, true> for Done<R, H> {
+/// The component itself.
+impl<R: Planned, H: Placed<R>> Get<R, H, 0> for Done<R, H> {
     #[inline]
     fn get(&self) -> &H::Output {
         &self.out
     }
 }
-/// Somewhere in the node's dependencies.
-impl<R: Planned, C: Placed<R>, H: Component> Get<R, H, false> for Done<R, C>
+/// Somewhere in the component's dependencies.
+impl<R: Planned, C: Placed<R>, H: Component> Get<R, H, 1> for Done<R, C>
 where
-    DepsDone<R, C>: Top + Get<R, H, { TopHolds::<R, DepsDone<R, C>, H>::YES }>,
+    DepsDone<R, C>: Select<R, H> + Get<R, H, { <DepsDone<R, C> as Select<R, H>>::POS }>,
 {
     #[inline]
     fn get(&self) -> &H::Output {
         self.deps.get()
     }
 }
-/// In the head of a tuple.
-impl<R: Planned, H: Component, C: Placed<R>, B> Get<R, H, true> for (Done<R, C>, B)
-where
-    Done<R, C>: Get<R, H, { IsSame::<C, H>::YES }>,
-{
-    #[inline]
-    fn get(&self) -> &H::Output {
-        self.0.get()
-    }
+
+/// In field `$k` (of type `$s`) of a tuple node.
+macro_rules! get_impl {
+    (($($g:ident)+) $k:tt $s:ident) => {
+        impl<R: Planned, H: Component, $($g: Span<R>),+> Get<R, H, $k> for ($($g,)+)
+        where
+            $s: Select<R, H> + Get<R, H, { <$s as Select<R, H>>::POS }>,
+        {
+            #[inline]
+            fn get(&self) -> &H::Output {
+                self.$k.get()
+            }
+        }
+    };
 }
-/// Past the head of a tuple.
-impl<R: Planned, H: Component, A, B: Top> Get<R, H, false> for (A, B)
-where
-    B: Get<R, H, { TopHolds::<R, B, H>::YES }>,
-{
-    #[inline]
-    fn get(&self) -> &H::Output {
-        self.1.get()
-    }
-}
+get_impl!((A) 0 A);
+get_impl!((A B) 0 A);
+get_impl!((A B) 1 B);
+get_impl!((A B C) 0 A);
+get_impl!((A B C) 1 B);
+get_impl!((A B C) 2 C);
+get_impl!((A B C D) 0 A);
+get_impl!((A B C D) 1 B);
+get_impl!((A B C D) 2 C);
+get_impl!((A B C D) 3 D);
+get_impl!((A B C D K0 K1 K2 K3) 0 A);
+get_impl!((A B C D K0 K1 K2 K3) 1 B);
+get_impl!((A B C D K0 K1 K2 K3) 2 C);
+get_impl!((A B C D K0 K1 K2 K3) 3 D);
+get_impl!((A B C D K0 K1 K2 K3) 4 K0);
+get_impl!((A B C D K0 K1 K2 K3) 5 K1);
+get_impl!((A B C D K0 K1 K2 K3) 6 K2);
+get_impl!((A B C D K0 K1 K2 K3) 7 K3);
 
 // ---------------------------------------------------------------------------
 // Context
 // ---------------------------------------------------------------------------
 
-/// A type-level list of finished storage pieces; its value is references.
+/// The span of the head entry of a context; empty for `()`.
+#[doc(hidden)]
+pub trait Top {
+    const LO: usize;
+    const HI: usize;
+}
+impl Top for () {
+    const LO: usize = EMPTY_LO;
+    const HI: usize = 0;
+}
+impl<R: Planned, C: Placed<R>, B> Top for (Done<R, C>, B) {
+    const LO: usize = <Done<R, C> as Span<R>>::LO;
+    const HI: usize = <Done<R, C> as Span<R>>::HI;
+}
+impl<R: Planned, X: Span<R>, B> Top for (Node<R, X>, B) {
+    const LO: usize = <X as Span<R>>::LO;
+    const HI: usize = <X as Span<R>>::HI;
+}
+
+/// Does the head of context `L` hold `H`? Picks the branch of `Find`.
+#[doc(hidden)]
+pub struct TopHolds<R, L, H>(PhantomData<(R, L, H)>);
+impl<R: Planned, L: Top, H: Component> TopHolds<R, L, H> {
+    pub const YES: bool = {
+        let h = plan_position::<R, H>();
+        L::LO <= h && h < L::HI
+    };
+}
+
+/// A type-level list of finished pieces; its value is references.
 #[doc(hidden)]
 pub trait Context: Top + 'static {
     type Refs<'a>: Copy;
@@ -158,8 +260,8 @@ impl<R: Planned, C: Placed<R>, T: Context> Context for (Done<R, C>, T) {
         (r.0, T::shorten(r.1))
     }
 }
-impl<R: Planned, C: Placed<R>, T: Context> Context for (Pending<R, C>, T) {
-    type Refs<'a> = (&'a DepsDone<R, C>, T::Refs<'a>);
+impl<R: Planned, X: Span<R> + 'static, T: Context> Context for (Node<R, X>, T) {
+    type Refs<'a> = (&'a X, T::Refs<'a>);
     #[inline]
     fn shorten<'s, 'a: 's>(r: Self::Refs<'a>) -> Self::Refs<'s> {
         (r.0, T::shorten(r.1))
@@ -179,17 +281,17 @@ pub trait Find<R, H: Component, const HERE: bool>: Context {
 /// In a finished subtree.
 impl<R: Planned, H: Component, C: Placed<R>, T: Context> Find<R, H, true> for (Done<R, C>, T)
 where
-    Done<R, C>: Get<R, H, { IsSame::<C, H>::YES }>,
+    Done<R, C>: Select<R, H> + Get<R, H, { <Done<R, C> as Select<R, H>>::POS }>,
 {
     #[inline]
     fn find<'a>(r: Self::Refs<'a>) -> &'a H::Output {
         r.0.get()
     }
 }
-/// In the finished dependencies of the component being walked.
-impl<R: Planned, H: Component, C: Placed<R>, T: Context> Find<R, H, true> for (Pending<R, C>, T)
+/// In a finished node.
+impl<R: Planned, H: Component, X: Span<R> + 'static, T: Context> Find<R, H, true> for (Node<R, X>, T)
 where
-    DepsDone<R, C>: Top + Get<R, H, { TopHolds::<R, DepsDone<R, C>, H>::YES }>,
+    X: Select<R, H> + Get<R, H, { <X as Select<R, H>>::POS }>,
 {
     #[inline]
     fn find<'a>(r: Self::Refs<'a>) -> &'a H::Output {
@@ -206,7 +308,7 @@ where
         T::find(r.1)
     }
 }
-impl<R: Planned, H: Component, C: Placed<R>, T: Context> Find<R, H, false> for (Pending<R, C>, T)
+impl<R: Planned, H: Component, X: Span<R> + 'static, T: Context> Find<R, H, false> for (Node<R, X>, T)
 where
     T: Find<R, H, { TopHolds::<R, T, H>::YES }>,
 {
@@ -221,7 +323,7 @@ where
 // ---------------------------------------------------------------------------
 
 /// The references `update` receives, found in context `T`: one `Find` per
-/// entry of the dependency list.
+/// entry of the subscription tree.
 #[doc(hidden)]
 pub trait GatherInputs<R, T: Context>: DepList {
     fn gather<'a>(r: T::Refs<'a>) -> Self::Inputs<'a>;
@@ -230,12 +332,26 @@ impl<R, T: Context> GatherInputs<R, T> for () {
     #[inline]
     fn gather<'a>(_: T::Refs<'a>) -> Self::Inputs<'a> {}
 }
-impl<R: Planned, T: Context, H: Component, Rest: GatherInputs<R, T>> GatherInputs<R, T> for (H, Rest)
-where
-    T: Find<R, H, { TopHolds::<R, T, H>::YES }>,
-{
-    #[inline]
-    fn gather<'a>(r: T::Refs<'a>) -> Self::Inputs<'a> {
-        (T::find(r), Rest::gather(r))
-    }
+
+macro_rules! gather_impl {
+    ([$($E:ident)+] [$($K:ident)*]) => {
+        impl<R: Planned, T: Context, $($E: Component,)+ $($K: GatherInputs<R, T>,)*> GatherInputs<R, T>
+            for ($($E,)+ $($K,)*)
+        where
+            $(T: Find<R, $E, { TopHolds::<R, T, $E>::YES }>,)+
+        {
+            #[inline]
+            fn gather<'a>(r: T::Refs<'a>) -> Self::Inputs<'a> {
+                (
+                    $(<T as Find<R, $E, { TopHolds::<R, T, $E>::YES }>>::find(r),)+
+                    $(<$K as GatherInputs<R, T>>::gather(r),)*
+                )
+            }
+        }
+    };
 }
+gather_impl!([A][]);
+gather_impl!([A B][]);
+gather_impl!([A B C][]);
+gather_impl!([A B C D][]);
+gather_impl!([A B C D][K0 K1 K2 K3]);

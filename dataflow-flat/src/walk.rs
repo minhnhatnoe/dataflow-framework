@@ -3,12 +3,18 @@
 
 use crate::build::ConstructPass;
 use crate::component::Component;
-use crate::lookup::{Context, Done, GatherInputs, Pending};
+use crate::lookup::{Context, Done, GatherInputs, Node, Span};
 use crate::plan::{Planned, Upstream};
 use crate::storage::{DepsDone, DepsStored, If, Placed, Slot, Tree};
 
 /// Run a (piece of a) states tree under context `T`, producing its finished
 /// outputs by value.
+///
+/// A piece is a [`Tree`], a node of a subscription tree's storage (a tuple), or
+/// `()` (a non-first edge or an unused child). Walking a piece also says what a
+/// later sibling sees: `After`, the context extended by this piece's finished
+/// outputs (one entry per piece: a `Done` for a tree, a `Node` for a tuple,
+/// nothing for `()`).
 ///
 /// The `on_unimplemented` text is what users see when a type that is not a
 /// `Component` (or generic code without the `Root` bound) is used as the root
@@ -19,39 +25,116 @@ use crate::storage::{DepsDone, DepsStored, If, Placed, Slot, Tree};
     label = "`{R}` must implement `Component`; in generic code add the bound `{R}: Root`"
 )]
 pub trait Walk<R, T: Context> {
-    type Out: 'static;
+    type Out: Span<R> + 'static;
+    type After: Context;
     fn walk<'a>(&mut self, ctx: T::Refs<'a>) -> Self::Out;
+    /// The context seen by a later sibling, given this piece's outputs.
+    fn after<'a, 'b>(out: &'b Self::Out, ctx: T::Refs<'a>) -> <Self::After as Context>::Refs<'b>
+    where
+        'a: 'b;
 }
 
-/// The end of a dependency list.
+/// Nothing stored: a non-first edge or an unused child.
 impl<R, T: Context> Walk<R, T> for () {
     type Out = ();
+    type After = T;
     #[inline]
     fn walk<'a>(&mut self, _: T::Refs<'a>) {}
-}
-
-/// A non-first edge: nothing stored, nothing to run.
-impl<R, T: Context, B: Walk<R, T>> Walk<R, T> for ((), B) {
-    type Out = ((), B::Out);
     #[inline]
-    fn walk<'a>(&mut self, ctx: T::Refs<'a>) -> Self::Out {
-        ((), self.1.walk(ctx))
+    fn after<'a, 'b>(_: &'b (), ctx: T::Refs<'a>) -> T::Refs<'b>
+    where
+        'a: 'b,
+    {
+        T::shorten(ctx)
     }
 }
 
-/// A first edge: run the subtree, then the later siblings with it in context.
-impl<R: Planned, C: Placed<R>, T: Context, B> Walk<R, T> for (Tree<R, C>, B)
+/// Walk fields one after another, each seeing what the previous ones finished.
+/// The last field's `after` is not needed and not computed.
+macro_rules! walk_seq {
+    ($self:ident, $ctx:ident;) => {};
+    ($self:ident, $ctx:ident; $E:ident $e:ident $i:tt $Ci:ty;) => {
+        let $e = $self.$i.walk($ctx);
+    };
+    ($self:ident, $ctx:ident; $E:ident $e:ident $i:tt $Ci:ty; $($rest:tt)+) => {
+        let $e = $self.$i.walk($ctx);
+        let $ctx = <$E as Walk<R, $Ci>>::after(&$e, $ctx);
+        walk_seq!($self, $ctx; $($rest)+);
+    };
+}
+
+/// A leaf node: its entries in order, each seeing the finished ones before it.
+/// Each entry is `E e i O Cin Cout`: type, variable, field, output type, the
+/// context it is walked under, and the context it leaves.
+macro_rules! walk_leaf {
+    ($($E:ident $e:ident $i:tt $O:ident $Ci:ident $Co:ident;)+) => {
+        impl<R: Planned, T: Context, $($E, $O: Span<R> + 'static, $Co: Context),+> Walk<R, T> for ($($E,)+)
+        where
+            $($E: Walk<R, $Ci, Out = $O, After = $Co>,)+
+        {
+            type Out = ($($O,)+);
+            type After = (Node<R, ($($O,)+)>, T);
+            #[inline]
+            fn walk<'a>(&mut self, ctx: T::Refs<'a>) -> Self::Out {
+                walk_seq!(self, ctx; $($E $e $i $Ci;)+);
+                ($($e,)+)
+            }
+            #[inline]
+            fn after<'a, 'b>(out: &'b Self::Out, ctx: T::Refs<'a>) -> <Self::After as Context>::Refs<'b>
+            where
+                'a: 'b,
+            {
+                (out, T::shorten(ctx))
+            }
+        }
+    };
+}
+walk_leaf!(A a 0 OA T XA;);
+walk_leaf!(A a 0 OA T XA; B b 1 OB XA XB;);
+walk_leaf!(A a 0 OA T XA; B b 1 OB XA XB; C c 2 OC XB XC;);
+walk_leaf!(A a 0 OA T XA; B b 1 OB XA XB; C c 2 OC XB XC; D d 3 OD XC XD;);
+
+/// An inner node: its four entries (each seeing the finished ones before it),
+/// then its four children. The children see the finished entries as one
+/// context entry, and each finished child as one more.
+impl<R: Planned, T: Context,
+     A, OA: Span<R> + 'static, XA: Context,
+     B, OB: Span<R> + 'static, XB: Context,
+     C, OC: Span<R> + 'static, XC: Context,
+     D, OD: Span<R> + 'static, XD: Context,
+     K0, OK0: Span<R> + 'static, Y1: Context,
+     K1, OK1: Span<R> + 'static, Y2: Context,
+     K2, OK2: Span<R> + 'static, Y3: Context,
+     K3, OK3: Span<R> + 'static, Y4: Context>
+    Walk<R, T> for (A, B, C, D, K0, K1, K2, K3)
 where
-    Tree<R, C>: Walk<R, T, Out = Done<R, C>>,
-    B: Walk<R, (Done<R, C>, T)>,
+    A: Walk<R, T, Out = OA, After = XA>,
+    B: Walk<R, XA, Out = OB, After = XB>,
+    C: Walk<R, XB, Out = OC, After = XC>,
+    D: Walk<R, XC, Out = OD, After = XD>,
+    K0: Walk<R, (Node<R, (OA, OB, OC, OD)>, T), Out = OK0, After = Y1>,
+    K1: Walk<R, Y1, Out = OK1, After = Y2>,
+    K2: Walk<R, Y2, Out = OK2, After = Y3>,
+    K3: Walk<R, Y3, Out = OK3, After = Y4>,
 {
-    type Out = (Done<R, C>, <B as Walk<R, (Done<R, C>, T)>>::Out);
+    type Out = (OA, OB, OC, OD, OK0, OK1, OK2, OK3);
+    type After = (Node<R, Self::Out>, T);
     #[inline]
     fn walk<'a>(&mut self, ctx: T::Refs<'a>) -> Self::Out {
-        let a = self.0.walk(ctx);
-        // Later siblings may read anything first reached inside `a`.
-        let b = self.1.walk((&a, T::shorten(ctx)));
-        (a, b)
+        let outer = ctx;
+        walk_seq!(self, ctx; A a 0 T; B b 1 XA; C c 2 XB; D d 3 XC;);
+        let entries = (a, b, c, d);
+        let ctx = (&entries, T::shorten(outer));
+        walk_seq!(self, ctx; K0 k0 4 (Node<R, (OA, OB, OC, OD)>, T); K1 k1 5 Y1; K2 k2 6 Y2; K3 k3 7 Y3;);
+        let (a, b, c, d) = entries;
+        (a, b, c, d, k0, k1, k2, k3)
+    }
+    #[inline]
+    fn after<'a, 'b>(out: &'b Self::Out, ctx: T::Refs<'a>) -> <Self::After as Context>::Refs<'b>
+    where
+        'a: 'b,
+    {
+        (out, T::shorten(ctx))
     }
 }
 
@@ -59,9 +142,10 @@ where
 impl<R: Planned, C: Placed<R>, T: Context> Walk<R, T> for Tree<R, C>
 where
     DepsStored<R, C>: Walk<R, T, Out = DepsDone<R, C>>,
-    C::Deps: GatherInputs<R, (Pending<R, C>, T)>,
+    C::Deps: GatherInputs<R, (Node<R, DepsDone<R, C>>, T)>,
 {
     type Out = Done<R, C>;
+    type After = (Done<R, C>, T);
     #[inline]
     fn walk<'a>(&mut self, ctx: T::Refs<'a>) -> Self::Out {
         // Upstream first; first-edge dependencies come back by value, the
@@ -69,10 +153,17 @@ where
         let deps = self.deps.walk(ctx);
         let out = {
             let refs = (&deps, T::shorten(ctx));
-            let inputs = <C::Deps as GatherInputs<R, (Pending<R, C>, T)>>::gather(refs);
+            let inputs = <C::Deps as GatherInputs<R, (Node<R, DepsDone<R, C>>, T)>>::gather(refs);
             self.node.update(C::input(inputs))
         };
         Done { deps, out }
+    }
+    #[inline]
+    fn after<'a, 'b>(out: &'b Self::Out, ctx: T::Refs<'a>) -> <Self::After as Context>::Refs<'b>
+    where
+        'a: 'b,
+    {
+        (out, T::shorten(ctx))
     }
 }
 

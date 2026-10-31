@@ -1,4 +1,5 @@
-# usage: python3 bench/gen_bench.py full|flat|hand [layers=20]  -> writes bench/src/main.rs
+# usage: python3 bench/gen_bench.py full|flat|hand [layers=20] [wide]  -> writes bench/src/main.rs
+# `wide`: the root subscribes to the last 5 layers (100 components at 20 wide) instead of the last one.
 # `flat` generates one root component `App` (subscribes to the last layer, returns the XOR
 # checksum as u64); `full` also generates the hand-written baseline and asserts the results agree.
 import random, sys
@@ -9,7 +10,8 @@ deps = {}
 for l in range(L):
     for w in range(W):
         deps[(l,w)] = [] if l == 0 else [(l-1, d) for d in random.sample(range(W), D)]
-roots = [(L-1, w) for w in range(W)]
+WIDE = len(sys.argv) > 3 and sys.argv[3] == "wide"
+roots = [(l, w) for l in range(L - (5 if WIDE else 1), L) for w in range(W)]
 order, seen = [], set()
 def visit(n):
     if n in seen: return

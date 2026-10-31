@@ -18,6 +18,63 @@ use syn::{
     Token, Type,
 };
 
+/// The shape of a subscription tree: `()`, a leaf of 1 to 4 entries, or an
+/// inner node of 4 entries and 4 children. Entries are indices into the list of
+/// unique subscriptions, in listing order: a node's entries, then its children
+/// from left to right.
+enum Shape {
+    Empty,
+    Leaf(Vec<usize>),
+    Inner(Vec<usize>, Vec<Shape>),
+}
+
+impl Shape {
+    /// Capacity of a tree of depth `d` (a leaf has depth 1).
+    fn capacity(d: u32) -> usize {
+        if d <= 1 { 4 } else { 4 + 4 * Self::capacity(d - 1) }
+    }
+
+    /// Fill nodes left to right in the shallowest tree that holds everything.
+    fn build(items: &[usize]) -> Shape {
+        if items.is_empty() {
+            return Shape::Empty;
+        }
+        if items.len() <= 4 {
+            return Shape::Leaf(items.to_vec());
+        }
+        let mut depth = 2;
+        while Self::capacity(depth) < items.len() {
+            depth += 1;
+        }
+        let child_cap = Self::capacity(depth - 1);
+        let mut rest = &items[4..];
+        let mut children = Vec::new();
+        for _ in 0..4 {
+            let n = rest.len().min(child_cap);
+            children.push(Shape::build(&rest[..n]));
+            rest = &rest[n..];
+        }
+        assert!(rest.is_empty());
+        Shape::Inner(items[..4].to_vec(), children)
+    }
+
+    /// The tuple type (or the matching pattern), with `leaf(i)` for entry `i`.
+    fn render(&self, leaf: &dyn Fn(usize) -> TokenStream2) -> TokenStream2 {
+        match self {
+            Shape::Empty => quote!(()),
+            Shape::Leaf(es) => {
+                let es = es.iter().map(|&i| leaf(i));
+                quote!((#(#es,)*))
+            }
+            Shape::Inner(es, children) => {
+                let es = es.iter().map(|&i| leaf(i));
+                let cs = children.iter().map(|c| c.render(leaf));
+                quote!((#(#es,)* #(#cs,)*))
+            }
+        }
+    }
+}
+
 struct Subscription {
     name: Ident,
     ty: Type,
@@ -105,14 +162,19 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         slot_of.push(i);
     }
     let vars: Vec<Ident> = (0..unique.len()).map(|i| format_ident!("__dep{}", i)).collect();
-    let deps_ty = unique
-        .iter()
-        .rev()
-        .fold(quote!(()), |acc, (_, t)| quote!((#t, #acc)));
-    let deps_pat = vars
-        .iter()
-        .rev()
-        .fold(quote!(()), |acc, v| quote!((#v, #acc)));
+    // The subscriptions as a tree of tuples (see `DepList`): at most 4 entries
+    // in a leaf, 4 entries and 4 children in an inner node.
+    let all: Vec<usize> = (0..unique.len()).collect();
+    let tree = Shape::build(&all);
+    let types: Vec<&Type> = unique.iter().map(|(_, t)| *t).collect();
+    let deps_ty = tree.render(&|i| {
+        let t = types[i];
+        quote!(#t)
+    });
+    let deps_pat = tree.render(&|i| {
+        let v = &vars[i];
+        quote!(#v)
+    });
     let field_vars: Vec<&Ident> = slot_of.iter().map(|&i| &vars[i]).collect();
 
     // Type parameters may not appear in any field; a marker keeps them used.

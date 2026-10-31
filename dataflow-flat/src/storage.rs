@@ -6,7 +6,7 @@ use std::any::type_name;
 
 use crate::build::ConstructPass;
 use crate::component::{Component, ComponentSubscription, DepList};
-use crate::lookup::Done;
+use crate::lookup::{Done, Span};
 use crate::plan::{Edge, Planned};
 
 /// `C: Placed<R>`: the storage of `C`'s dependencies exists for root `R`. This
@@ -57,7 +57,7 @@ pub trait Slot<R: Planned, H: Component> {
     /// The stored subtree.
     type Out;
     /// What walking `Out` produces.
-    type Fin: 'static;
+    type Fin: Span<R> + 'static;
     fn make(pass: &mut ConstructPass) -> Self::Out;
 }
 impl<R: Planned, H: Placed<R>> Slot<R, H> for If<true> {
@@ -73,14 +73,14 @@ impl<R: Planned, H: Component> Slot<R, H> for If<false> {
     fn make(_: &mut ConstructPass) {}
 }
 
-/// The storage of a dependency list `Self` owned by component `P`, as a nested
-/// tuple that mirrors the list.
+/// The storage of a subscription tree `Self` owned by component `P`, as nested
+/// tuples that mirror the tree.
 #[doc(hidden)]
 pub trait DepStorage<R: Planned, P: Component>: DepList {
     /// The stored subtrees.
     type S;
     /// The finished outputs of `S`.
-    type O: 'static;
+    type O: Span<R> + 'static;
     fn make(pass: &mut ConstructPass) -> Self::S;
 }
 impl<R: Planned, P: Component> DepStorage<R, P> for () {
@@ -88,15 +88,27 @@ impl<R: Planned, P: Component> DepStorage<R, P> for () {
     type O = ();
     fn make(_: &mut ConstructPass) {}
 }
-impl<R: Planned, P: Component, H: Placed<R>, T: DepStorage<R, P>> DepStorage<R, P> for (H, T)
-where
-    If<{ Edge::<R, P, H>::FIRST }>: Slot<R, H>,
-{
-    type S = (<If<{ Edge::<R, P, H>::FIRST }> as Slot<R, H>>::Out, T::S);
-    type O = (<If<{ Edge::<R, P, H>::FIRST }> as Slot<R, H>>::Fin, T::O);
-    fn make(pass: &mut ConstructPass) -> Self::S {
-        let first = <If<{ Edge::<R, P, H>::FIRST }> as Slot<R, H>>::make(pass);
-        let rest = T::make(pass);
-        (first, rest)
-    }
+
+macro_rules! dep_storage_impl {
+    ([$($E:ident)+] [$($K:ident)*]) => {
+        impl<R: Planned, P: Component, $($E: Placed<R>,)+ $($K: DepStorage<R, P>,)*> DepStorage<R, P>
+            for ($($E,)+ $($K,)*)
+        where
+            $(If<{ Edge::<R, P, $E>::FIRST }>: Slot<R, $E>,)+
+        {
+            type S = ($(<If<{ Edge::<R, P, $E>::FIRST }> as Slot<R, $E>>::Out,)+ $($K::S,)*);
+            type O = ($(<If<{ Edge::<R, P, $E>::FIRST }> as Slot<R, $E>>::Fin,)+ $($K::O,)*);
+            fn make(pass: &mut ConstructPass) -> Self::S {
+                (
+                    $(<If<{ Edge::<R, P, $E>::FIRST }> as Slot<R, $E>>::make(pass),)+
+                    $($K::make(pass),)*
+                )
+            }
+        }
+    };
 }
+dep_storage_impl!([A][]);
+dep_storage_impl!([A B][]);
+dep_storage_impl!([A B C][]);
+dep_storage_impl!([A B C D][]);
+dep_storage_impl!([A B C D][K0 K1 K2 K3]);

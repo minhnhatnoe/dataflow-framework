@@ -18,12 +18,13 @@
 //! A dependency cycle is found before the walk runs: the walk's trait bounds
 //! (`C::Deps: const Upstream`, which mention the dependencies' bounds in turn)
 //! are proved by the trait solver, and on a cyclic graph the proof needs itself.
-//! That is reported as "overflow evaluating the requirement `(B, ()): Upstream`",
+//! That is reported as "overflow evaluating the requirement `(B,): Upstream`",
 //! naming a component of the cycle. (The walk would also catch it, as a const
 //! panic, but never gets to run.) The proof is as deep as the graph, so graphs
 //! deeper than about 17 layers of 4 dependencies make the compiler's recursion
 //! limit (128) a cost, and much deeper ones need `#![recursion_limit = "256"]`
-//! in the user's crate.
+//! in the user's crate. A component's own subscriptions add little depth: they
+//! are a tree of 4-ary nodes, so 100 subscriptions are 4 levels.
 //!
 //! Every constant is a plain value with no references inside. (A graph of
 //! nested `&'static` constants is hashed as a tree by incremental
@@ -106,21 +107,24 @@ where
     plan.end[i] = plan.len as u32;
 }
 
-/// The walk ([`visit`]) of every entry of a dependency list.
+/// The walk ([`visit`]) of every entry of a subscription tree (see
+/// [`DepList`](crate::DepList)): one impl per node shape.
 ///
-/// A cons list `(A, (B, (C, ())))` is handled up to 8 entries at a time: one
-/// impl per list length below 8, and one for longer lists that takes 8 entries
-/// and recurses on the rest. Impls that peeled one entry
-/// each would make the trait solver's proof for a component as deep as its
-/// dependency list is long, and the proof for the root as deep as the graph
-/// times that: the compiler's recursion limit (128) would then cap graphs at
-/// about 20 layers of 4 dependencies.
+/// A node is handled in one impl: its (up to 4) entries, then its (up to 4)
+/// children. The trait solver's proof for a component is as deep as its tree
+/// (about log4 of its number of subscriptions), and the proof for the root as
+/// deep as the graph times that.
 #[doc(hidden)]
 pub const trait Upstream {
-    /// Visit each entry, in listing order, as reached from `parent`.
+    /// Visit each entry, in listing order, as reached from `parent`. Called on
+    /// the top node of a component's tree: rejects a dependency listed twice,
+    /// also when the two are in different nodes.
     fn visit_all(plan: &mut Plan, parent: u64);
-    /// Does the list contain the component with this id?
-    fn lists(id: u64) -> bool;
+    /// Visit the entries of this node and then its children (no duplicate check).
+    fn visit_rec(plan: &mut Plan, parent: u64);
+    /// Append the ids of this node's entries and then its children's to the
+    /// plan's scratch list, in listing order.
+    fn collect_ids(plan: &mut Plan);
 }
 
 const fn assert_distinct(ids: &[u64]) {
@@ -137,77 +141,71 @@ const fn assert_distinct(ids: &[u64]) {
     }
 }
 
-const fn contains(ids: &[u64], id: u64) -> bool {
-    let mut i = 0;
-    while i < ids.len() {
-        if ids[i] == id {
-            return true;
-        }
-        i += 1;
-    }
-    false
+const impl Upstream for () {
+    fn visit_all(_: &mut Plan, _: u64) {}
+    fn visit_rec(_: &mut Plan, _: u64) {}
+    fn collect_ids(_: &mut Plan) {}
 }
 
-/// `nest!(A B C; T)` is the type `(A, (B, (C, T)))`.
-macro_rules! nest {
-    (; $tail:ty) => { $tail };
-    ($h:ident $($rest:ident)*; $tail:ty) => { ($h, nest!($($rest)*; $tail)) };
-}
-
-macro_rules! upstream_impls {
-    // Lists of exactly these entries.
-    (exact $($h:ident)+) => {
-        const impl<$($h: Component),+> Upstream for nest!($($h)+; ())
+macro_rules! upstream_leaf {
+    ($($h:ident)+) => {
+        const impl<$($h: Component),+> Upstream for ($($h,)+)
         where $($h::Deps: [const] Upstream,)+
         {
             fn visit_all(plan: &mut Plan, parent: u64) {
                 assert_distinct(&[$(<$h as Described>::ID),+]);
                 $(visit::<$h>(plan, parent);)+
             }
-            fn lists(id: u64) -> bool {
-                contains(&[$(<$h as Described>::ID),+], id)
-            }
-        }
-    };
-    // Lists of at least these entries, followed by `T`.
-    (more $($h:ident)+) => {
-        const impl<$($h: Component,)+ T: [const] Upstream> Upstream for nest!($($h)+; T)
-        where $($h::Deps: [const] Upstream,)+
-        {
-            fn visit_all(plan: &mut Plan, parent: u64) {
-                let ids = [$(<$h as Described>::ID),+];
-                assert_distinct(&ids);
-                let mut i = 0;
-                while i < ids.len() {
-                    if T::lists(ids[i]) {
-                        panic!("a component lists the same dependency twice");
-                    }
-                    i += 1;
-                }
+            fn visit_rec(plan: &mut Plan, parent: u64) {
                 $(visit::<$h>(plan, parent);)+
-                T::visit_all(plan, parent);
             }
-            fn lists(id: u64) -> bool {
-                contains(&[$(<$h as Described>::ID),+], id) || T::lists(id)
+            fn collect_ids(plan: &mut Plan) {
+                $(plan.push_id(<$h as Described>::ID);)+
             }
         }
     };
 }
+upstream_leaf!(A0);
+upstream_leaf!(A0 A1);
+upstream_leaf!(A0 A1 A2);
+upstream_leaf!(A0 A1 A2 A3);
 
-const impl Upstream for () {
-    fn visit_all(_: &mut Plan, _: u64) {}
-    fn lists(_: u64) -> bool {
-        false
+const impl<A0: Component, A1: Component, A2: Component, A3: Component,
+           K0: [const] Upstream, K1: [const] Upstream, K2: [const] Upstream, K3: [const] Upstream>
+    Upstream for (A0, A1, A2, A3, K0, K1, K2, K3)
+where
+    A0::Deps: [const] Upstream,
+    A1::Deps: [const] Upstream,
+    A2::Deps: [const] Upstream,
+    A3::Deps: [const] Upstream,
+{
+    fn visit_all(plan: &mut Plan, parent: u64) {
+        plan.scratch_len = 0;
+        <Self as Upstream>::collect_ids(plan);
+        assert_distinct(plan.scratch_ids());
+        <Self as Upstream>::visit_rec(plan, parent);
+    }
+    fn visit_rec(plan: &mut Plan, parent: u64) {
+        visit::<A0>(plan, parent);
+        visit::<A1>(plan, parent);
+        visit::<A2>(plan, parent);
+        visit::<A3>(plan, parent);
+        K0::visit_rec(plan, parent);
+        K1::visit_rec(plan, parent);
+        K2::visit_rec(plan, parent);
+        K3::visit_rec(plan, parent);
+    }
+    fn collect_ids(plan: &mut Plan) {
+        plan.push_id(<A0 as Described>::ID);
+        plan.push_id(<A1 as Described>::ID);
+        plan.push_id(<A2 as Described>::ID);
+        plan.push_id(<A3 as Described>::ID);
+        K0::collect_ids(plan);
+        K1::collect_ids(plan);
+        K2::collect_ids(plan);
+        K3::collect_ids(plan);
     }
 }
-upstream_impls!(exact A0);
-upstream_impls!(exact A0 A1);
-upstream_impls!(exact A0 A1 A2);
-upstream_impls!(exact A0 A1 A2 A3);
-upstream_impls!(exact A0 A1 A2 A3 A4);
-upstream_impls!(exact A0 A1 A2 A3 A4 A5);
-upstream_impls!(exact A0 A1 A2 A3 A4 A5 A6);
-upstream_impls!(more A0 A1 A2 A3 A4 A5 A6 A7);
 
 // ---------------------------------------------------------------------------
 // The plan of a root
@@ -227,6 +225,9 @@ pub struct Plan {
     /// storage subtree of entry `i` is the range `i..end[i]`. 0 while the
     /// walk is still inside entry `i`.
     end: [u32; MAX_COMPONENTS],
+    /// The ids listed by the component whose duplicate check is running.
+    scratch: [u64; MAX_COMPONENTS],
+    scratch_len: usize,
 }
 
 impl Plan {
@@ -241,9 +242,23 @@ impl Plan {
             index: [0; SET_CAP],
             first_parent: [0; MAX_COMPONENTS],
             end: [0; MAX_COMPONENTS],
+            scratch: [0; MAX_COMPONENTS],
+            scratch_len: 0,
         };
         visit::<A>(&mut plan, ROOT);
         plan
+    }
+
+    const fn push_id(&mut self, id: u64) {
+        if self.scratch_len == MAX_COMPONENTS {
+            panic!("too many subscriptions in one component");
+        }
+        self.scratch[self.scratch_len] = id;
+        self.scratch_len += 1;
+    }
+
+    const fn scratch_ids(&self) -> &[u64] {
+        self.scratch.split_at(self.scratch_len).0
     }
 
     const fn slot(&self, id: u64) -> usize {
@@ -265,8 +280,20 @@ impl Plan {
         self.first_parent[self.index_of(id)]
     }
 
+    /// The storage subtree of `id` as the range `lo..hi` of plan indices.
+    pub(crate) const fn range_of(&self, id: u64) -> (usize, usize) {
+        let i = self.index_of(id);
+        (i, self.end[i] as usize)
+    }
+
+    /// Plan index of `id`.
+    pub(crate) const fn position(&self, id: u64) -> usize {
+        self.index_of(id)
+    }
+
     /// Does the storage subtree of `top` hold `id`? Equivalently: is `top` on
     /// the first-parent chain of `id` (inclusive)?
+    #[cfg(test)]
     pub(crate) const fn holds(&self, top: u64, id: u64) -> bool {
         let t = self.index_of(top);
         let i = self.index_of(id);

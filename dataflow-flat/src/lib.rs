@@ -33,15 +33,17 @@
 //!    `Done { deps, out }`: the outputs by value.
 //! 4. **Lookups** (`lookup`). A later component reads the outputs of finished
 //!    ones through a *context*, a type-level list of shared references to
-//!    finished subtrees living in the enclosing stack frames. An input is
-//!    found by following the plan: at each entry a constant says whether the
-//!    entry holds the wanted component, and the impl for that constant is
+//!    finished subtrees living in the enclosing stack frames (a finished
+//!    component with its subtree, or a whole finished node of a subscription
+//!    tree, as one entry). An input is found by following the plan: every
+//!    finished piece covers a contiguous range of the plan, a constant says
+//!    which entry holds the wanted component, and the impl for that constant is
 //!    chosen. Every step is a separately monomorphized function and there are
 //!    no steps for paths not taken, so after inlining a `run` is straight-line
 //!    code, as for a hand-written struct.
 //!
-//! The rest: `component` (the traits and the dependency list the derive
-//! builds), `build` (configs and the two startup passes, the only runtime
+//! The rest: `component` (the traits and the subscription tree the derive
+//! builds: tuples of up to 4 entries, 4 entries and 4 children when wider), `build` (configs and the two startup passes, the only runtime
 //! lookups) and `pipeline`.
 //!
 //! The price of being `unsafe`-free is that this needs `generic_const_exprs`,
@@ -62,7 +64,7 @@
 //!
 //! Checked at compile time: every dependency is a component, `update`'s inputs
 //! match the upstream outputs, the graph is acyclic (a cycle is E0275 "overflow
-//! evaluating the requirement `(B, ()): Upstream`", naming a component of the
+//! evaluating the requirement `(B,): Upstream`", naming a component of the
 //! cycle), no component lists the same dependency twice, and the graph fits
 //! [`MAX_COMPONENTS`].
 //! Checked when the pipeline is built: no config is supplied for a component

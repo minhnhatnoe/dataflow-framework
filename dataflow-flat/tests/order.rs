@@ -120,3 +120,79 @@ fn construction_order_is_the_run_order() {
     let built: Vec<&str> = p.order().iter().map(|n| n.rsplit("::").next().unwrap()).collect();
     assert_eq!(built, ran);
 }
+
+// ---------------------------------------------------------------------------
+// Wide components. Subscriptions of a component are stored as a tree of
+// tuples (4 entries and up to 4 children per node), so these cross node
+// boundaries: 5 (one inner node), 16, 17, and 22 subscriptions. Listing order
+// must hold across node boundaries.
+// ---------------------------------------------------------------------------
+mod wide {
+    use super::*;
+    comp!(X0, []);
+    comp!(X1, []);
+    comp!(X2, []);
+    comp!(X3, []);
+    comp!(X4, []);
+    comp!(X5, []);
+    comp!(X6, []);
+    comp!(X7, []);
+    comp!(X8, []);
+    comp!(X9, []);
+    comp!(X10, []);
+    comp!(X11, []);
+    comp!(X12, []);
+    comp!(X13, []);
+    comp!(X14, []);
+    comp!(X15, []);
+    comp!(X16, []);
+    comp!(X17, []);
+    comp!(X18, []);
+    comp!(X19, []);
+    comp!(X20, []);
+    // Mid is listed early but subscribes to X20, which a wide root lists last.
+    comp!(Mid, [x: X20]);
+    comp!(W5, [f0: X0, f1: X1, f2: X2, f3: X3, f4: X4]);
+    comp!(W16, [f0: X0, f1: X1, f2: X2, f3: X3, f4: X4, f5: X5, f6: X6, f7: X7, f8: X8, f9: X9, f10: X10, f11: X11, f12: X12, f13: X13, f14: X14, f15: X15]);
+    comp!(W17, [f0: X0, f1: X1, f2: X2, f3: X3, f4: X4, f5: X5, f6: X6, f7: X7, f8: X8, f9: X9, f10: X10, f11: X11, f12: X12, f13: X13, f14: X14, f15: X15, f16: X16]);
+    comp!(W21, [f0: X0, f1: X1, f2: Mid, f3: X2, f4: X3, f5: X4, f6: X5, f7: X6, f8: X7, f9: X8, f10: X9, f11: X10, f12: X11, f13: X12, f14: X13, f15: X14, f16: X15, f17: X16, f18: X17, f19: X18, f20: X19]);
+    comp!(W22, [f0: X0, f1: Mid, f2: X1, f3: X2, f4: X3, f5: X4, f6: X5, f7: X6, f8: X7, f9: X8, f10: X9, f11: X10, f12: X11, f13: X12, f14: X13, f15: X14, f16: X15, f17: X16, f18: X17, f19: X18, f20: X19, f21: X20]);
+}
+
+#[test]
+fn wide_components_keep_listing_order_across_nodes() {
+    use wide::*;
+    let _g = SERIAL.lock().unwrap();
+    take();
+    fn xs(r: std::ops::Range<usize>) -> Vec<String> {
+        r.map(|i| format!("X{i}")).collect()
+    }
+    macro_rules! check {
+        ($root:ty, $name:literal, $expected:expr) => {{
+            let mut p = Pipeline::<$root>::build(Configs::new()).unwrap();
+            for _ in 0..2 {
+                p.run();
+                let ran: Vec<String> = take().into_iter().map(String::from).collect();
+                let mut want: Vec<String> = $expected;
+                want.push($name.to_string());
+                assert_eq!(ran, want, $name);
+            }
+            let built: Vec<String> = p.order().iter().map(|n| n.rsplit("::").next().unwrap().to_string()).collect();
+            let mut want: Vec<String> = $expected;
+            want.push($name.to_string());
+            assert_eq!(built, want, "construction order of {}", $name);
+        }};
+    }
+    check!(W5, "W5", xs(0..5));
+    check!(W16, "W16", xs(0..16));
+    check!(W17, "W17", xs(0..17));
+    // W21 = [X0, X1, Mid, X2..X19]: Mid's block is X20, Mid.
+    let mut w21 = xs(0..2);
+    w21.extend(["X20".to_string(), "Mid".to_string()]);
+    w21.extend(xs(2..20));
+    check!(W21, "W21", w21.clone());
+    // W22 = [X0, Mid, X1..X20]: X20 is listed last but runs inside Mid's block.
+    let mut w22 = vec!["X0".to_string(), "X20".to_string(), "Mid".to_string()];
+    w22.extend(xs(1..20));
+    check!(W22, "W22", w22.clone());
+}
