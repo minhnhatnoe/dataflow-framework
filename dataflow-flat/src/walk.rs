@@ -38,9 +38,9 @@ pub trait Walk<R, T: Context> {
 impl<R, T: Context> Walk<R, T> for () {
     type Out = ();
     type After = T;
-    #[inline]
+    #[inline(always)]
     fn walk<'a>(&mut self, _: T::Refs<'a>) {}
-    #[inline]
+    #[inline(always)]
     fn after<'a, 'b>(_: &'b (), ctx: T::Refs<'a>) -> T::Refs<'b>
     where
         'a: 'b,
@@ -74,12 +74,12 @@ macro_rules! walk_leaf {
         {
             type Out = ($($O,)+);
             type After = (Node<R, ($($O,)+)>, T);
-            #[inline]
+            #[inline(always)]
             fn walk<'a>(&mut self, ctx: T::Refs<'a>) -> Self::Out {
                 walk_seq!(self, ctx; $($E $e $i $Ci;)+);
                 ($($e,)+)
             }
-            #[inline]
+            #[inline(always)]
             fn after<'a, 'b>(out: &'b Self::Out, ctx: T::Refs<'a>) -> <Self::After as Context>::Refs<'b>
             where
                 'a: 'b,
@@ -113,12 +113,12 @@ where
 {
     type Out = (OP, OK0, OK1, OK2, OK3);
     type After = (Node<R, Self::Out>, T);
-    #[inline]
+    #[inline(always)]
     fn walk<'a>(&mut self, ctx: T::Refs<'a>) -> Self::Out {
         walk_seq!(self, ctx; P p 0 T; K0 k0 1 Y1; K1 k1 2 Y2; K2 k2 3 Y3; K3 k3 4 Y4;);
         (p, k0, k1, k2, k3)
     }
-    #[inline]
+    #[inline(always)]
     fn after<'a, 'b>(out: &'b Self::Out, ctx: T::Refs<'a>) -> <Self::After as Context>::Refs<'b>
     where
         'a: 'b,
@@ -135,7 +135,7 @@ where
 {
     type Out = Done<R, C>;
     type After = (Done<R, C>, T);
-    #[inline]
+    #[inline(always)]
     fn walk<'a>(&mut self, ctx: T::Refs<'a>) -> Self::Out {
         // Upstream first; first-edge dependencies come back by value, the
         // others are already finished somewhere in `ctx`.
@@ -147,7 +147,7 @@ where
         };
         Done { deps, out }
     }
-    #[inline]
+    #[inline(always)]
     fn after<'a, 'b>(out: &'b Self::Out, ctx: T::Refs<'a>) -> <Self::After as Context>::Refs<'b>
     where
         'a: 'b,
@@ -198,7 +198,7 @@ where
     fn in_plan(id: u64) -> bool {
         <A as Planned>::PLAN.contains(id)
     }
-    #[inline]
+    #[inline(always)]
     fn run(states: &mut Tree<A, A>) -> A::Output {
         states.walk(()).into_output()
     }

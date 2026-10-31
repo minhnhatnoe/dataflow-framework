@@ -38,7 +38,7 @@ pub struct Done<R: Planned, C: Placed<R>> {
 
 impl<R: Planned, C: Placed<R>> Done<R, C> {
     /// Keep the output, drop the finished outputs of the dependencies.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn into_output(self) -> C::Output {
         let Done { deps, out } = self;
         drop(deps);
@@ -159,7 +159,7 @@ pub trait Get<R, H: Component, const P: usize> {
 }
 /// The component itself.
 impl<R: Planned, H: Placed<R>> Get<R, H, 0> for Done<R, H> {
-    #[inline]
+    #[inline(always)]
     fn get(&self) -> &H::Output {
         &self.out
     }
@@ -169,7 +169,7 @@ impl<R: Planned, C: Placed<R>, H: Component> Get<R, H, 1> for Done<R, C>
 where
     DepsDone<R, C>: Select<R, H> + Get<R, H, { <DepsDone<R, C> as Select<R, H>>::POS }>,
 {
-    #[inline]
+    #[inline(always)]
     fn get(&self) -> &H::Output {
         self.deps.get()
     }
@@ -182,7 +182,7 @@ macro_rules! get_impl {
         where
             $s: Select<R, H> + Get<R, H, { <$s as Select<R, H>>::POS }>,
         {
-            #[inline]
+            #[inline(always)]
             fn get(&self) -> &H::Output {
                 self.$k.get()
             }
@@ -247,19 +247,19 @@ pub trait Context: Top + 'static {
 }
 impl Context for () {
     type Refs<'a> = ();
-    #[inline]
+    #[inline(always)]
     fn shorten<'s, 'a: 's>(_: ()) {}
 }
 impl<R: Planned, C: Placed<R>, T: Context> Context for (Done<R, C>, T) {
     type Refs<'a> = (&'a Done<R, C>, T::Refs<'a>);
-    #[inline]
+    #[inline(always)]
     fn shorten<'s, 'a: 's>(r: Self::Refs<'a>) -> Self::Refs<'s> {
         (r.0, T::shorten(r.1))
     }
 }
 impl<R: Planned, X: Span<R> + 'static, T: Context> Context for (Node<R, X>, T) {
     type Refs<'a> = (&'a X, T::Refs<'a>);
-    #[inline]
+    #[inline(always)]
     fn shorten<'s, 'a: 's>(r: Self::Refs<'a>) -> Self::Refs<'s> {
         (r.0, T::shorten(r.1))
     }
@@ -280,7 +280,7 @@ impl<R: Planned, H: Component, C: Placed<R>, T: Context> Find<R, H, true> for (D
 where
     Done<R, C>: Select<R, H> + Get<R, H, { <Done<R, C> as Select<R, H>>::POS }>,
 {
-    #[inline]
+    #[inline(always)]
     fn find<'a>(r: Self::Refs<'a>) -> &'a H::Output {
         r.0.get()
     }
@@ -290,7 +290,7 @@ impl<R: Planned, H: Component, X: Span<R> + 'static, T: Context> Find<R, H, true
 where
     X: Select<R, H> + Get<R, H, { <X as Select<R, H>>::POS }>,
 {
-    #[inline]
+    #[inline(always)]
     fn find<'a>(r: Self::Refs<'a>) -> &'a H::Output {
         r.0.get()
     }
@@ -300,7 +300,7 @@ impl<R: Planned, H: Component, C: Placed<R>, T: Context> Find<R, H, false> for (
 where
     T: Find<R, H, { TopHolds::<R, T, H>::YES }>,
 {
-    #[inline]
+    #[inline(always)]
     fn find<'a>(r: Self::Refs<'a>) -> &'a H::Output {
         T::find(r.1)
     }
@@ -309,7 +309,7 @@ impl<R: Planned, H: Component, X: Span<R> + 'static, T: Context> Find<R, H, fals
 where
     T: Find<R, H, { TopHolds::<R, T, H>::YES }>,
 {
-    #[inline]
+    #[inline(always)]
     fn find<'a>(r: Self::Refs<'a>) -> &'a H::Output {
         T::find(r.1)
     }
@@ -326,7 +326,7 @@ pub trait GatherInputs<R, T: Context>: DepList {
     fn gather<'a>(r: T::Refs<'a>) -> Self::Inputs<'a>;
 }
 impl<R, T: Context> GatherInputs<R, T> for () {
-    #[inline]
+    #[inline(always)]
     fn gather<'a>(_: T::Refs<'a>) -> Self::Inputs<'a> {}
 }
 
@@ -337,7 +337,7 @@ macro_rules! gather_impl {
         where
             $(T: Find<R, $E, { TopHolds::<R, T, $E>::YES }>,)+
         {
-            #[inline]
+            #[inline(always)]
             fn gather<'a>(r: T::Refs<'a>) -> Self::Inputs<'a> {
                 (
                     $(<T as Find<R, $E, { TopHolds::<R, T, $E>::YES }>>::find(r),)+

@@ -50,7 +50,7 @@ impl<A: Root> Pipeline<A> {
 
     /// Update every component once, in the documented order, and return the
     /// root's output.
-    #[inline]
+    #[inline(always)]
     pub fn run(&mut self) -> A::Output {
         A::run(&mut self.states)
     }
