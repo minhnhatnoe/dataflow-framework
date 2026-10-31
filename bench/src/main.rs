@@ -7596,22 +7596,28 @@ impl Hand {
         0 ^ o_C19_0 ^ o_C19_1 ^ o_C19_2 ^ o_C19_3 ^ o_C19_4 ^ o_C19_5 ^ o_C19_6 ^ o_C19_7 ^ o_C19_8 ^ o_C19_9 ^ o_C19_10 ^ o_C19_11 ^ o_C19_12 ^ o_C19_13 ^ o_C19_14 ^ o_C19_15 ^ o_C19_16 ^ o_C19_17 ^ o_C19_18 ^ o_C19_19
     }
 }
-const RUNS: u32 = 200_000;
-fn ns(d: std::time::Duration) -> f64 { d.as_nanos() as f64 / RUNS as f64 }
+const WARMUP: u32 = 5_000; // untimed runs per side
+const RUNS: u32 = 50_000; // timed runs per side per round
+const ROUNDS: usize = 11; // timed rounds; the side that runs first alternates
+fn stats(v: &mut Vec<f64>) -> (f64, f64) {
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    (v[0], v[v.len() / 2])
+}
 #[inline(never)]
 fn run_flat(p: &mut dataflow_flat::Pipeline<flat::App>) -> u64 { p.run() }
 fn main() {
     let mut b = dataflow_flat::Pipeline::<flat::App>::build(dataflow_flat::Configs::new()).unwrap();
     let mut xb = 0;
-    let t = Instant::now(); for _ in 0..RUNS { xb = run_flat(&mut b); }
-    let el = t.elapsed();
-    black_box(xb);
-    println!("flat:         {:>6.0} ns/run  ({} components)", ns(el), b.len());
+    let mut tf: Vec<f64> = Vec::new();
+    for _ in 0..WARMUP { xb = run_flat(&mut b); }
     let mut h = Hand::new();
     let mut xh = 0;
-    let t = Instant::now(); for _ in 0..RUNS { xh = h.run(); }
-    let el = t.elapsed();
-    black_box(xh);
-    println!("hand-written: {:>6.0} ns/run", ns(el));
+    let mut th: Vec<f64> = Vec::new();
+    for _ in 0..WARMUP { xh = h.run(); }
+    for r in 0..ROUNDS { if r % 2 == 0 { { let t = Instant::now(); for _ in 0..RUNS { xb = run_flat(&mut b); } let el = t.elapsed(); black_box(xb); tf.push(el.as_nanos() as f64 / RUNS as f64); } { let t = Instant::now(); for _ in 0..RUNS { xh = h.run(); } let el = t.elapsed(); black_box(xh); th.push(el.as_nanos() as f64 / RUNS as f64); } } else { { let t = Instant::now(); for _ in 0..RUNS { xh = h.run(); } let el = t.elapsed(); black_box(xh); th.push(el.as_nanos() as f64 / RUNS as f64); } { let t = Instant::now(); for _ in 0..RUNS { xb = run_flat(&mut b); } let el = t.elapsed(); black_box(xb); tf.push(el.as_nanos() as f64 / RUNS as f64); } } }
+    let (mn, md) = stats(&mut tf);
+    println!("flat:         min {:>6.1}  median {:>6.1} ns/run  ({} components, {} rounds x {} runs)", mn, md, b.len(), ROUNDS, RUNS);
+    let (mn, md) = stats(&mut th);
+    println!("hand-written: min {:>6.1}  median {:>6.1} ns/run", mn, md);
     assert_eq!(xb, xh); println!("results agree");
 }

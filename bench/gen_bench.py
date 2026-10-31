@@ -85,21 +85,32 @@ if use_hand:
     for n in order:
         out.append(f"        let o_{name(n)} = self.c_{name(n)}.update({', '.join(f'&o_{name(d)}' for d in deps[n])});")
     out.append("        0" + "".join(f" ^ o_{name(r)}" for r in roots) + "\n    }\n}")
-out.append("const RUNS: u32 = 200_000;")
-out.append("fn ns(d: std::time::Duration) -> f64 { d.as_nanos() as f64 / RUNS as f64 }")
+out.append("""const WARMUP: u32 = 5_000; // untimed runs per side
+const RUNS: u32 = 50_000; // timed runs per side per round
+const ROUNDS: usize = 11; // timed rounds; the side that runs first alternates
+fn stats(v: &mut Vec<f64>) -> (f64, f64) {
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    (v[0], v[v.len() / 2])
+}""")
 body = ["fn main() {"]
 if use_flat: body.append("""    let mut b = dataflow_flat::Pipeline::<flat::App>::build(dataflow_flat::Configs::new()).unwrap();
     let mut xb = 0;
-    let t = Instant::now(); for _ in 0..RUNS { xb = run_flat(&mut b); }
-    let el = t.elapsed();
-    black_box(xb);
-    println!("flat:         {:>6.0} ns/run  ({} components)", ns(el), b.len());""")
+    let mut tf: Vec<f64> = Vec::new();
+    for _ in 0..WARMUP { xb = run_flat(&mut b); }""")
 if use_hand: body.append("""    let mut h = Hand::new();
     let mut xh = 0;
-    let t = Instant::now(); for _ in 0..RUNS { xh = h.run(); }
-    let el = t.elapsed();
-    black_box(xh);
-    println!("hand-written: {:>6.0} ns/run", ns(el));""")
+    let mut th: Vec<f64> = Vec::new();
+    for _ in 0..WARMUP { xh = h.run(); }""")
+blk_f = """{ let t = Instant::now(); for _ in 0..RUNS { xb = run_flat(&mut b); } let el = t.elapsed(); black_box(xb); tf.push(el.as_nanos() as f64 / RUNS as f64); }"""
+blk_h = """{ let t = Instant::now(); for _ in 0..RUNS { xh = h.run(); } let el = t.elapsed(); black_box(xh); th.push(el.as_nanos() as f64 / RUNS as f64); }"""
+if use_flat and use_hand:
+    body.append(f"    for r in 0..ROUNDS {{ if r % 2 == 0 {{ {blk_f} {blk_h} }} else {{ {blk_h} {blk_f} }} }}")
+elif use_flat: body.append(f"    for _ in 0..ROUNDS {{ {blk_f} }}")
+else: body.append(f"    for _ in 0..ROUNDS {{ {blk_h} }}")
+if use_flat: body.append("""    let (mn, md) = stats(&mut tf);
+    println!("flat:         min {:>6.1}  median {:>6.1} ns/run  ({} components, {} rounds x {} runs)", mn, md, b.len(), ROUNDS, RUNS);""")
+if use_hand: body.append("""    let (mn, md) = stats(&mut th);
+    println!("hand-written: min {:>6.1}  median {:>6.1} ns/run", mn, md);""")
 if use_flat and use_hand: body.append('    assert_eq!(xb, xh); println!("results agree");')
 body.append("}")
 if use_flat: out.append("#[inline(never)]\nfn run_flat(p: &mut dataflow_flat::Pipeline<flat::App>) -> u64 { p.run() }")
