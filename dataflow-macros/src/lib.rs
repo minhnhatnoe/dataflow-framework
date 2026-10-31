@@ -29,12 +29,9 @@ enum Shape {
 }
 
 impl Shape {
-    /// Capacity of a tree of depth `d` (a leaf has depth 0).
+    /// Capacity of a tree of depth `d` (a leaf has depth 0): 4 + 16 + ... + 4^(d+1) = (4^(d+2) - 4) / 3, i.e. 4, 20, 84, 340.
     fn capacity(d: u32) -> usize {
-        match d {
-            0 => 4,
-            _ => 4 + 4 * Self::capacity(d - 1),
-        }
+        (4usize.pow(d + 2) - 4) / 3
     }
 
     /// Fill nodes left to right in the shallowest tree that holds everything.
@@ -303,6 +300,7 @@ mod tests {
         assert_eq!(Shape::capacity(0), 4);
         assert_eq!(Shape::capacity(1), 20);
         assert_eq!(Shape::capacity(2), 84);
+        assert_eq!(Shape::capacity(3), 340);
     }
 
     #[test]
