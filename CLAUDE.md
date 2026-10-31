@@ -13,7 +13,6 @@ timeout 120 cargo test                           # plan assertions + runtime gua
 timeout 300 scripts/check_errors.sh              # or pass case names to run a subset
 timeout 120 cargo run -p example
 python3 bench/gen_bench.py full 20 && timeout 200 cargo run --release -p bench
-timeout 120 cargo test -p dataflow-flat --features cycle-diagnostics   # the feature is a no-op now (cycles are always diagnosed); kept so old commands work
 ```
 
 `bench` is excluded from default members because its release build takes about 5 s. `python3 bench/gen_bench.py <full|flat|hand> [layers] [wide]` (`wide`: the root subscribes to the last 5 layers, 100 components, to exercise a very wide subscription list) regenerates `bench/src/main.rs` (`flat` has only the framework side, `hand` only the baseline). Regenerate with `full 20` before committing; the committed file should be what the generator produces.

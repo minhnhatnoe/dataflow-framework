@@ -5,9 +5,3 @@ edition = "2021"
 
 [dependencies]
 dataflow-macros = { path = "../dataflow-macros" }
-
-[features]
-# No longer needed: a dependency cycle is always reported readably (E0275 naming
-# a component of the cycle). Kept so existing `--features cycle-diagnostics`
-# commands keep working.
-cycle-diagnostics = []
