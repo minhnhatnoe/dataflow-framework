@@ -29,7 +29,7 @@
 //! deeper than about 17 layers of 4 dependencies make the compiler's recursion
 //! limit (128) a cost, and much deeper ones need `#![recursion_limit = "256"]`
 //! in the user's crate. A component's own subscriptions add little depth: they
-//! are a tree of 4-ary nodes, so 100 subscriptions are 4 levels.
+//! are a tree of 8-ary nodes, so 100 subscriptions are 3 levels.
 //!
 //! Every constant is a plain value with no references inside. (A graph of
 //! nested `&'static` constants is hashed as a tree by incremental
@@ -88,10 +88,10 @@ where
 /// The walk ([`visit`]) of every entry of a subscription tree (see
 /// [`DepList`](crate::DepList)): one impl per node shape.
 ///
-/// A node is handled in one impl: its (up to 4) entries, then its (up to 4)
-/// children. The trait solver's proof for a component is as deep as its tree
-/// (about log4 of its number of subscriptions), and the proof for the root as
-/// deep as the graph times that.
+/// A leaf visits its (up to 7) entries; an inner node visits its 8 children.
+/// The trait solver's proof for a component is as deep as its tree (about log8
+/// of its number of subscriptions), and the proof for the root as deep as the
+/// graph times that.
 #[doc(hidden)]
 pub const trait Upstream {
     /// Visit each entry, in listing order, as reached from `parent`; then the
@@ -100,7 +100,7 @@ pub const trait Upstream {
 }
 
 macro_rules! upstream_leaf {
-    ($($h:ident $i:ident)*) => {
+    ([$($h:ident $i:ident)*]) => {
         #[allow(unused_variables)]
         const impl<$($h: Component, const $i: usize),*> Upstream for ($(Sub<$h, $i>,)*)
         where $($h::Deps: [const] Upstream,)*
@@ -111,33 +111,18 @@ macro_rules! upstream_leaf {
         }
     };
 }
-upstream_leaf!();
-upstream_leaf!(A0 I0);
-upstream_leaf!(A0 I0 A1 I1);
-upstream_leaf!(A0 I0 A1 I1 A2 I2);
-upstream_leaf!(A0 I0 A1 I1 A2 I2 A3 I3);
+dataflow_macros::leaf_shapes!(upstream_leaf);
 
-const impl<A0: Component, const I0: usize, A1: Component, const I1: usize,
-           A2: Component, const I2: usize, A3: Component, const I3: usize,
-           K0: [const] Upstream, K1: [const] Upstream, K2: [const] Upstream, K3: [const] Upstream>
-    Upstream for (Sub<A0, I0>, Sub<A1, I1>, Sub<A2, I2>, Sub<A3, I3>, K0, K1, K2, K3)
-where
-    A0::Deps: [const] Upstream,
-    A1::Deps: [const] Upstream,
-    A2::Deps: [const] Upstream,
-    A3::Deps: [const] Upstream,
-{
-    fn visit_all(plan: &mut Plan, parent: u32) {
-        visit::<A0>(plan, parent, I0 as u32);
-        visit::<A1>(plan, parent, I1 as u32);
-        visit::<A2>(plan, parent, I2 as u32);
-        visit::<A3>(plan, parent, I3 as u32);
-        K0::visit_all(plan, parent);
-        K1::visit_all(plan, parent);
-        K2::visit_all(plan, parent);
-        K3::visit_all(plan, parent);
-    }
+macro_rules! upstream_inner {
+    ([$($K:ident)*]) => {
+        const impl<$($K: [const] Upstream,)*> Upstream for ($($K,)*) {
+            fn visit_all(plan: &mut Plan, parent: u32) {
+                $($K::visit_all(plan, parent);)*
+            }
+        }
+    };
 }
+dataflow_macros::inner_shape!(upstream_inner);
 
 // ---------------------------------------------------------------------------
 // The plan of a root
@@ -370,8 +355,3 @@ mod trace {
         assert!(plan.contains(TypeId::of::<Longest>()));
     }
 }
-
-const _: () = assert!(
-    crate::ARITY == 4,
-    "the node-shape impls in this file are written for ARITY = 4; update them"
-);

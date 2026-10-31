@@ -47,7 +47,7 @@
 //!    code, as for a hand-written struct.
 //!
 //! The rest: `component` (the traits and the subscription tree the derive
-//! builds: tuples of up to 4 entries, 4 entries and 4 children when wider), `build` (configs and the two startup passes, the only runtime
+//! builds: tuples of up to 7 entries, exactly 8 children when wider), `build` (configs and the two startup passes, the only runtime
 //! lookups) and `pipeline`.
 //!
 //! The price of being `unsafe`-free is that this needs `generic_const_exprs`,
@@ -102,7 +102,7 @@ mod table;
 mod walk;
 
 pub use build::{BuildError, Configs};
-pub use component::{Component, ComponentSubscription, DepList, Sub, ARITY};
+pub use component::{Component, ComponentSubscription, DepList, Sub};
 pub use pipeline::Pipeline;
 pub use plan::MAX_COMPONENTS;
 pub use walk::Root;

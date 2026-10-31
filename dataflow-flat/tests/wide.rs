@@ -1,6 +1,7 @@
 //! Lifecycle and values for wide components (stored as a tree of tuples): a
 //! root with 100 subscriptions, and a 22-subscription component whose entries
-//! read each other's upstream across node boundaries.
+//! read each other's upstream across node boundaries, and components of 9 and 15
+//! subscriptions (an inner node with empty children).
 
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::Mutex;
@@ -182,7 +183,15 @@ leaf!(L99, 100);
 summing!(Mid, 1000, [a: L3, b: L40, c: L99]);
 summing!(Mid2, 5000, [a: L60, m: Mid, b: L1]);
 summing!(Root100, 0, [r0: L0, r1: L1, r2: L2, r3: L3, r4: L4, r5: L5, r6: L6, r7: L7, r8: L8, r9: L9, r10: L10, r11: L11, r12: L12, r13: L13, r14: L14, r15: L15, r16: L16, r17: L17, r18: L18, r19: L19, r20: L20, r21: L21, r22: L22, r23: L23, r24: L24, r25: L25, r26: L26, r27: L27, r28: L28, r29: L29, r30: L30, r31: L31, r32: L32, r33: L33, r34: L34, r35: L35, r36: L36, r37: L37, r38: L38, r39: L39, r40: L40, r41: L41, r42: L42, r43: L43, r44: L44, r45: L45, r46: L46, r47: L47, r48: L48, r49: L49, r50: L50, r51: L51, r52: L52, r53: L53, r54: L54, r55: L55, r56: L56, r57: L57, r58: L58, r59: L59, r60: L60, r61: L61, r62: L62, r63: L63, r64: L64, r65: L65, r66: L66, r67: L67, r68: L68, r69: L69, r70: L70, r71: L71, r72: L72, r73: L73, r74: L74, r75: L75, r76: L76, r77: L77, r78: L78, r79: L79, r80: L80, r81: L81, r82: L82, r83: L83, r84: L84, r85: L85, r86: L86, r87: L87, r88: L88, r89: L89, r90: L90, r91: L91, r92: L92, r93: L93, r94: L94, r95: L95, r96: L96, r97: L97, r98: L98, r99: L99]);
-summing!(Wide22, 7, [a: L0, m: Mid2, r1: L1, r2: L2, r3: L3, r4: L4, r5: L5, r6: L6, r7: L7, r8: L8, r9: L9, r10: L10, r11: L11, r12: L12, r13: L13, r14: L14, r15: L15, r16: L16, r17: L17, r18: L18, r19: L19, r20: L20]);
+// 22 unique subscriptions, fill-first: leaf 0 = indices 0..7, leaf 1 = 7..14,
+// leaf 2 = 14..21, leaf 3 = index 21. `m: Mid2` (leaf 0) reaches L1 and L3 first;
+// `r1: L1` is read in leaf 2 and `r3: L3` in leaf 3, so those inputs are found
+// in an earlier node of the same list.
+summing!(Wide22, 7, [a: L0, m: Mid2, r2: L2, r4: L4, r5: L5, r6: L6, r7: L7, r8: L8, r9: L9, r10: L10, r11: L11, r12: L12, r13: L13, r14: L14, r15: L15, r16: L16, r17: L17, r18: L18, r19: L19, r20: L20, r1: L1, r3: L3]);
+// 9 subscriptions: ((L0..L6), (L7, L8), (), (), (), (), (), ()).
+summing!(Nine, 0, [n0: L0, n1: L1, n2: L2, n3: L3, n4: L4, n5: L5, n6: L6, n7: L7, n8: L8]);
+// 15 subscriptions: ((L0..L6), (L7..L13), (L14), (), (), (), (), ()).
+summing!(Fifteen, 0, [f0: L0, f1: L1, f2: L2, f3: L3, f4: L4, f5: L5, f6: L6, f7: L7, f8: L8, f9: L9, f10: L10, f11: L11, f12: L12, f13: L13, f14: L14]);
 summing!(App, 0, [w: Wide22, x: Root100, m: Mid]);
 
 #[test]
@@ -211,7 +220,10 @@ fn entries_read_upstream_found_in_earlier_nodes() {
     assert_eq!(counts().0, 105);
     let mid: u64 = 1000 + 1 * 4 + 2 * 41 + 3 * 100;
     let mid2: u64 = 5000 + 61 + 2 * mid + 3 * 2;
-    let wide22: u64 = 7 + 1 + 2 * mid2 + (1..=20u64).map(|i| (i + 2) * (i + 1)).sum::<u64>();
+    // The values in field order of `Wide22`: L0, Mid2, then L2, L4..L20, L1, L3.
+    let mut vals = vec![1, mid2];
+    vals.extend([2u64, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 1, 3].iter().map(|i| i + 1));
+    let wide22: u64 = 7 + vals.iter().enumerate().map(|(k, v)| (k as u64 + 1) * v).sum::<u64>();
     let root100: u64 = (1..=100u64).map(|k| k * k).sum();
     let want = wide22 + 2 * root100 + 3 * mid;
     for run in 1..=2 {
@@ -220,4 +232,30 @@ fn entries_read_upstream_found_in_earlier_nodes() {
     }
     drop(p);
     assert_eq!(counts(), (105, 210, 105));
+}
+
+/// Inner nodes whose later children are empty (`()`): every component built,
+/// updated and dropped once, with the right inputs in the right fields.
+#[test]
+fn nine_and_fifteen_subscriptions() {
+    let _g = SERIAL.lock().unwrap();
+    reset();
+    let mut p = Pipeline::<Nine>::build(Configs::new()).unwrap();
+    assert_eq!(counts(), (10, 0, 0));
+    for run in 1..=2 {
+        assert_eq!(p.run(), (1..=9u64).map(|k| k * k).sum::<u64>());
+        assert_eq!(counts(), (10, 10 * run, 0));
+    }
+    drop(p);
+    assert_eq!(counts(), (10, 20, 10));
+
+    reset();
+    let mut p = Pipeline::<Fifteen>::build(Configs::new()).unwrap();
+    assert_eq!(counts(), (16, 0, 0));
+    for run in 1..=2 {
+        assert_eq!(p.run(), (1..=15u64).map(|k| k * k).sum::<u64>());
+        assert_eq!(counts(), (16, 16 * run, 0));
+    }
+    drop(p);
+    assert_eq!(counts(), (16, 32, 16));
 }

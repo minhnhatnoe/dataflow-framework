@@ -44,19 +44,6 @@ pub trait Component: ComponentSubscription + Sized {
     fn update(&mut self, input: Self::Input<'_>) -> Self::Output;
 }
 
-/// Entries per node, and children per inner node, of a subscription tree
-/// (see [`DepList`]). Defined once, in `dataflow-macros` (`arity!()`), which
-/// builds the trees with it. The per-node-shape impls in this crate are written
-/// out by `macro_rules!` for 4 and cannot follow it; each family asserts
-/// `ARITY == 4` so changing the constant fails the build until they are updated.
-#[doc(hidden)]
-pub const ARITY: usize = dataflow_macros::arity!();
-
-const _: () = assert!(
-    ARITY == 4,
-    "the node-shape impls (DepList, Upstream, DepStorage, Walk, Get, GatherInputs) are written for ARITY = 4; update them"
-);
-
 /// One entry of a subscription tree: the component `C` listed at position `I`
 /// of its subscriber's list of unique subscriptions (listing order, after the
 /// derive merges entries spelled alike). The position tells apart two entries
@@ -76,36 +63,43 @@ pub struct Sub<C, const I: usize>(PhantomData<C>);
 /// In the shapes below an entry `A` stands for [`Sub<A, i>`](Sub), `i` being
 /// its position in the listing.
 ///
-/// * a leaf, a plain tuple of 0 to 4 components: `()` (no subscriptions),
-///   `(A,)`, `(A, B)`, `(A, B, C)`, `(A, B, C, D)`;
-/// * an inner node `(A, B, C, D, K0, K1, K2, K3)` with 4 components and 4 child
-///   nodes (unused children are the empty leaf `()`), used for more than 4
-///   subscriptions.
+/// * a leaf, a plain tuple of 0 to 7 components: `()` (no subscriptions),
+///   `(A,)`, `(A, B)`, up to `(A, B, C, D, E, F, G)`;
+/// * an inner node, exactly a tuple of 8 child nodes `(K0, .., K7)` and no
+///   entries of its own (unused children are the empty leaf `()`), used for
+///   more than 7 subscriptions. A tuple of 8 is therefore always an inner node
+///   and a shorter one always a leaf.
 ///
-/// Listing order is the order of the entries of a node followed by its children
-/// left to right. The derive keeps the tree as shallow as possible and
-/// balanced: after the node's 4 entries it splits the remaining subscriptions
-/// into 4 contiguous parts of near-equal size (depth grows with log4 of the
-/// number of subscriptions). 12 subscriptions are
-/// `(A, B, C, D, (E, F), (G, H), (I, J), (K, L))`.
+/// Listing order is the leaves left to right. The derive keeps the tree as
+/// shallow as possible and fills it from the left: with `d` the least depth
+/// whose capacity `7 * 8^d` holds the subscriptions, the 8 children get
+/// `7 * 8^(d-1)` each, in order, until nothing is left (depth grows with log8
+/// of the number of subscriptions). 12 subscriptions are
+/// `((A, .., G), (H, .., L), (), (), (), (), (), ())`.
+///
+/// The number 8 is `ARITY` in `dataflow-macros`, the only place it is written:
+/// the impls for each shape below are generated from it by the callback macros
+/// `leaf_shapes!` and `inner_shape!`.
 pub trait DepList: 'static {
     /// The nested tuple of references `update` is handed, before the derive
     /// names its fields. It has the shape of the node.
     type Inputs<'a>;
 }
 
-macro_rules! dep_list_impl {
-    ([$($E:ident $I:ident)*] [$($K:ident)*]) => {
-        impl<$($E: Component, const $I: usize,)* $($K: DepList,)*> DepList
-            for ($(Sub<$E, $I>,)* $($K,)*)
-        {
-            type Inputs<'a> = ($(&'a $E::Output,)* $($K::Inputs<'a>,)*);
+macro_rules! dep_list_leaf {
+    ([$($E:ident $I:ident)*]) => {
+        impl<$($E: Component, const $I: usize,)*> DepList for ($(Sub<$E, $I>,)*) {
+            type Inputs<'a> = ($(&'a $E::Output,)*);
         }
     };
 }
-dep_list_impl!([][]);
-dep_list_impl!([A IA][]);
-dep_list_impl!([A IA B IB][]);
-dep_list_impl!([A IA B IB C IC][]);
-dep_list_impl!([A IA B IB C IC D ID][]);
-dep_list_impl!([A IA B IB C IC D ID][K0 K1 K2 K3]);
+dataflow_macros::leaf_shapes!(dep_list_leaf);
+
+macro_rules! dep_list_inner {
+    ([$($K:ident)*]) => {
+        impl<$($K: DepList,)*> DepList for ($($K,)*) {
+            type Inputs<'a> = ($($K::Inputs<'a>,)*);
+        }
+    };
+}
+dataflow_macros::inner_shape!(dep_list_inner);

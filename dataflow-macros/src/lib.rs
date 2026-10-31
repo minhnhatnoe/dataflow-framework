@@ -18,53 +18,168 @@ use syn::{
     Token, Type,
 };
 
-/// Entries per node, and children per inner node, of a subscription tree.
-///
-/// The one definition: `dataflow_flat::ARITY` is `arity!()`, which expands to
-/// this. The library's per-node-shape impls (`macro_rules!`-generated for
-/// leaves of 0 to 4 entries and inner nodes of 4 entries and 4 children)
-/// cannot follow it; they assert `ARITY == 4` so a change stops the build.
-const ARITY: usize = 4;
+/// Children per inner node of a subscription tree. The one constant that sets
+/// the shape: a node with more than `LEAF` subscriptions is an inner node,
+/// exactly a tuple of `ARITY` child subtrees (no entries of its own); a leaf is
+/// a tuple of up to `LEAF = ARITY - 1` entries, so a tuple of `ARITY` is always
+/// an inner node and anything shorter a leaf. The library's per-shape impls are
+/// generated from it by the callback macros below ([`leaf_shapes`] and friends),
+/// so changing this constant is the only edit needed.
+const ARITY: usize = 8;
+/// Entries a leaf holds at most.
+const LEAF: usize = ARITY - 1;
 
-/// Expands to [`ARITY`] as a `usize` literal, so `dataflow-flat` shares the
-/// constant instead of repeating it.
-#[proc_macro]
-pub fn arity(_: TokenStream) -> TokenStream {
-    let n = ARITY;
-    quote!(#n).into()
+fn idents(prefix: &str, n: usize) -> Vec<Ident> {
+    (0..n).map(|i| format_ident!("{}{}", prefix, i)).collect()
 }
 
-/// The shape of a subscription tree: a leaf of 0 to `ARITY` entries (`()` is
-/// the empty leaf), or an inner node of `ARITY` entries and `ARITY` children. Entries are indices into
-/// the list of unique subscriptions, in listing order: a node's entries, then
-/// its children from left to right.
+fn callback(input: TokenStream) -> Ident {
+    syn::parse(input).expect("expected the name of a macro_rules! macro")
+}
+
+/// `leaf_shapes!(cb)`: `cb!([A0 I0 A1 I1 ..]);` for each leaf size 0..=LEAF
+/// (an entry is a component and its position constant).
+#[proc_macro]
+pub fn leaf_shapes(input: TokenStream) -> TokenStream {
+    let cb = callback(input);
+    let items = (0..=LEAF).map(|n| {
+        let rows = (0..n).flat_map(|i| [format_ident!("A{}", i), format_ident!("I{}", i)]);
+        quote!(#cb!([#(#rows)*]);)
+    });
+    quote!(#(#items)*).into()
+}
+
+/// `inner_shape!(cb)`: `cb!([K0 .. K{ARITY-1}]);`, the inner node.
+#[proc_macro]
+pub fn inner_shape(input: TokenStream) -> TokenStream {
+    let cb = callback(input);
+    let k = idents("K", ARITY);
+    quote!(#cb!([#(#k)*]);).into()
+}
+
+/// `tuple_sizes!(cb)`: `cb!(A0 .. An-1);` for n in 0..=ARITY.
+#[proc_macro]
+pub fn tuple_sizes(input: TokenStream) -> TokenStream {
+    let cb = callback(input);
+    let items = (0..=ARITY).map(|n| {
+        let a = idents("A", n);
+        quote!(#cb!(#(#a)*);)
+    });
+    quote!(#(#items)*).into()
+}
+
+/// `select_tuples!(cb)`: `cb!(A0 0 A1 1 ..);` for n in 1..=ARITY.
+#[proc_macro]
+pub fn select_tuples(input: TokenStream) -> TokenStream {
+    let cb = callback(input);
+    let items = (1..=ARITY).map(|n| {
+        let a = idents("A", n);
+        let i = (0..n).map(syn::Index::from);
+        quote!(#cb!(#(#a #i)*);)
+    });
+    quote!(#(#items)*).into()
+}
+
+/// `get_tuples!(cb)`: `cb!((A0 .. An-1) k Ak);` for n in 1..=ARITY, k in 0..n.
+#[proc_macro]
+pub fn get_tuples(input: TokenStream) -> TokenStream {
+    let cb = callback(input);
+    let mut out = TokenStream2::new();
+    for n in 1..=ARITY {
+        let a = idents("A", n);
+        for k in 0..n {
+            let ak = &a[k];
+            let ki = syn::Index::from(k);
+            out.extend(quote!(#cb!((#(#a)*) #ki #ak);));
+        }
+    }
+    out.into()
+}
+
+/// `walk_leaves!(cb)`: `cb!(E0 e0 0 O0 T X0; E1 e1 1 O1 X0 X1; ..);` for n in
+/// 1..=ARITY: a tuple of walkers, each seeing what the previous ones finished.
+/// Leaves and inner nodes of the states tree are both such tuples.
+#[proc_macro]
+pub fn walk_leaves(input: TokenStream) -> TokenStream {
+    let cb = callback(input);
+    let mut out = TokenStream2::new();
+    for n in 1..=ARITY {
+        let rows = (0..n).map(|j| {
+            let (e, v, o, x) = (format_ident!("E{}", j), format_ident!("e{}", j), format_ident!("O{}", j), format_ident!("X{}", j));
+            let cin = if j == 0 { format_ident!("T") } else { format_ident!("X{}", j - 1) };
+            let idx = syn::Index::from(j);
+            quote!(#e #v #idx #o #cin #x;)
+        });
+        out.extend(quote!(#cb!(#(#rows)*);));
+    }
+    out.into()
+}
+
+/// The storage of a leaf: `MaskN<..>` keeps the entries whose edge is the first
+/// one. For each leaf size N in 0..=LEAF: the `MaskN` struct, the `StoredN`
+/// trait (`stored_trait!`), one `stored_impl!` per mask (2^N of them, 255 in
+/// all) and the `dep_storage_leaf!` impl. The macros are defined in `storage.rs`.
+#[proc_macro]
+pub fn leaf_storage(_: TokenStream) -> TokenStream {
+    let mut out = TokenStream2::new();
+    for n in 0..=LEAF {
+        let a = idents("A", n);
+        let ia = idents("IA", n);
+        let mask = format_ident!("Mask{}", n);
+        let stored = format_ident!("Stored{}", n);
+        if n == 0 {
+            out.extend(quote!(#[doc(hidden)] pub struct #mask;));
+        } else {
+            let b = idents("B", n);
+            out.extend(quote!(#[doc(hidden)] pub struct #mask<#(const #b: bool),*>;));
+        }
+        out.extend(quote!(stored_trait!(#stored [#(#a)*]);));
+        for bits in 0..(1usize << n) {
+            let flags: Vec<TokenStream2> =
+                (0..n).map(|i| if bits >> i & 1 == 1 { quote!(true) } else { quote!(false) }).collect();
+            let kept: Vec<&Ident> = (0..n).filter(|i| bits >> i & 1 == 1).map(|i| &a[i]).collect();
+            let ty = if n == 0 { quote!(#mask) } else { quote!(#mask<#(#flags),*>) };
+            out.extend(quote!(stored_impl!(#stored, #ty, [#(#a)*] => [#(#kept)*]);));
+        }
+        let rows = a.iter().zip(&ia).flat_map(|(x, y)| [x, y]);
+        out.extend(quote!(dep_storage_leaf!(#stored, #mask, [#(#rows)*]);));
+    }
+    out.into()
+}
+
+/// The shape of a subscription tree: a leaf of 0 to `LEAF` entries (`()` is the
+/// empty leaf), or an inner node that is exactly `ARITY` child subtrees. Entries
+/// are indices into the list of unique subscriptions, in listing order: leaves
+/// from left to right.
 enum Shape {
     Leaf(Vec<usize>),
-    Inner([usize; ARITY], Box<[Shape; ARITY]>),
+    Inner(Box<[Shape; ARITY]>),
+}
+
+/// Items a tree of depth `d` (a leaf has depth 0) holds at most.
+fn capacity(d: u32) -> usize {
+    LEAF * ARITY.pow(d)
 }
 
 impl Shape {
-    /// Balanced and as shallow as possible. Up to `ARITY` items are a leaf.
-    /// Otherwise the first `ARITY` items are the node's entries and the rest is
-    /// split into `ARITY` contiguous parts of near-equal size (the first
-    /// `r` parts one longer, with `q, r = (n - ARITY).divmod(ARITY)`), built
-    /// recursively; empty parts are leaves of 0 entries (`()`). The depth is minimal: a tree of
-    /// depth `d` holds `n` items iff `n - ARITY <= ARITY * capacity(d - 1)`,
-    /// which is the condition for the largest part, `ceil((n - ARITY) / ARITY)`,
-    /// to fit at depth `d - 1`.
+    /// Fill-first and as shallow as possible. Up to `LEAF` items are a leaf.
+    /// Otherwise, with `d` the least depth whose capacity (`LEAF * ARITY^d`)
+    /// holds the items, the `ARITY` children are filled left to right with
+    /// `capacity(d - 1)` items each (the last non-empty one with what is left),
+    /// built recursively; children that get nothing are leaves of 0 entries (`()`).
     fn build(items: &[usize]) -> Shape {
-        if items.len() <= ARITY {
+        if items.len() <= LEAF {
             return Shape::Leaf(items.to_vec());
         }
-        let (entries, mut rest) = items.split_at(ARITY);
-        let (q, r) = (rest.len() / ARITY, rest.len() % ARITY);
-        let children = std::array::from_fn(|k| {
-            let n = if k < r { q + 1 } else { q };
-            let (part, tail) = rest.split_at(n);
+        let d = (1..).find(|&d| capacity(d) >= items.len()).unwrap();
+        let per_child = capacity(d - 1);
+        let mut rest = items;
+        let children = std::array::from_fn(|_| {
+            let (part, tail) = rest.split_at(rest.len().min(per_child));
             rest = tail;
             Shape::build(part)
         });
-        Shape::Inner(entries.try_into().unwrap(), Box::new(children))
+        Shape::Inner(Box::new(children))
     }
 
     /// The tuple type (or the matching pattern), with `leaf(i)` for entry `i`.
@@ -74,10 +189,9 @@ impl Shape {
                 let es = es.iter().map(|&i| leaf(i));
                 quote!((#(#es,)*))
             }
-            Shape::Inner(es, children) => {
-                let es = es.iter().map(|&i| leaf(i));
+            Shape::Inner(children) => {
                 let cs = children.iter().map(|c| c.render(leaf));
-                quote!((#(#es,)* #(#cs,)*))
+                quote!((#(#cs,)*))
             }
         }
     }
@@ -170,8 +284,8 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         slot_of.push(i);
     }
     let vars: Vec<Ident> = (0..unique.len()).map(|i| format_ident!("__dep{}", i)).collect();
-    // The subscriptions as a tree of tuples (see `DepList`): at most `ARITY`
-    // entries in a leaf, `ARITY` entries and `ARITY` children in an inner node.
+    // The subscriptions as a tree of tuples (see `DepList`): at most `LEAF`
+    // entries in a leaf, exactly `ARITY` children in an inner node.
     let all: Vec<usize> = (0..unique.len()).collect();
     let tree = Shape::build(&all);
     let types: Vec<&Type> = unique.iter().map(|(_, t)| *t).collect();
@@ -249,69 +363,66 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
 mod tests {
     use super::*;
 
-    /// Items a tree of depth `d` (a leaf has depth 0) holds at most.
-    fn capacity(d: u32) -> usize {
-        if d == 0 { ARITY } else { ARITY + ARITY * capacity(d - 1) }
-    }
-
     fn flatten(s: &Shape, out: &mut Vec<usize>) {
         match s {
             Shape::Leaf(es) => out.extend(es),
-            Shape::Inner(es, cs) => {
-                out.extend(es);
-                for c in cs {
-                    flatten(c, out);
-                }
-            }
+            Shape::Inner(cs) => cs.iter().for_each(|c| flatten(c, out)),
         }
     }
 
-    fn count(s: &Shape) -> usize {
-        let mut v = Vec::new();
-        flatten(s, &mut v);
-        v.len()
-    }
-
-    /// Check node sizes and balance; returns the depth (a leaf is 0).
+    /// Check node sizes; returns the depth (a leaf is 0).
     fn check(s: &Shape) -> u32 {
         match s {
             Shape::Leaf(es) => {
-                assert!((0..=ARITY).contains(&es.len()));
+                assert!(es.len() <= LEAF);
                 0
             }
-            Shape::Inner(_, cs) => {
-                let sizes: Vec<usize> = cs.iter().map(count).collect();
-                let (min, max) = (sizes.iter().min().unwrap(), sizes.iter().max().unwrap());
-                assert!(max - min <= 1, "unbalanced parts {sizes:?}");
-                assert!(sizes.windows(2).all(|w| w[0] >= w[1]), "larger parts first {sizes:?}");
-                1 + cs.iter().map(check).max().unwrap()
-            }
+            Shape::Inner(cs) => 1 + cs.iter().map(check).max().unwrap(),
         }
     }
 
     #[test]
     fn capacities() {
-        assert_eq!(capacity(0), 4);
-        assert_eq!(capacity(1), 20);
-        assert_eq!(capacity(2), 84);
-        assert_eq!(capacity(3), 340);
+        assert_eq!(capacity(0), 7);
+        assert_eq!(capacity(1), 56);
+        assert_eq!(capacity(2), 448);
+        assert_eq!(capacity(3), 3584);
     }
 
     #[test]
     fn shapes() {
-        for n in (0..=100).chain([84, 85, 340, 341, 512]) {
+        for n in (0..=600).chain([3584, 3585]) {
             let items: Vec<usize> = (0..n).collect();
             let shape = Shape::build(&items);
 
             let mut flat = Vec::new();
             flatten(&shape, &mut flat);
-            assert_eq!(flat, items, "n = {n}");
+            assert_eq!(flat, items, "order, n = {n}");
 
             let depth = check(&shape);
-            if n > 0 {
-                let smallest = (0..).find(|&d| capacity(d) >= n).unwrap();
-                assert_eq!(depth, smallest, "n = {n}");
-            }
+            let smallest = (0..).find(|&d| capacity(d) >= n).unwrap();
+            assert_eq!(depth, smallest, "minimal depth, n = {n}");
         }
+    }
+
+    /// Render the shape of `n` items as a string: `(0 1 2) ..`.
+    fn show(s: &Shape) -> String {
+        match s {
+            Shape::Leaf(es) => format!("({})", es.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(" ")),
+            Shape::Inner(cs) => format!("[{}]", cs.iter().map(show).collect::<Vec<_>>().join(", ")),
+        }
+    }
+
+    #[test]
+    fn fill_first() {
+        let shape = |n: usize| show(&Shape::build(&(0..n).collect::<Vec<_>>()));
+        assert_eq!(shape(7), "(0 1 2 3 4 5 6)");
+        assert_eq!(shape(8), "[(0 1 2 3 4 5 6), (7), (), (), (), (), (), ()]");
+        assert_eq!(shape(12), "[(0 1 2 3 4 5 6), (7 8 9 10 11), (), (), (), (), (), ()]");
+        // Every non-final child is full.
+        let s = Shape::build(&(0..100).collect::<Vec<_>>());
+        let Shape::Inner(cs) = s else { panic!() };
+        let sizes: Vec<usize> = cs.iter().map(|c| { let mut v = vec![]; flatten(c, &mut v); v.len() }).collect();
+        assert_eq!(sizes, [56, 44, 0, 0, 0, 0, 0, 0]);
     }
 }

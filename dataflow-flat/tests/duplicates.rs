@@ -84,6 +84,7 @@ leaf!(Z1, 2);
 leaf!(Z2, 3);
 leaf!(Z3, 4);
 leaf!(Z4, 5);
+leaf!(Z5, 6);
 
 /// Output: the sum of all inputs weighted by position; checks that the listed
 /// fields are all the same reference.
@@ -117,15 +118,28 @@ macro_rules! dup {
 
 // Both entries in one leaf; `c: X` is spelled like `a` and merged by the derive.
 dup!(DupLeaf, [a: X, m: Z0, b: Y, n: Z1, c: X], same: [a, b, c]);
-// 7 unique subscriptions: `a` is in the node, `b` in a child.
-dup!(DupWide, [s0: Z0, a: X, s1: Z1, s2: Z2, s3: Z3, b: Y, s4: Z4], same: [a, b]);
-// 22 unique subscriptions: X and Y in two different children of an inner node
-// that has inner children.
+// 8 unique subscriptions. Fill-first puts the first 7 in child 0 and the 8th
+// in child 1 of an inner node, so `a` (index 1) and `b` (index 7) are in
+// different nodes.
+dup!(DupWide, [s0: Z0, a: X, s1: Z1, s2: Z2, s3: Z3, s4: Z4, s5: Z5, b: Y], same: [a, b]);
+// 70 unique subscriptions (capacity 56 at depth 1, so depth 2): the root node's
+// child 0 holds indices 0..56 (an inner node with 8 children of 7), child 1
+// indices 56..70. `a` (index 5) is in the first leaf of child 0, `b` (index 69)
+// in a leaf of child 1: different nodes at every level.
 dup!(
     DupDeep,
-    [g0: G<0>, g1: G<1>, g2: G<2>, g3: G<3>, g4: G<4>, a: X, g5: G<5>, g6: G<6>, g7: G<7>,
+    [
+    g0: G<0>, g1: G<1>, g2: G<2>, g3: G<3>, g4: G<4>, a: X, g5: G<5>, g6: G<6>, g7: G<7>,
      g8: G<8>, g9: G<9>, g10: G<10>, g11: G<11>, g12: G<12>, g13: G<13>, g14: G<14>,
-     g15: G<15>, g16: G<16>, g17: G<17>, g18: G<18>, g19: G<19>, b: Y],
+     g15: G<15>, g16: G<16>, g17: G<17>, g18: G<18>, g19: G<19>, g20: G<20>, g21: G<21>,
+     g22: G<22>, g23: G<23>, g24: G<24>, g25: G<25>, g26: G<26>, g27: G<27>, g28: G<28>,
+     g29: G<29>, g30: G<30>, g31: G<31>, g32: G<32>, g33: G<33>, g34: G<34>, g35: G<35>,
+     g36: G<36>, g37: G<37>, g38: G<38>, g39: G<39>, g40: G<40>, g41: G<41>, g42: G<42>,
+     g43: G<43>, g44: G<44>, g45: G<45>, g46: G<46>, g47: G<47>, g48: G<48>, g49: G<49>,
+     g50: G<50>, g51: G<51>, g52: G<52>, g53: G<53>, g54: G<54>, g55: G<55>, g56: G<56>,
+     g57: G<57>, g58: G<58>, g59: G<59>, g60: G<60>, g61: G<61>, g62: G<62>, g63: G<63>,
+     g64: G<64>, g65: G<65>, g66: G<66>, g67: G<67>, b: Y
+    ],
     same: [a, b]
 );
 
@@ -198,13 +212,13 @@ fn check<A: dataflow_flat::Root<Output = u64>>(expected: u64, checks_per_run: us
 // Expected outputs: the inputs weighted by 10^position in field order (see `dup!`).
 // DupLeaf (a, m, b, n, c = 7, 1, 7, 2, 7).
 const LEAF: u64 = 7 + 10 + 700 + 2000 + 70000;
-// DupWide (s0, a, s1, s2, s3, b, s4 = 1, 7, 2, 3, 4, 7, 5).
-const WIDE: u64 = 1 + 70 + 200 + 3000 + 40000 + 700000 + 5_000_000;
+// DupWide (s0, a, s1, s2, s3, s4, s5, b = 1, 7, 2, 3, 4, 5, 6, 7).
+const WIDE: u64 = 1 + 70 + 200 + 3000 + 40000 + 500_000 + 6_000_000 + 70_000_000;
 fn deep() -> u64 {
     // The field order of `DupDeep`, weighted 10^position (wrapping, like `dup!`).
     let g = |n: u64| n + 100;
     let mut vals = vec![g(0), g(1), g(2), g(3), g(4), 7];
-    vals.extend((5..=19).map(g));
+    vals.extend((5..=67).map(g));
     vals.push(7);
     let (mut acc, mut w) = (0u64, 1u64);
     for v in vals {

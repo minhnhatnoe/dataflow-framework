@@ -106,12 +106,7 @@ macro_rules! span_impl {
         }
     };
 }
-span_impl!();
-span_impl!(A);
-span_impl!(A B);
-span_impl!(A B C);
-span_impl!(A B C D);
-span_impl!(A B C D E);
+dataflow_macros::tuple_sizes!(span_impl);
 
 // ---------------------------------------------------------------------------
 // Get: inside one finished piece
@@ -139,11 +134,7 @@ macro_rules! select_impl {
         }
     };
 }
-select_impl!(A 0);
-select_impl!(A 0 B 1);
-select_impl!(A 0 B 1 C 2);
-select_impl!(A 0 B 1 C 2 D 3);
-select_impl!(A 0 B 1 C 2 D 3 E 4);
+dataflow_macros::select_tuples!(select_impl);
 
 /// `H`'s output inside this finished piece, which holds it at position `P`
 /// (see [`Select`]).
@@ -183,21 +174,7 @@ macro_rules! get_impl {
         }
     };
 }
-get_impl!((A) 0 A);
-get_impl!((A B) 0 A);
-get_impl!((A B) 1 B);
-get_impl!((A B C) 0 A);
-get_impl!((A B C) 1 B);
-get_impl!((A B C) 2 C);
-get_impl!((A B C D) 0 A);
-get_impl!((A B C D) 1 B);
-get_impl!((A B C D) 2 C);
-get_impl!((A B C D) 3 D);
-get_impl!((A B C D E) 0 A);
-get_impl!((A B C D E) 1 B);
-get_impl!((A B C D E) 2 C);
-get_impl!((A B C D E) 3 D);
-get_impl!((A B C D E) 4 E);
+dataflow_macros::get_tuples!(get_impl);
 
 // ---------------------------------------------------------------------------
 // Context
@@ -281,32 +258,31 @@ where
 pub trait GatherInputs<R, T: Context>: DepList {
     fn gather<'a>(r: T::Refs<'a>) -> Self::Inputs<'a>;
 }
-macro_rules! gather_impl {
-    ([$($E:ident $I:ident)*] [$($K:ident)*]) => {
-        impl<R: Planned, T: Context, $($E: Component, const $I: usize,)* $($K: GatherInputs<R, T>,)*>
-            GatherInputs<R, T> for ($(Sub<$E, $I>,)* $($K,)*)
+macro_rules! gather_leaf {
+    ([$($E:ident $I:ident)*]) => {
+        impl<R: Planned, T: Context, $($E: Component, const $I: usize,)*>
+            GatherInputs<R, T> for ($(Sub<$E, $I>,)*)
         where
             $(T: Find<R, $E, { TopHolds::<R, T, $E>::YES }>,)*
         {
             #[inline(always)]
             #[allow(unused_variables)]
             fn gather<'a>(r: T::Refs<'a>) -> Self::Inputs<'a> {
-                (
-                    $(<T as Find<R, $E, { TopHolds::<R, T, $E>::YES }>>::find(r),)*
-                    $(<$K as GatherInputs<R, T>>::gather(r),)*
-                )
+                ($(<T as Find<R, $E, { TopHolds::<R, T, $E>::YES }>>::find(r),)*)
             }
         }
     };
 }
-gather_impl!([][]);
-gather_impl!([A IA][]);
-gather_impl!([A IA B IB][]);
-gather_impl!([A IA B IB C IC][]);
-gather_impl!([A IA B IB C IC D ID][]);
-gather_impl!([A IA B IB C IC D ID][K0 K1 K2 K3]);
+dataflow_macros::leaf_shapes!(gather_leaf);
 
-const _: () = assert!(
-    crate::ARITY == 4,
-    "the node-shape impls in this file are written for ARITY = 4; update them"
-);
+macro_rules! gather_inner {
+    ([$($K:ident)*]) => {
+        impl<R: Planned, T: Context, $($K: GatherInputs<R, T>,)*> GatherInputs<R, T> for ($($K,)*) {
+            #[inline(always)]
+            fn gather<'a>(r: T::Refs<'a>) -> Self::Inputs<'a> {
+                ($(<$K as GatherInputs<R, T>>::gather(r),)*)
+            }
+        }
+    };
+}
+dataflow_macros::inner_shape!(gather_inner);

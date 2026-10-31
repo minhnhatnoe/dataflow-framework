@@ -65,7 +65,9 @@ macro_rules! walk_seq {
     };
 }
 
-/// A leaf node: its entries in order, each seeing the finished ones before it.
+/// A tuple node, a leaf of 1 to 7 stored entries or an inner node of its 8
+/// children: its fields in order, each seeing the finished ones before it. The
+/// tuple pushes its finished fields as one context entry.
 /// Each entry is `E e i O Cin Cout`: type, variable, field, output type, the
 /// context it is walked under, and the context it leaves.
 macro_rules! walk_leaf {
@@ -91,43 +93,7 @@ macro_rules! walk_leaf {
         }
     };
 }
-walk_leaf!(A a 0 OA T XA;);
-walk_leaf!(A a 0 OA T XA; B b 1 OB XA XB;);
-walk_leaf!(A a 0 OA T XA; B b 1 OB XA XB; C c 2 OC XB XC;);
-walk_leaf!(A a 0 OA T XA; B b 1 OB XA XB; C c 2 OC XB XC; D d 3 OD XC XD;);
-
-/// An inner node: the tuple of its stored entries, then its four children, in
-/// this order. The entries tuple pushes the finished entries as one context
-/// entry, and each finished child as one more.
-impl<R: Planned, T: Context,
-     P, OP: Span<R> + 'static, Y1: Context,
-     K0, OK0: Span<R> + 'static, Y2: Context,
-     K1, OK1: Span<R> + 'static, Y3: Context,
-     K2, OK2: Span<R> + 'static, Y4: Context,
-     K3, OK3: Span<R> + 'static, Y5: Context>
-    Walk<R, T> for (P, K0, K1, K2, K3)
-where
-    P: Walk<R, T, Out = OP, After = Y1>,
-    K0: Walk<R, Y1, Out = OK0, After = Y2>,
-    K1: Walk<R, Y2, Out = OK1, After = Y3>,
-    K2: Walk<R, Y3, Out = OK2, After = Y4>,
-    K3: Walk<R, Y4, Out = OK3, After = Y5>,
-{
-    type Out = (OP, OK0, OK1, OK2, OK3);
-    type After = (Node<R, Self::Out>, T);
-    #[inline(always)]
-    fn walk<'a>(&mut self, ctx: T::Refs<'a>) -> Self::Out {
-        walk_seq!(self, ctx; P p 0 T; K0 k0 1 Y1; K1 k1 2 Y2; K2 k2 3 Y3; K3 k3 4 Y4;);
-        (p, k0, k1, k2, k3)
-    }
-    #[inline(always)]
-    fn after<'a, 'b>(out: &'b Self::Out, ctx: T::Refs<'a>) -> <Self::After as Context>::Refs<'b>
-    where
-        'a: 'b,
-    {
-        (out, T::shorten(ctx))
-    }
-}
+dataflow_macros::walk_leaves!(walk_leaf);
 
 /// One component: upstream first, then `update` on the component field.
 impl<R: Planned, C: Placed<R>, T: Context> Walk<R, T> for Tree<R, C>
@@ -205,8 +171,3 @@ where
         states.walk(()).into_output()
     }
 }
-
-const _: () = assert!(
-    crate::ARITY == 4,
-    "the node-shape impls in this file are written for ARITY = 4; update them"
-);
