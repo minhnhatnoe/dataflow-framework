@@ -57,20 +57,21 @@ const NO_PARENT: u32 = u32::MAX;
 /// `C` (reached from `parent`, at position `pos` of its list) and walk its
 /// dependencies, unless it was reached before.
 ///
-/// This is a function rather than a trait method on purpose: the only trait
-/// bound it needs is `C::Deps: [const] Upstream`, so the trait solver's proof
-/// that a graph can be walked has one level per layer of the graph, not two.
-const fn visit<C: Component>(plan: &mut Plan, parent: u32, pos: u32)
-where
-    C::Deps: [const] Upstream,
-{
+/// This is split into `enter` (record `C`; returns its index, or `None` if it
+/// was reached before) and `leave` (record its subtree end), both non-recursive.
+/// The generated [`Upstream`] impls call them inline around the recursion into
+/// `C::Deps`, so constant evaluation uses one stack frame per graph layer
+/// (`visit_all`) instead of two (`visit` + `visit_all`). The trait solver's
+/// proof is unaffected: the only bound is `C::Deps: [const] Upstream`, a trait
+/// on the tree rather than on the component.
+const fn enter<C: Component>(plan: &mut Plan, parent: u32, pos: u32) -> Option<u32> {
     let id = TypeId::of::<C>();
     let slot = plan.table.slot(&plan.ids, <C as Hashed>::HASH, id);
     if let Some(at) = plan.table.at(slot) {
         if plan.end[at] == 0 {
             panic!("dependency cycle");
         }
-        return;
+        return None;
     }
     let i = plan.len;
     if i == MAX_COMPONENTS {
@@ -81,8 +82,24 @@ where
     plan.first_parent[i] = parent;
     plan.first_pos[i] = pos;
     plan.len = i + 1;
-    <C::Deps as Upstream>::visit_all(plan, i as u32);
-    plan.end[i] = plan.len as u32;
+    Some(i as u32)
+}
+
+/// A component's walk is over: record its subtree end.
+const fn leave(plan: &mut Plan, i: u32) {
+    plan.end[i as usize] = plan.len as u32;
+}
+
+/// `enter`, the walk of the dependencies, `leave`: used for the root only (the
+/// `Upstream` impls spell this out inline for their entries).
+const fn visit<C: Component>(plan: &mut Plan, parent: u32, pos: u32)
+where
+    C::Deps: [const] Upstream,
+{
+    if let Some(i) = enter::<C>(plan, parent, pos) {
+        <C::Deps as Upstream>::visit_all(plan, i);
+        leave(plan, i);
+    }
 }
 
 /// The walk ([`visit`]) of every entry of a subscription tree (see
@@ -106,7 +123,10 @@ macro_rules! upstream_leaf {
         where $($h::Deps: [const] Upstream,)*
         {
             fn visit_all(plan: &mut Plan, parent: u32) {
-                $(visit::<$h>(plan, parent, $i as u32);)*
+                $(if let Some(i) = enter::<$h>(plan, parent, $i as u32) {
+                    <$h::Deps as Upstream>::visit_all(plan, i);
+                    leave(plan, i);
+                })*
             }
         }
     };
