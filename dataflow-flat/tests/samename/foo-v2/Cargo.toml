@@ -1,0 +1,15 @@
+# Version 2 of a crate named "foo". The package is called foo-v2 (Cargo
+# refuses two packages named "foo" in one workspace), but the library is named
+# "foo". The dataflow-flat test `same_type_name` depends on both versions as
+# foo_a and foo_b, so it has two distinct types whose `type_name` is the same,
+# "foo::Foo".
+[package]
+name = "foo-v2"
+version = "0.2.0"
+edition = "2021"
+
+[lib]
+name = "foo"
+
+[dependencies]
+dataflow-flat = { path = "../../.." }

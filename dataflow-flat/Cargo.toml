@@ -5,3 +5,9 @@ edition = "2021"
 
 [dependencies]
 dataflow-macros = { path = "../dataflow-macros" }
+
+# tests/same_type_name.rs: two crates whose library is named "foo" (the packages
+# are foo-v1 and foo-v2), so both have a component with type_name "foo::Foo".
+[dev-dependencies]
+foo_a = { package = "foo-v1", path = "tests/samename/foo-v1" }
+foo_b = { package = "foo-v2", path = "tests/samename/foo-v2" }

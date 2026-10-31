@@ -40,7 +40,7 @@ These came from the person who asked for the framework, roughly in the order the
 
 ```sh
 cargo run -p example                     # text pipeline: 8 components under one root
-cargo run -p diamond                     # smallest interesting graph (4 components)
+cargo run -p example --example diamond   # smallest interesting graph (4 components)
 cargo test                               # plan assertions + runtime guarantees + execution order
 scripts/check_errors.sh                  # 15 cases: each mistake fails the documented way
 
@@ -59,10 +59,9 @@ cargo run --release -p bench             # flat runtime vs hand-written
 |---|---|---|
 | `dataflow-flat` | nightly | **The runtime.** Compile-time plan (`plan.rs`) with component identity (`identity.rs`, `table.rs`), typed storage tree (`storage.rs`), lookups (`lookup.rs`), safe fold (`walk.rs`), startup (`build.rs`, `pipeline.rs`). `#![forbid(unsafe_code)]`. |
 | `dataflow-macros` | any | `#[derive(ComponentSubscription)]` and `#[subscribe(...)]`. Re-exported by `dataflow-flat`. |
-| `example` | nightly | Text pipeline: `Source → Tokenize → {WordCount → TopWords, Longest, Len<Tokenize>} → Report → App`. `run` returns a `Summary`. |
-| `diamond` | nightly | `Src → {Double, Square} → Sum` (the root). Small enough to read its MIR, LLVM IR and assembly. |
+| `example` | nightly | Text pipeline: `Source → Tokenize → {WordCount → TopWords, Longest, Len<Tokenize>} → Report → App`. `run` returns a `Summary`. `examples/diamond.rs` (`cargo run -p example --example diamond`): `Src → {Double, Square} → Sum` (the root), small enough to read its MIR, LLVM IR and assembly. |
 | `bench` | nightly | Generated 396-component, 1,504-edge layered graph plus a root, run through the flat runtime and a hand-written baseline. Not a default member. |
-| `samename/` | nightly | Its own workspace (two packages named `foo`, versions 0.1.0 and 0.2.0, renamed in the test crate): two component types with the same `type_name` are two components. `cargo test --manifest-path samename/test/Cargo.toml`. |
+| `dataflow-flat/tests/samename/{foo-v1,foo-v2}` | nightly | Helper crates for the `same_type_name` integration test: packages `foo-v1` and `foo-v2` (Cargo refuses two packages named `foo` in one workspace) whose library is named `foo`, so both have a component with `type_name` `foo::Foo`. They are workspace members and dev-dependencies of `dataflow-flat`; `cargo test` runs the test. |
 | `scripts/check_errors.sh` | | Compiles small crates that each contain one mistake and checks the error. |
 
 ## Writing components
@@ -321,7 +320,7 @@ At the end, `Root::run` drops everything except the root: the finished outputs t
 | Same dependency twice through an alias | not an error | one component, both fields the same reference (any node layout, any root) | `tests/duplicates.rs` |
 | More than `MAX_COMPONENTS` | `cargo build` only | E0080 "too many components: raise dataflow_flat::MAX_COMPONENTS" | `too_many_components` |
 | Config supplied for a component not in the graph | `Pipeline::build` at startup, before any constructor runs | `BuildError { unused }`, all at once | `unused_config` |
-| Two components with the same `type_name` | not an error: identity is the `TypeId` | both are in the graph, constructed, run and dropped once | `samename/test` |
+| Two components with the same `type_name` | not an error: identity is the `TypeId` | both are in the graph, constructed, run and dropped once | `dataflow-flat/tests/same_type_name.rs` |
 
 A root listed twice used to be a possible mistake; with a single root component it cannot be written. Two subscriptions of the root to the same thing, through an alias or not, are one dependency (`tests/duplicates.rs`).
 
@@ -479,7 +478,7 @@ Read this before trying something "simpler"; most simpler ideas were tried. Rows
 | 42 | Store only the first-edge entries of a node (a `Mask` of the `Edge::FIRST` constants picks the tuple type); an inner node is `(entries, child 0, .., child 3)`; no `()` placeholders for the 1,525 non-first edges of the benchmark | **Kept, current.** Debug scratch 2.55 s -> 2.40 s, non-incremental 2.12 s -> 2.00 s, release scratch 5.1 s -> 4.4 s, debug run 107 -> 89 us, 13,639 -> 12,608 functions. `Walk`, `Span`, `Select` and `Get` needed no change for the missing positions because they work from plan ranges, not listing positions. |
 | 43 | Cheaper lookups: skip up to four context entries per `Find` step (the stride is computed from a per-context distance constant `Dist`, and an `H`-independent `Tail` step does the skipping) | **Rejected.** 12,608 -> 11,582 functions, but debug scratch got slower (non-incremental 2.04 s -> 2.06 s over five runs each, twice; incremental 2.40 s -> 2.45 s), release unchanged, debug run unchanged (89 -> 90 us): the extra trait obligations (`Dist`, `Tail` projections) cost what the saved instances saved. The diff is kept out of the tree. A positional jump straight to the context entry (field path `.1.1.1.0` generated per distance) was not tried: it needs one impl per distance, and the distance reaches 60 at 20 layers. |
 | 44 | **`#[inline(always)]` on the walk and lookup chain, adopted unconditionally** (reverses row 11) | Row 11's exponential debug blowup came from the dead `if false` branches of the old raw-pointer runtime, which the current fold does not have. What changed the decision: with plain `#[inline]` the release run time fell off a cliff on large graphs (LLVM stopped inlining the root's walk from about 477 components), and `inline(always)` removed it (497 components: 767 -> 180 ns). Debug-build cost is not a concern for this project (decision of 2026-10-30). |
-| 45 | **Component identity by `TypeId`** instead of `fnv1a(type_name)`: the plan stores `[TypeId; MAX_COMPONENTS]`, `first_parent`/`Edge::FIRST`/`Span`/`Select` use plan indices (`At::INDEX`), `Configs` keyed by `TypeId`, construction-time id map and collision panic removed. (a) found by a **linear scan** with `==`; (b) found by an open-addressing table that **starts at the name hash and confirms by `TypeId ==`** (`table.rs`) | **(a) Rejected, (b) kept, current.** (a): debug scratch at full 20 3.8 s -> 5.1 s (non-incremental total 2.07 s -> 3.27 s), `eval_to_allocation_raw` self 0.18 s -> 1.48 s, release scratch 4.3 s -> 5.4 s; edit rebuild and function count unchanged. (b): within noise of the hash-only version at full 20, 25 and 20 wide (numbers under "Performance and compile time"); release run time unchanged (it is the same code). Same-name types are separate components (`samename/`). |
+| 45 | **Component identity by `TypeId`** instead of `fnv1a(type_name)`: the plan stores `[TypeId; MAX_COMPONENTS]`, `first_parent`/`Edge::FIRST`/`Span`/`Select` use plan indices (`At::INDEX`), `Configs` keyed by `TypeId`, construction-time id map and collision panic removed. (a) found by a **linear scan** with `==`; (b) found by an open-addressing table that **starts at the name hash and confirms by `TypeId ==`** (`table.rs`) | **(a) Rejected, (b) kept, current.** (a): debug scratch at full 20 3.8 s -> 5.1 s (non-incremental total 2.07 s -> 3.27 s), `eval_to_allocation_raw` self 0.18 s -> 1.48 s, release scratch 4.3 s -> 5.4 s; edit rebuild and function count unchanged. (b): within noise of the hash-only version at full 20, 25 and 20 wide (numbers under "Performance and compile time"); release run time unchanged (it is the same code). Same-name types are separate components (`dataflow-flat/tests/same_type_name.rs`). |
 | 46 | **Entries tagged with their position** (`Sub<T, I>`, `I` the index in the unique-subscription list) so the plan can tell apart two entries naming one type through an alias: `Plan::first_pos` next to `first_parent`, `Edge<R, P, H, I>::FIRST = first_parent == P && first_pos == I`; the duplicate check (`assert_distinct`, a scratch array of `TypeId`s in the plan, the `visit_all`/`visit_rec` split) is deleted | **Kept, current.** Before, `a: X, b: Y` with `type Y = X;` was E0080 "lists the same dependency twice" (also printing a stray E0284), found only by `cargo build`. Now it behaves as `a: X, b: X` does, in every case (first reached through the duplicating component or earlier through another; one node or several; any root): `tests/duplicates.rs`. Cost, measured against the tree just before it (interleaved, six scratch builds each, `bench full 20` / `full 20 wide`): release scratch +0.05 s / +0.03 s (median), release incremental +0.08 s / +0.10 s, debug scratch +0.03 s / -0.07 s (noise), run time unchanged within noise (145-150 ns before and after; the hand-written baseline moved as much). |
 | 47 | **Fixed 8-ary subscription tree, fill-first** (`(L, E, K) = (7, 0, 8)`): a leaf holds 0 to 7 entries, an inner node is exactly 8 children and holds no entries; the per-shape impls are generated from one constant by callback proc macros instead of being written out for 4; the split fills children left to right (`7 * 8^(d-1)` each) rather than balancing | **Kept, current.** Numbers are the main agent's, from the parametrised experiment (20 layers, flat-only release scratch, seconds; 4-ary / 8-ary): 4 subscriptions each 2.53 / 2.54; 6 each fails at the default recursion limit (4.68 with `rl=1024`) / 3.94; 7 each fails (5.11 with `rl`) / 4.15; a root subscribing to 100: 3.07 / 3.13; one root subscribing to 400: 2.93 / 2.48; 12 each with a balanced split (and `rl`): 9.8 / 14.4, which is what fill-first is for. The 4-ary failures at 6 to 7 subscriptions were the misleading "component not in this node" error at the recursion limit. This change was made without new measurements (the user's instruction); checked only that `flat 20 d=6` and `d=7` compile at the default recursion limit, that `full 20` prints "results agree" and that the tests and error cases pass. |
 
@@ -526,14 +525,14 @@ Smaller decisions:
 
 ## Inspecting compiler output
 
-All of these were used during development; flag spellings may differ on newer nightlies. They run on the `diamond` crate, where the output is small enough to read.
+All of these were used during development; flag spellings may differ on newer nightlies. They run on the `diamond` example (`example/examples/diamond.rs`), where the output is small enough to read.
 
 ```sh
-cargo rustc -p diamond -- -Zunpretty=expanded                       # derive output
+cargo rustc -p example --example diamond -- -Zunpretty=expanded                       # derive output
 cargo rustc -p dataflow-flat --lib -- --emit=mir -o /tmp/flat.mir    # generic walk and lookups
-cargo rustc -p diamond -- -Zprint-mono-items=yes                     # instances: one walk per Tree, one function per lookup step
-cargo rustc -p diamond -- --emit=llvm-ir -o /tmp/d.ll
-cargo rustc --release -p diamond -- --emit=asm \
+cargo rustc -p example --example diamond -- -Zprint-mono-items=yes                     # instances: one walk per Tree, one function per lookup step
+cargo rustc -p example --example diamond -- --emit=llvm-ir -o /tmp/d.ll
+cargo rustc --release -p example --example diamond -- --emit=asm \
     -C llvm-args=-x86-asm-syntax=intel -o /tmp/d.s                   # run_once: nine instructions, no calls, no branches
 CARGO_INCREMENTAL=0 cargo rustc -p bench -- -Ztime-passes            # where compile time goes
 # per-query self time: -Zself-profile=<dir> -Zself-profile-events=default,args, then `summarize summarize <dir>/*.mm_profdata`

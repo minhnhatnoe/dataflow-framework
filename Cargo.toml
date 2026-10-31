@@ -1,7 +1,5 @@
 [workspace]
 resolver = "2"
-# `samename` is a workspace of its own: it needs two packages named `foo`.
-exclude = ["samename"]
-members = ["dataflow-flat", "dataflow-macros", "example", "diamond", "bench"]
+members = ["dataflow-flat", "dataflow-macros", "example", "bench", "dataflow-flat/tests/samename/foo-v1", "dataflow-flat/tests/samename/foo-v2"]
 # `cargo build` / `cargo test` without -p: everything except the 400-component benchmark.
-default-members = ["dataflow-flat", "dataflow-macros", "example", "diamond"]
+default-members = ["dataflow-flat", "dataflow-macros", "example", "dataflow-flat/tests/samename/foo-v1", "dataflow-flat/tests/samename/foo-v2"]
