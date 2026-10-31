@@ -22,7 +22,7 @@ use syn::{
 ///
 /// The one definition: `dataflow_flat::ARITY` is `arity!()`, which expands to
 /// this. The library's per-node-shape impls (`macro_rules!`-generated for
-/// leaves of 1 to 4 entries and inner nodes of 4 entries and 4 children)
+/// leaves of 0 to 4 entries and inner nodes of 4 entries and 4 children)
 /// cannot follow it; they assert `ARITY == 4` so a change stops the build.
 const ARITY: usize = 4;
 
@@ -34,14 +34,13 @@ pub fn arity(_: TokenStream) -> TokenStream {
     quote!(#n).into()
 }
 
-/// The shape of a subscription tree: `()`, a leaf of 1 to `ARITY` entries, or an
-/// inner node of `ARITY` entries and `ARITY` children. Entries are indices into
+/// The shape of a subscription tree: a leaf of 0 to `ARITY` entries (`()` is
+/// the empty leaf), or an inner node of `ARITY` entries and `ARITY` children. Entries are indices into
 /// the list of unique subscriptions, in listing order: a node's entries, then
 /// its children from left to right.
 enum Shape {
-    Empty,
     Leaf(Vec<usize>),
-    Inner(Vec<usize>, Vec<Shape>),
+    Inner([usize; ARITY], Box<[Shape; ARITY]>),
 }
 
 impl Shape {
@@ -49,34 +48,28 @@ impl Shape {
     /// Otherwise the first `ARITY` items are the node's entries and the rest is
     /// split into `ARITY` contiguous parts of near-equal size (the first
     /// `r` parts one longer, with `q, r = (n - ARITY).divmod(ARITY)`), built
-    /// recursively; empty parts are `()`. The depth is minimal: a tree of
+    /// recursively; empty parts are leaves of 0 entries (`()`). The depth is minimal: a tree of
     /// depth `d` holds `n` items iff `n - ARITY <= ARITY * capacity(d - 1)`,
     /// which is the condition for the largest part, `ceil((n - ARITY) / ARITY)`,
     /// to fit at depth `d - 1`.
     fn build(items: &[usize]) -> Shape {
-        if items.is_empty() {
-            return Shape::Empty;
-        }
         if items.len() <= ARITY {
             return Shape::Leaf(items.to_vec());
         }
         let (entries, mut rest) = items.split_at(ARITY);
         let (q, r) = (rest.len() / ARITY, rest.len() % ARITY);
-        let mut children = Vec::with_capacity(ARITY);
-        for k in 0..ARITY {
+        let children = std::array::from_fn(|k| {
             let n = if k < r { q + 1 } else { q };
             let (part, tail) = rest.split_at(n);
-            children.push(Shape::build(part));
             rest = tail;
-        }
-        assert!(rest.is_empty());
-        Shape::Inner(entries.to_vec(), children)
+            Shape::build(part)
+        });
+        Shape::Inner(entries.try_into().unwrap(), Box::new(children))
     }
 
     /// The tuple type (or the matching pattern), with `leaf(i)` for entry `i`.
     fn render(&self, leaf: &dyn Fn(usize) -> TokenStream2) -> TokenStream2 {
         match self {
-            Shape::Empty => quote!(()),
             Shape::Leaf(es) => {
                 let es = es.iter().map(|&i| leaf(i));
                 quote!((#(#es,)*))
@@ -261,7 +254,6 @@ mod tests {
 
     fn flatten(s: &Shape, out: &mut Vec<usize>) {
         match s {
-            Shape::Empty => {}
             Shape::Leaf(es) => out.extend(es),
             Shape::Inner(es, cs) => {
                 out.extend(es);
@@ -278,17 +270,14 @@ mod tests {
         v.len()
     }
 
-    /// Check node sizes and balance; returns the depth (empty and leaf are 0).
+    /// Check node sizes and balance; returns the depth (a leaf is 0).
     fn check(s: &Shape) -> u32 {
         match s {
-            Shape::Empty => 0,
             Shape::Leaf(es) => {
-                assert!((1..=ARITY).contains(&es.len()));
+                assert!((0..=ARITY).contains(&es.len()));
                 0
             }
-            Shape::Inner(es, cs) => {
-                assert_eq!(es.len(), ARITY);
-                assert_eq!(cs.len(), ARITY);
+            Shape::Inner(_, cs) => {
                 let sizes: Vec<usize> = cs.iter().map(count).collect();
                 let (min, max) = (sizes.iter().min().unwrap(), sizes.iter().max().unwrap());
                 assert!(max - min <= 1, "unbalanced parts {sizes:?}");

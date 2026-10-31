@@ -52,6 +52,8 @@ impl<R: Planned, C: Placed<R>> Tree<R, C> {
 /// plan. This is the one place the plan's constants select types
 /// (`generic_const_exprs`).
 #[doc(hidden)]
+pub struct Mask0;
+#[doc(hidden)]
 pub struct Mask1<const A: bool>;
 #[doc(hidden)]
 pub struct Mask2<const A: bool, const B: bool>;
@@ -65,9 +67,9 @@ pub struct Mask4<const A: bool, const B: bool, const C: bool, const D: bool>;
 /// the first-edge entries are stored; every other edge costs nothing at run
 /// time and nothing in the type.
 macro_rules! stored_trait {
-    ($Tr:ident [$($E:ident)+]) => {
+    ($Tr:ident [$($E:ident)*]) => {
         #[doc(hidden)]
-        pub trait $Tr<R: Planned, $($E: Placed<R>),+> {
+        pub trait $Tr<R: Planned, $($E: Placed<R>),*> {
             /// The stored subtrees.
             type S;
             /// What walking `S` produces.
@@ -76,14 +78,15 @@ macro_rules! stored_trait {
         }
     };
 }
+stored_trait!(Stored0 []);
 stored_trait!(Stored1 [A]);
 stored_trait!(Stored2 [A B]);
 stored_trait!(Stored3 [A B C]);
 stored_trait!(Stored4 [A B C D]);
 
 macro_rules! stored_impl {
-    ($Tr:ident, $Mask:ty, [$($E:ident)+] => [$($P:ident)*]) => {
-        impl<R: Planned, $($E: Placed<R>),+> $Tr<R, $($E),+> for $Mask {
+    ($Tr:ident, $Mask:ty, [$($E:ident)*] => [$($P:ident)*]) => {
+        impl<R: Planned, $($E: Placed<R>),*> $Tr<R, $($E),*> for $Mask {
             type S = ($(Tree<R, $P>,)*);
             type O = ($(Done<R, $P>,)*);
             #[allow(unused_variables)]
@@ -93,6 +96,7 @@ macro_rules! stored_impl {
         }
     };
 }
+stored_impl!(Stored0, Mask0, [] => []);
 stored_impl!(Stored1, Mask1<true>, [A] => [A]);
 stored_impl!(Stored1, Mask1<false>, [A] => []);
 stored_impl!(Stored2, Mask2<true, true>, [A B] => [A B]);
@@ -135,26 +139,21 @@ pub trait DepStorage<R: Planned, P: Component>: DepList {
     type O: Span<R> + 'static;
     fn make(pass: &mut ConstructPass) -> Self::S;
 }
-impl<R: Planned, P: Component> DepStorage<R, P> for () {
-    type S = ();
-    type O = ();
-    fn make(_: &mut ConstructPass) {}
-}
-
 macro_rules! dep_storage_leaf {
-    ($Tr:ident, $Mask:ident, [$($E:ident)+]) => {
-        impl<R: Planned, P: Component, $($E: Placed<R>),+> DepStorage<R, P> for ($($E,)+)
+    ($Tr:ident, $Mask:ident, [$($E:ident)*]) => {
+        impl<R: Planned, P: Component, $($E: Placed<R>),*> DepStorage<R, P> for ($($E,)*)
         where
-            $Mask<$({ Edge::<R, P, $E>::FIRST }),+>: $Tr<R, $($E),+>,
+            $Mask<$({ Edge::<R, P, $E>::FIRST }),*>: $Tr<R, $($E),*>,
         {
-            type S = <$Mask<$({ Edge::<R, P, $E>::FIRST }),+> as $Tr<R, $($E),+>>::S;
-            type O = <$Mask<$({ Edge::<R, P, $E>::FIRST }),+> as $Tr<R, $($E),+>>::O;
+            type S = <$Mask<$({ Edge::<R, P, $E>::FIRST }),*> as $Tr<R, $($E),*>>::S;
+            type O = <$Mask<$({ Edge::<R, P, $E>::FIRST }),*> as $Tr<R, $($E),*>>::O;
             fn make(pass: &mut ConstructPass) -> Self::S {
-                <$Mask<$({ Edge::<R, P, $E>::FIRST }),+> as $Tr<R, $($E),+>>::make(pass)
+                <$Mask<$({ Edge::<R, P, $E>::FIRST }),*> as $Tr<R, $($E),*>>::make(pass)
             }
         }
     };
 }
+dep_storage_leaf!(Stored0, Mask0, []);
 dep_storage_leaf!(Stored1, Mask1, [A]);
 dep_storage_leaf!(Stored2, Mask2, [A B]);
 dep_storage_leaf!(Stored3, Mask3, [A B C]);

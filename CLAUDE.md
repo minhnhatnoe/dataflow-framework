@@ -37,7 +37,7 @@ scripts/bench.sh [layers] [wide]       # robust benchmark: pinned, warm-up, 11 a
 | Path | What |
 |---|---|
 | `dataflow-flat/src/lib.rs` | Crate docs (the four stages, top-down), feature gates, module list, re-exports |
-| `dataflow-flat/src/component.rs` | `ComponentSubscription`, `Component`, `DepList` (the subscription tree the derive builds: `()`, leaves of 1-4 entries, inner nodes of 4 entries and 4 children; the 4 is `ARITY`, defined in `dataflow-macros` and shared via `arity!()`, with `assert!(ARITY == 4)` next to the macro_rules impls; the derive balances the children) |
+| `dataflow-flat/src/component.rs` | `ComponentSubscription`, `Component`, `DepList` (the subscription tree the derive builds: leaves of 0-4 entries (`()` is the empty leaf), inner nodes of 4 entries and 4 children; the 4 is `ARITY`, defined in `dataflow-macros` and shared via `arity!()`, with `assert!(ARITY == 4)` next to the macro_rules impls; the derive balances the children) |
 | `dataflow-flat/src/plan.rs` | The compile-time plan: the const dependency walk (`visit`, `Upstream`), `Plan` (`TypeId`s by index, first parents and subtree ends as indices), `Planned`, `Edge`, and the `plan_trace` test |
 | `dataflow-flat/src/identity.rs`, `table.rs` | Component identity: `At::INDEX` (position of a component in a root's plan), `Hashed` (name hash used only as a probe start), the open-addressing `Table` confirmed by `TypeId ==` |
 | `dataflow-flat/src/storage.rs` | The typed states tree: `Tree`, `MaskN`/`StoredN` (only first-edge entries are stored), `DepStorage`, `Placed` |

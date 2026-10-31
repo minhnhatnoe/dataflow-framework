@@ -99,30 +99,26 @@ pub const trait Upstream {
     fn collect_ids(plan: &mut Plan);
 }
 
-const impl Upstream for () {
-    fn visit_all(_: &mut Plan, _: u32) {}
-    fn visit_rec(_: &mut Plan, _: u32) {}
-    fn collect_ids(_: &mut Plan) {}
-}
-
 macro_rules! upstream_leaf {
-    ($($h:ident)+) => {
-        const impl<$($h: Component),+> Upstream for ($($h,)+)
-        where $($h::Deps: [const] Upstream,)+
+    ($($h:ident)*) => {
+        #[allow(unused_variables)]
+        const impl<$($h: Component),*> Upstream for ($($h,)*)
+        where $($h::Deps: [const] Upstream,)*
         {
             fn visit_all(plan: &mut Plan, parent: u32) {
-                assert_distinct(&[$(TypeId::of::<$h>()),+]);
-                $(visit::<$h>(plan, parent);)+
+                assert_distinct(&[$(TypeId::of::<$h>()),*] as &[TypeId]);
+                $(visit::<$h>(plan, parent);)*
             }
             fn visit_rec(plan: &mut Plan, parent: u32) {
-                $(visit::<$h>(plan, parent);)+
+                $(visit::<$h>(plan, parent);)*
             }
             fn collect_ids(plan: &mut Plan) {
-                $(plan.push_id(TypeId::of::<$h>());)+
+                $(plan.push_id(TypeId::of::<$h>());)*
             }
         }
     };
 }
+upstream_leaf!();
 upstream_leaf!(A0);
 upstream_leaf!(A0 A1);
 upstream_leaf!(A0 A1 A2);

@@ -93,23 +93,20 @@ pub trait Span<R> {
     const LO: usize;
     const HI: usize;
 }
-impl<R> Span<R> for () {
-    const LO: usize = EMPTY_LO;
-    const HI: usize = 0;
-}
 impl<R: Planned, C: Placed<R>> Span<R> for Done<R, C> {
     const LO: usize = R::PLAN.range_of(At::<R, C>::INDEX).0;
     const HI: usize = R::PLAN.range_of(At::<R, C>::INDEX).1;
 }
 
 macro_rules! span_impl {
-    ($($g:ident)+) => {
-        impl<R, $($g: Span<R>),+> Span<R> for ($($g,)+) {
-            const LO: usize = min_all(&[$(<$g as Span<R>>::LO),+]);
-            const HI: usize = max_all(&[$(<$g as Span<R>>::HI),+]);
+    ($($g:ident)*) => {
+        impl<R, $($g: Span<R>),*> Span<R> for ($($g,)*) {
+            const LO: usize = min_all(&[$(<$g as Span<R>>::LO),*]);
+            const HI: usize = max_all(&[$(<$g as Span<R>>::HI),*]);
         }
     };
 }
+span_impl!();
 span_impl!(A);
 span_impl!(A B);
 span_impl!(A B C);
@@ -326,28 +323,25 @@ where
 pub trait GatherInputs<R, T: Context>: DepList {
     fn gather<'a>(r: T::Refs<'a>) -> Self::Inputs<'a>;
 }
-impl<R, T: Context> GatherInputs<R, T> for () {
-    #[inline(always)]
-    fn gather<'a>(_: T::Refs<'a>) -> Self::Inputs<'a> {}
-}
-
 macro_rules! gather_impl {
-    ([$($E:ident)+] [$($K:ident)*]) => {
-        impl<R: Planned, T: Context, $($E: Component,)+ $($K: GatherInputs<R, T>,)*> GatherInputs<R, T>
-            for ($($E,)+ $($K,)*)
+    ([$($E:ident)*] [$($K:ident)*]) => {
+        impl<R: Planned, T: Context, $($E: Component,)* $($K: GatherInputs<R, T>,)*> GatherInputs<R, T>
+            for ($($E,)* $($K,)*)
         where
-            $(T: Find<R, $E, { TopHolds::<R, T, $E>::YES }>,)+
+            $(T: Find<R, $E, { TopHolds::<R, T, $E>::YES }>,)*
         {
             #[inline(always)]
+            #[allow(unused_variables)]
             fn gather<'a>(r: T::Refs<'a>) -> Self::Inputs<'a> {
                 (
-                    $(<T as Find<R, $E, { TopHolds::<R, T, $E>::YES }>>::find(r),)+
+                    $(<T as Find<R, $E, { TopHolds::<R, T, $E>::YES }>>::find(r),)*
                     $(<$K as GatherInputs<R, T>>::gather(r),)*
                 )
             }
         }
     };
 }
+gather_impl!([][]);
 gather_impl!([A][]);
 gather_impl!([A B][]);
 gather_impl!([A B C][]);

@@ -62,11 +62,11 @@ const _: () = assert!(
 /// (plan, storage, walk, lookup, cycle check) is a handful of impls, one per
 /// node *shape*:
 ///
-/// * `()`: no subscriptions;
-/// * a leaf, a plain tuple of 1 to 4 components `(A,)`, `(A, B)`, `(A, B, C)`,
-///   `(A, B, C, D)`;
+/// * a leaf, a plain tuple of 0 to 4 components: `()` (no subscriptions),
+///   `(A,)`, `(A, B)`, `(A, B, C)`, `(A, B, C, D)`;
 /// * an inner node `(A, B, C, D, K0, K1, K2, K3)` with 4 components and 4 child
-///   nodes (unused children are `()`), used for more than 4 subscriptions.
+///   nodes (unused children are the empty leaf `()`), used for more than 4
+///   subscriptions.
 ///
 /// Listing order is the order of the entries of a node followed by its children
 /// left to right. The derive keeps the tree as shallow as possible and
@@ -80,17 +80,14 @@ pub trait DepList: 'static {
     type Inputs<'a>;
 }
 
-impl DepList for () {
-    type Inputs<'a> = ();
-}
-
 macro_rules! dep_list_impl {
-    ([$($E:ident)+] [$($K:ident)*]) => {
-        impl<$($E: Component,)+ $($K: DepList,)*> DepList for ($($E,)+ $($K,)*) {
-            type Inputs<'a> = ($(&'a $E::Output,)+ $($K::Inputs<'a>,)*);
+    ([$($E:ident)*] [$($K:ident)*]) => {
+        impl<$($E: Component,)* $($K: DepList,)*> DepList for ($($E,)* $($K,)*) {
+            type Inputs<'a> = ($(&'a $E::Output,)* $($K::Inputs<'a>,)*);
         }
     };
 }
+dep_list_impl!([][]);
 dep_list_impl!([A][]);
 dep_list_impl!([A B][]);
 dep_list_impl!([A B C][]);
