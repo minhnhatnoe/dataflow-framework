@@ -125,52 +125,6 @@ impl Component for A {
 }
 fn main() { let _ = Pipeline::<A>::build(Configs::new()); }'
 
-# Same type written two different ways: the derive can only dedupe identical
-# spellings, so the compile-time plan catches it. This is a post-monomorphization
-# error: `cargo check` does NOT report it, `cargo build` does.
-CMD[duplicate_dep_via_alias]=build
-PATTERN[duplicate_dep_via_alias]='E0080|same dependency twice'
-BODY[duplicate_dep_via_alias]='
-type AlsoSrc = Src;
-#[derive(ComponentSubscription)]
-#[subscribe(x: Src, y: AlsoSrc)]
-pub struct A;
-impl Component for A {
-    type Config = ();
-    type Output = u64;
-    fn new((): ()) -> Self { A }
-    fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 0 }
-}
-fn main() { let _ = Pipeline::<A>::build(Configs::new()); }'
-
-# The two duplicates are far apart: with 6 subscriptions they are in different
-# nodes of the subscription tree (the first four in the node, the rest in a child).
-CMD[duplicate_dep_across_nodes]=build
-PATTERN[duplicate_dep_across_nodes]='E0080|same dependency twice'
-BODY[duplicate_dep_across_nodes]='
-type AlsoSrc = Src;
-macro_rules! leaf { ($($n:ident),*) => { $(
-    #[derive(ComponentSubscription)]
-    pub struct $n;
-    impl Component for $n {
-        type Config = ();
-        type Output = u64;
-        fn new((): ()) -> Self { $n }
-        fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 0 }
-    }
-)* } }
-leaf!(L1, L2, L3, L4, L5);
-#[derive(ComponentSubscription)]
-#[subscribe(a: Src, b: L1, c: L2, d: L3, e: L4, f: L5, g: AlsoSrc)]
-pub struct A;
-impl Component for A {
-    type Config = ();
-    type Output = u64;
-    fn new((): ()) -> Self { A }
-    fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 0 }
-}
-fn main() { let _ = Pipeline::<A>::build(Configs::new()); }'
-
 # The root is an ordinary component; anything else is not a root.
 CMD[root_not_a_component]=check
 PATTERN[root_not_a_component]='E0277.*(String: Root|can.t be the root of a .Pipeline.)'
@@ -253,7 +207,7 @@ PY
 
 ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        self_cycle
-       duplicate_dep_via_alias duplicate_dep_across_nodes too_many_components root_not_a_component generic_missing_root_bound
+       too_many_components root_not_a_component generic_missing_root_bound
        generic_root_bound_ok keep_input_reference
        name_input_struct_outside unused_config)
 

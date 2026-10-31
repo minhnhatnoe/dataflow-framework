@@ -21,7 +21,7 @@
 
 use std::marker::PhantomData;
 
-use crate::component::{Component, DepList};
+use crate::component::{Component, DepList, Sub};
 use crate::identity::At;
 use crate::plan::Planned;
 use crate::storage::{DepsDone, Placed};
@@ -282,9 +282,9 @@ pub trait GatherInputs<R, T: Context>: DepList {
     fn gather<'a>(r: T::Refs<'a>) -> Self::Inputs<'a>;
 }
 macro_rules! gather_impl {
-    ([$($E:ident)*] [$($K:ident)*]) => {
-        impl<R: Planned, T: Context, $($E: Component,)* $($K: GatherInputs<R, T>,)*> GatherInputs<R, T>
-            for ($($E,)* $($K,)*)
+    ([$($E:ident $I:ident)*] [$($K:ident)*]) => {
+        impl<R: Planned, T: Context, $($E: Component, const $I: usize,)* $($K: GatherInputs<R, T>,)*>
+            GatherInputs<R, T> for ($(Sub<$E, $I>,)* $($K,)*)
         where
             $(T: Find<R, $E, { TopHolds::<R, T, $E>::YES }>,)*
         {
@@ -300,11 +300,11 @@ macro_rules! gather_impl {
     };
 }
 gather_impl!([][]);
-gather_impl!([A][]);
-gather_impl!([A B][]);
-gather_impl!([A B C][]);
-gather_impl!([A B C D][]);
-gather_impl!([A B C D][K0 K1 K2 K3]);
+gather_impl!([A IA][]);
+gather_impl!([A IA B IB][]);
+gather_impl!([A IA B IB C IC][]);
+gather_impl!([A IA B IB C IC D ID][]);
+gather_impl!([A IA B IB C IC D ID][K0 K1 K2 K3]);
 
 const _: () = assert!(
     crate::ARITY == 4,

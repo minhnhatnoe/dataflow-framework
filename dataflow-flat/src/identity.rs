@@ -33,21 +33,6 @@ use crate::plan::Planned;
 /// some value; `()` is not a component, so it never matches one).
 pub(crate) const BLANK: TypeId = TypeId::of::<()>();
 
-/// Panics if a list of identities has a repeat.
-pub(crate) const fn assert_distinct(ids: &[TypeId]) {
-    let mut i = 0;
-    while i < ids.len() {
-        let mut j = i + 1;
-        while j < ids.len() {
-            if ids[i] == ids[j] {
-                panic!("a component lists the same dependency twice");
-            }
-            j += 1;
-        }
-        i += 1;
-    }
-}
-
 /// FNV-1a of a type name: where the plan's table starts looking for a
 /// component (see `table`). It is only a hint: equal names or equal hashes of
 /// different types are told apart by `TypeId`.

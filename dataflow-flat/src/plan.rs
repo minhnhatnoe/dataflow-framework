@@ -2,7 +2,10 @@
 //!
 //! The run needs one kind of fact: for every edge `parent -> dependency`,
 //! whether this is where the depth-first walk from the root *first* reaches
-//! the dependency ([`Edge::FIRST`]). Each component is stored (and later run)
+//! the dependency ([`Edge::FIRST`]). An edge is an entry of the parent's
+//! subscription tree, `Sub<dependency, position>`, so two entries of one parent
+//! that name the same type (through an alias) are two edges, and exactly one of
+//! them is the first. Each component is stored (and later run)
 //! at that edge only. The plan also gives the range of plan indices each
 //! storage subtree covers ([`Plan::range_of`]), which steers the input lookups.
 //!
@@ -11,7 +14,9 @@
 //! it was reached from, unless it was reached before; then visits its
 //! dependencies in listing order. This needs `const_trait_impl`, because the
 //! walk calls trait methods ([`Upstream::visit_all`]) on the types of the
-//! graph from inside a `const fn`. The walk records components in first-reached
+//! graph from inside a `const fn`. There is no check for a component listing a
+//! dependency twice: the second entry is just a later visit of a component
+//! already recorded. The walk records components in first-reached
 //! order, which is a pre-order of the first-parent tree, so the storage subtree
 //! of a component is a contiguous range of the plan.
 //!
@@ -33,8 +38,8 @@
 use std::any::TypeId;
 use std::marker::PhantomData;
 
-use crate::component::Component;
-use crate::identity::{assert_distinct, At, Hashed, BLANK};
+use crate::component::{Component, Sub};
+use crate::identity::{At, Hashed, BLANK};
 use crate::table::Table;
 
 /// Upper bound on components per pipeline. Compile-time memory grows with
@@ -49,13 +54,13 @@ const NO_PARENT: u32 = u32::MAX;
 // ---------------------------------------------------------------------------
 
 /// The depth-first walk over a component and everything upstream of it: record
-/// `C` (reached from `parent`) and walk its dependencies, unless it was reached
-/// before.
+/// `C` (reached from `parent`, at position `pos` of its list) and walk its
+/// dependencies, unless it was reached before.
 ///
 /// This is a function rather than a trait method on purpose: the only trait
 /// bound it needs is `C::Deps: [const] Upstream`, so the trait solver's proof
 /// that a graph can be walked has one level per layer of the graph, not two.
-const fn visit<C: Component>(plan: &mut Plan, parent: u32)
+const fn visit<C: Component>(plan: &mut Plan, parent: u32, pos: u32)
 where
     C::Deps: [const] Upstream,
 {
@@ -74,6 +79,7 @@ where
     plan.table.put(slot, i);
     plan.ids[i] = id;
     plan.first_parent[i] = parent;
+    plan.first_pos[i] = pos;
     plan.len = i + 1;
     <C::Deps as Upstream>::visit_all(plan, i as u32);
     plan.end[i] = plan.len as u32;
@@ -88,45 +94,33 @@ where
 /// deep as the graph times that.
 #[doc(hidden)]
 pub const trait Upstream {
-    /// Visit each entry, in listing order, as reached from `parent`. Called on
-    /// the top node of a component's tree: rejects a dependency listed twice,
-    /// also when the two are in different nodes.
+    /// Visit each entry, in listing order, as reached from `parent`; then the
+    /// children. An entry `Sub<E, I>` visits `E` with position `I`.
     fn visit_all(plan: &mut Plan, parent: u32);
-    /// Visit the entries of this node and then its children (no duplicate check).
-    fn visit_rec(plan: &mut Plan, parent: u32);
-    /// Append the `TypeId`s of this node's entries and then its children's to the
-    /// plan's scratch list, in listing order.
-    fn collect_ids(plan: &mut Plan);
 }
 
 macro_rules! upstream_leaf {
-    ($($h:ident)*) => {
+    ($($h:ident $i:ident)*) => {
         #[allow(unused_variables)]
-        const impl<$($h: Component),*> Upstream for ($($h,)*)
+        const impl<$($h: Component, const $i: usize),*> Upstream for ($(Sub<$h, $i>,)*)
         where $($h::Deps: [const] Upstream,)*
         {
             fn visit_all(plan: &mut Plan, parent: u32) {
-                assert_distinct(&[$(TypeId::of::<$h>()),*] as &[TypeId]);
-                $(visit::<$h>(plan, parent);)*
-            }
-            fn visit_rec(plan: &mut Plan, parent: u32) {
-                $(visit::<$h>(plan, parent);)*
-            }
-            fn collect_ids(plan: &mut Plan) {
-                $(plan.push_id(TypeId::of::<$h>());)*
+                $(visit::<$h>(plan, parent, $i as u32);)*
             }
         }
     };
 }
 upstream_leaf!();
-upstream_leaf!(A0);
-upstream_leaf!(A0 A1);
-upstream_leaf!(A0 A1 A2);
-upstream_leaf!(A0 A1 A2 A3);
+upstream_leaf!(A0 I0);
+upstream_leaf!(A0 I0 A1 I1);
+upstream_leaf!(A0 I0 A1 I1 A2 I2);
+upstream_leaf!(A0 I0 A1 I1 A2 I2 A3 I3);
 
-const impl<A0: Component, A1: Component, A2: Component, A3: Component,
+const impl<A0: Component, const I0: usize, A1: Component, const I1: usize,
+           A2: Component, const I2: usize, A3: Component, const I3: usize,
            K0: [const] Upstream, K1: [const] Upstream, K2: [const] Upstream, K3: [const] Upstream>
-    Upstream for (A0, A1, A2, A3, K0, K1, K2, K3)
+    Upstream for (Sub<A0, I0>, Sub<A1, I1>, Sub<A2, I2>, Sub<A3, I3>, K0, K1, K2, K3)
 where
     A0::Deps: [const] Upstream,
     A1::Deps: [const] Upstream,
@@ -134,30 +128,14 @@ where
     A3::Deps: [const] Upstream,
 {
     fn visit_all(plan: &mut Plan, parent: u32) {
-        plan.scratch_len = 0;
-        <Self as Upstream>::collect_ids(plan);
-        assert_distinct(plan.scratch_ids());
-        <Self as Upstream>::visit_rec(plan, parent);
-    }
-    fn visit_rec(plan: &mut Plan, parent: u32) {
-        visit::<A0>(plan, parent);
-        visit::<A1>(plan, parent);
-        visit::<A2>(plan, parent);
-        visit::<A3>(plan, parent);
-        K0::visit_rec(plan, parent);
-        K1::visit_rec(plan, parent);
-        K2::visit_rec(plan, parent);
-        K3::visit_rec(plan, parent);
-    }
-    fn collect_ids(plan: &mut Plan) {
-        plan.push_id(TypeId::of::<A0>());
-        plan.push_id(TypeId::of::<A1>());
-        plan.push_id(TypeId::of::<A2>());
-        plan.push_id(TypeId::of::<A3>());
-        K0::collect_ids(plan);
-        K1::collect_ids(plan);
-        K2::collect_ids(plan);
-        K3::collect_ids(plan);
+        visit::<A0>(plan, parent, I0 as u32);
+        visit::<A1>(plan, parent, I1 as u32);
+        visit::<A2>(plan, parent, I2 as u32);
+        visit::<A3>(plan, parent, I3 as u32);
+        K0::visit_all(plan, parent);
+        K1::visit_all(plan, parent);
+        K2::visit_all(plan, parent);
+        K3::visit_all(plan, parent);
     }
 }
 
@@ -167,7 +145,8 @@ where
 
 /// The plan of one root: each component's `TypeId` in first-reached order
 /// (the order is the component's index), its first-reached parent as an
-/// index, and its subtree extent.
+/// index with the position of the entry that reached it, and its subtree
+/// extent.
 #[doc(hidden)]
 pub struct Plan {
     /// Number of components recorded so far.
@@ -180,13 +159,14 @@ pub struct Plan {
     /// Index of the component each was first reached from (`NO_PARENT` for
     /// the root).
     first_parent: [u32; MAX_COMPONENTS],
+    /// Position, in that parent's list of subscriptions, of the entry that
+    /// first reached each component (two entries of one parent may name the
+    /// same component, through an alias).
+    first_pos: [u32; MAX_COMPONENTS],
     /// Components are in first-reached (depth-first pre-)order, so the
     /// storage subtree of entry `i` is the range `i..end[i]`. 0 while the
     /// walk is still inside entry `i`.
     end: [u32; MAX_COMPONENTS],
-    /// The `TypeId`s listed by the component whose duplicate check is running.
-    scratch: [TypeId; MAX_COMPONENTS],
-    scratch_len: usize,
 }
 
 impl Plan {
@@ -200,24 +180,11 @@ impl Plan {
             ids: [BLANK; MAX_COMPONENTS],
             table: Table::new(),
             first_parent: [NO_PARENT; MAX_COMPONENTS],
+            first_pos: [0; MAX_COMPONENTS],
             end: [0; MAX_COMPONENTS],
-            scratch: [BLANK; MAX_COMPONENTS],
-            scratch_len: 0,
         };
-        visit::<A>(&mut plan, NO_PARENT);
+        visit::<A>(&mut plan, NO_PARENT, 0);
         plan
-    }
-
-    const fn push_id(&mut self, id: TypeId) {
-        if self.scratch_len == MAX_COMPONENTS {
-            panic!("too many subscriptions in one component");
-        }
-        self.scratch[self.scratch_len] = id;
-        self.scratch_len += 1;
-    }
-
-    const fn scratch_ids(&self) -> &[TypeId] {
-        self.scratch.split_at(self.scratch_len).0
     }
 
     /// Is the component with this `TypeId` in the plan? (Run time, at build.)
@@ -238,6 +205,12 @@ impl Plan {
         self.first_parent[i]
     }
 
+    /// Position, in the first parent's list, of the entry that first reached
+    /// entry `i`.
+    pub(crate) const fn first_pos_of(&self, i: usize) -> u32 {
+        self.first_pos[i]
+    }
+
     /// The storage subtree of entry `i` as the range `lo..hi` of plan indices.
     pub(crate) const fn range_of(&self, i: usize) -> (usize, usize) {
         (i, self.end[i] as usize)
@@ -256,12 +229,19 @@ where
     const PLAN: &'static Plan = &Plan::of::<A>();
 }
 
-/// Per-edge constant, looked up in the plan of root `R`.
+/// Per-edge constant, looked up in the plan of root `R`: the entry at position
+/// `I` of `P`'s list, naming `H`.
 #[doc(hidden)]
-pub struct Edge<R, P, H>(PhantomData<(R, P, H)>);
-impl<R: Planned, P: Component, H: Component> Edge<R, P, H> {
-    /// True if the edge `P -> H` is where the walk first reaches `H`.
-    pub const FIRST: bool = R::PLAN.first_parent_of(At::<R, H>::INDEX) as usize == At::<R, P>::INDEX;
+pub struct Edge<R, P, H, const I: usize>(PhantomData<(R, P, H)>);
+impl<R: Planned, P: Component, H: Component, const I: usize> Edge<R, P, H, I> {
+    /// True if this entry is where the walk first reaches `H`: `P` is the
+    /// first parent and this is the position that reached it. (Two entries of
+    /// `P` naming `H` through an alias have the same `P` and `H`, and differ in
+    /// `I`.)
+    pub const FIRST: bool = {
+        let h = At::<R, H>::INDEX;
+        R::PLAN.first_parent_of(h) as usize == At::<R, P>::INDEX && R::PLAN.first_pos_of(h) as usize == I
+    };
 }
 
 #[cfg(test)]
@@ -354,21 +334,23 @@ mod trace {
         }
 
         println!("\nedges:");
-        macro_rules! edge { ($p:ty, $h:ty, $pn:expr, $hn:expr, $want:expr) => {
-            let got = Edge::<App, $p, $h>::FIRST;
+        macro_rules! edge { ($p:ty, $h:ty, $i:expr, $pn:expr, $hn:expr, $want:expr) => {
+            let got = Edge::<App, $p, $h, $i>::FIRST;
             println!("  {:<10} -> {:<14} FIRST = {}", $pn, $hn, got);
             assert_eq!(got, $want, "{} -> {}", $pn, $hn);
         } }
-        edge!(App, Report, "App", "Report", true);
-        edge!(App, Len<Tokenize>, "App", "Len<Tokenize>", true);
-        edge!(Report, TopWords, "Report", "TopWords", true);
-        edge!(Report, Longest, "Report", "Longest", true);
-        edge!(Report, Source, "Report", "Source", false);
-        edge!(TopWords, WordCount, "TopWords", "WordCount", true);
-        edge!(WordCount, Tokenize, "WordCount", "Tokenize", true);
-        edge!(Longest, Tokenize, "Longest", "Tokenize", false);
-        edge!(Tokenize, Source, "Tokenize", "Source", true);
-        edge!(Len<Tokenize>, Tokenize, "Len<Tok>", "Tokenize", false);
+        edge!(App, Report, 0, "App", "Report", true);
+        edge!(App, Len<Tokenize>, 1, "App", "Len<Tokenize>", true);
+        edge!(Report, TopWords, 0, "Report", "TopWords", true);
+        edge!(Report, Longest, 1, "Report", "Longest", true);
+        edge!(Report, Source, 2, "Report", "Source", false);
+        edge!(TopWords, WordCount, 0, "TopWords", "WordCount", true);
+        edge!(WordCount, Tokenize, 0, "WordCount", "Tokenize", true);
+        edge!(Longest, Tokenize, 0, "Longest", "Tokenize", false);
+        edge!(Tokenize, Source, 0, "Tokenize", "Source", true);
+        edge!(Len<Tokenize>, Tokenize, 0, "Len<Tok>", "Tokenize", false);
+        // The right parent at another position is not the first edge.
+        edge!(App, Report, 1, "App", "Report@1", false);
 
         // The storage subtree of Report holds TopWords..Source and Longest, but
         // not Len<Tokenize> or App.

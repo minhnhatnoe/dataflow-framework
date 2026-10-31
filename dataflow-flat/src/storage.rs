@@ -6,7 +6,7 @@
 use std::any::type_name;
 
 use crate::build::ConstructPass;
-use crate::component::{Component, ComponentSubscription, DepList};
+use crate::component::{Component, ComponentSubscription, DepList, Sub};
 use crate::lookup::{Done, Span};
 use crate::plan::{Edge, Planned};
 
@@ -140,36 +140,39 @@ pub trait DepStorage<R: Planned, P: Component>: DepList {
     fn make(pass: &mut ConstructPass) -> Self::S;
 }
 macro_rules! dep_storage_leaf {
-    ($Tr:ident, $Mask:ident, [$($E:ident)*]) => {
-        impl<R: Planned, P: Component, $($E: Placed<R>),*> DepStorage<R, P> for ($($E,)*)
+    ($Tr:ident, $Mask:ident, [$($E:ident $I:ident)*]) => {
+        impl<R: Planned, P: Component, $($E: Placed<R>, const $I: usize),*> DepStorage<R, P>
+            for ($(Sub<$E, $I>,)*)
         where
-            $Mask<$({ Edge::<R, P, $E>::FIRST }),*>: $Tr<R, $($E),*>,
+            $Mask<$({ Edge::<R, P, $E, $I>::FIRST }),*>: $Tr<R, $($E),*>,
         {
-            type S = <$Mask<$({ Edge::<R, P, $E>::FIRST }),*> as $Tr<R, $($E),*>>::S;
-            type O = <$Mask<$({ Edge::<R, P, $E>::FIRST }),*> as $Tr<R, $($E),*>>::O;
+            type S = <$Mask<$({ Edge::<R, P, $E, $I>::FIRST }),*> as $Tr<R, $($E),*>>::S;
+            type O = <$Mask<$({ Edge::<R, P, $E, $I>::FIRST }),*> as $Tr<R, $($E),*>>::O;
             fn make(pass: &mut ConstructPass) -> Self::S {
-                <$Mask<$({ Edge::<R, P, $E>::FIRST }),*> as $Tr<R, $($E),*>>::make(pass)
+                <$Mask<$({ Edge::<R, P, $E, $I>::FIRST }),*> as $Tr<R, $($E),*>>::make(pass)
             }
         }
     };
 }
 dep_storage_leaf!(Stored0, Mask0, []);
-dep_storage_leaf!(Stored1, Mask1, [A]);
-dep_storage_leaf!(Stored2, Mask2, [A B]);
-dep_storage_leaf!(Stored3, Mask3, [A B C]);
-dep_storage_leaf!(Stored4, Mask4, [A B C D]);
+dep_storage_leaf!(Stored1, Mask1, [A IA]);
+dep_storage_leaf!(Stored2, Mask2, [A IA B IB]);
+dep_storage_leaf!(Stored3, Mask3, [A IA B IB C IC]);
+dep_storage_leaf!(Stored4, Mask4, [A IA B IB C IC D ID]);
 
-impl<R: Planned, P: Component, A: Placed<R>, B: Placed<R>, C: Placed<R>, D: Placed<R>,
+impl<R: Planned, P: Component,
+     A: Placed<R>, const IA: usize, B: Placed<R>, const IB: usize,
+     C: Placed<R>, const IC: usize, D: Placed<R>, const ID: usize,
      K0: DepStorage<R, P>, K1: DepStorage<R, P>, K2: DepStorage<R, P>, K3: DepStorage<R, P>>
-    DepStorage<R, P> for (A, B, C, D, K0, K1, K2, K3)
+    DepStorage<R, P> for (Sub<A, IA>, Sub<B, IB>, Sub<C, IC>, Sub<D, ID>, K0, K1, K2, K3)
 where
-    (A, B, C, D): DepStorage<R, P>,
+    (Sub<A, IA>, Sub<B, IB>, Sub<C, IC>, Sub<D, ID>): DepStorage<R, P>,
 {
-    type S = (<(A, B, C, D) as DepStorage<R, P>>::S, K0::S, K1::S, K2::S, K3::S);
-    type O = (<(A, B, C, D) as DepStorage<R, P>>::O, K0::O, K1::O, K2::O, K3::O);
+    type S = (<(Sub<A, IA>, Sub<B, IB>, Sub<C, IC>, Sub<D, ID>) as DepStorage<R, P>>::S, K0::S, K1::S, K2::S, K3::S);
+    type O = (<(Sub<A, IA>, Sub<B, IB>, Sub<C, IC>, Sub<D, ID>) as DepStorage<R, P>>::O, K0::O, K1::O, K2::O, K3::O);
     fn make(pass: &mut ConstructPass) -> Self::S {
         (
-            <(A, B, C, D) as DepStorage<R, P>>::make(pass),
+            <(Sub<A, IA>, Sub<B, IB>, Sub<C, IC>, Sub<D, ID>) as DepStorage<R, P>>::make(pass),
             K0::make(pass),
             K1::make(pass),
             K2::make(pass),

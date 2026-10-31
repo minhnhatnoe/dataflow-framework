@@ -154,8 +154,8 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
 
     // Subscriptions with the same type (compared as written) share one
     // dependency: `Deps` lists each type once and both fields get the same
-    // reference. (Two spellings of one type, e.g. via an alias, are still
-    // caught by the plan as a duplicate dependency.)
+    // reference. (Two spellings of one type, e.g. via an alias, stay two
+    // entries, told apart by their position; the plan stores the type once.)
     let mut unique: Vec<(String, &Type)> = Vec::new();
     let mut slot_of: Vec<usize> = Vec::new();
     for t in &field_types {
@@ -175,9 +175,11 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     let all: Vec<usize> = (0..unique.len()).collect();
     let tree = Shape::build(&all);
     let types: Vec<&Type> = unique.iter().map(|(_, t)| *t).collect();
+    // Each entry is tagged with its position in the unique list: two entries
+    // naming one type through different spellings stay two entries of the plan.
     let deps_ty = tree.render(&|i| {
         let t = types[i];
-        quote!(#t)
+        quote!(#krate::Sub<#t, #i>)
     });
     let deps_pat = tree.render(&|i| {
         let v = &vars[i];

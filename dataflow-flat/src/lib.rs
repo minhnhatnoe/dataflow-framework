@@ -20,8 +20,10 @@
 //!    parent it was first reached from. A component's identity is its
 //!    `TypeId` (`identity`, `table`). That gives, for every edge
 //!    `(parent, dependency)`, whether this is the edge that *first* reaches
-//!    the dependency (`Edge::FIRST`), and which components each storage
-//!    subtree covers (`Plan::range_of`).
+//!    the dependency (`Edge::FIRST`: the first parent *and* the position in its
+//!    list that reached it, so two entries naming the same type through an
+//!    alias are told apart), and which components each storage subtree covers
+//!    (`Plan::range_of`).
 //! 2. **States tree** (`storage`, types via `generic_const_exprs`).
 //!    `Tree<R, C>` holds a component `C` and, for each of its subscriptions,
 //!    either the subtree of that dependency (if this edge is the first one
@@ -55,7 +57,9 @@
 //!
 //! * **Singletons.** Each concrete component type is constructed once,
 //!   updated once per run, and dropped once. Generic instantiations are
-//!   different types.
+//!   different types. Subscribing to the same type twice, also through an alias
+//!   (`type Y = X;`, `a: X, b: Y`), is one dependency: both fields are the same
+//!   reference.
 //! * **Execution order** (see [`Pipeline`]): depth-first post-order following
 //!   subscription listing order.
 //! * **No outputs are stored between runs.** Intermediate outputs live only
@@ -67,8 +71,7 @@
 //! Checked at compile time: every dependency is a component, `update`'s inputs
 //! match the upstream outputs, the graph is acyclic (a cycle is E0275 "overflow
 //! evaluating the requirement `(B,): Upstream`", naming a component of the
-//! cycle), no component lists the same dependency twice, and the graph fits
-//! [`MAX_COMPONENTS`].
+//! cycle), and the graph fits [`MAX_COMPONENTS`].
 //! Checked when the pipeline is built: no config is supplied for a component
 //! outside the graph.
 
@@ -99,7 +102,7 @@ mod table;
 mod walk;
 
 pub use build::{BuildError, Configs};
-pub use component::{Component, ComponentSubscription, DepList, ARITY};
+pub use component::{Component, ComponentSubscription, DepList, Sub, ARITY};
 pub use pipeline::Pipeline;
 pub use plan::MAX_COMPONENTS;
 pub use walk::Root;
