@@ -5,13 +5,19 @@
 import random, sys
 mode = sys.argv[1]
 random.seed(1)
-L, W, D = int(sys.argv[2]) if len(sys.argv) > 2 else 20, 20, 4
+# Further arguments (any order after `layers`): `wide`, `d=N` (deps per component, default 4,
+# sampled from the previous layer), `w=N` (components per layer, default 20), `root=N` (the root
+# subscribes to the last N components, layer-major; default 20, or 100 with `wide`), `rl=N`
+# (adds #![recursion_limit = "N"] to the generated crate).
+extra = {a.split("=")[0]: int(a.split("=")[1]) for a in sys.argv[3:] if "=" in a}
+L, W, D = int(sys.argv[2]) if len(sys.argv) > 2 else 20, extra.get("w", 20), extra.get("d", 4)
 deps = {}
 for l in range(L):
     for w in range(W):
         deps[(l,w)] = [] if l == 0 else [(l-1, d) for d in random.sample(range(W), D)]
-WIDE = len(sys.argv) > 3 and sys.argv[3] == "wide"
+WIDE = "wide" in sys.argv[3:]
 roots = [(l, w) for l in range(L - (5 if WIDE else 1), L) for w in range(W)]
+if "root" in extra: roots = [(l, w) for l in range(L) for w in range(W)][-extra["root"]:]
 order, seen = [], set()
 def visit(n):
     if n in seen: return
@@ -72,7 +78,7 @@ def nest(xs):
     s = "()"
     for x in reversed(xs): s = f"({x}, {s})"
     return s
-out = ["#![allow(non_snake_case, unused_imports, dead_code)]", "use std::hint::black_box;", "use std::time::Instant;", ""]
+out = ["#![allow(non_snake_case, unused_imports, dead_code)]"] + ([f'#![recursion_limit = "{extra["rl"]}"]'] if "rl" in extra else []) + ["use std::hint::black_box;", "use std::time::Instant;", ""]
 use_flat = mode in ("full", "flat")
 use_hand = mode in ("full", "hand")
 if use_flat: out.append("mod flat {\n" + components_flat() + "\n}")
