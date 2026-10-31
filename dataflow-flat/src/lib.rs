@@ -99,7 +99,7 @@ mod table;
 mod walk;
 
 pub use build::{BuildError, Configs};
-pub use component::{Component, ComponentSubscription, DepList};
+pub use component::{Component, ComponentSubscription, DepList, ARITY};
 pub use pipeline::Pipeline;
 pub use plan::MAX_COMPONENTS;
 pub use walk::Root;

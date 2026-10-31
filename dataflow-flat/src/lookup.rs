@@ -353,3 +353,8 @@ gather_impl!([A B][]);
 gather_impl!([A B C][]);
 gather_impl!([A B C D][]);
 gather_impl!([A B C D][K0 K1 K2 K3]);
+
+const _: () = assert!(
+    crate::ARITY == 4,
+    "the node-shape impls in this file are written for ARITY = 4; update them"
+);

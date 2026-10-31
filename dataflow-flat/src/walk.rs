@@ -205,3 +205,8 @@ where
         states.walk(()).into_output()
     }
 }
+
+const _: () = assert!(
+    crate::ARITY == 4,
+    "the node-shape impls in this file are written for ARITY = 4; update them"
+);

@@ -42,6 +42,19 @@ pub trait Component: ComponentSubscription + Sized {
     fn update(&mut self, input: Self::Input<'_>) -> Self::Output;
 }
 
+/// Entries per node, and children per inner node, of a subscription tree
+/// (see [`DepList`]). Defined once, in `dataflow-macros` (`arity!()`), which
+/// builds the trees with it. The per-node-shape impls in this crate are written
+/// out by `macro_rules!` for 4 and cannot follow it; each family asserts
+/// `ARITY == 4` so changing the constant fails the build until they are updated.
+#[doc(hidden)]
+pub const ARITY: usize = dataflow_macros::arity!();
+
+const _: () = assert!(
+    ARITY == 4,
+    "the node-shape impls (DepList, Upstream, DepStorage, Walk, Get, GatherInputs) are written for ARITY = 4; update them"
+);
+
 /// A node of the subscription tree: the type the derive builds for
 /// [`ComponentSubscription::Deps`]. User code never writes one.
 ///
@@ -56,9 +69,11 @@ pub trait Component: ComponentSubscription + Sized {
 ///   nodes (unused children are `()`), used for more than 4 subscriptions.
 ///
 /// Listing order is the order of the entries of a node followed by its children
-/// left to right. The derive fills nodes left to right and keeps the tree
-/// shallow (depth grows with log4 of the number of subscriptions): 12
-/// subscriptions are `(A, B, C, D, (E, F, G, H), (I, J, K, L), (), ())`.
+/// left to right. The derive keeps the tree as shallow as possible and
+/// balanced: after the node's 4 entries it splits the remaining subscriptions
+/// into 4 contiguous parts of near-equal size (depth grows with log4 of the
+/// number of subscriptions). 12 subscriptions are
+/// `(A, B, C, D, (E, F), (G, H), (I, J), (K, L))`.
 pub trait DepList: 'static {
     /// The nested tuple of references `update` is handed, before the derive
     /// names its fields. It has the shape of the node.
