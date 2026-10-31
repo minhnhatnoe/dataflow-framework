@@ -17,7 +17,8 @@
 //! 1. **Plan** (`plan`, constant evaluation). The depth-first walk from the
 //!    root runs once inside constant evaluation (a `const fn` that calls trait
 //!    methods, `const_trait_impl`) and records every component with the
-//!    parent it was first reached from. That gives, for every edge
+//!    parent it was first reached from. A component's identity is its
+//!    `TypeId` (`identity`, `table`). That gives, for every edge
 //!    `(parent, dependency)`, whether this is the edge that *first* reaches
 //!    the dependency (`Edge::FIRST`), and which components each storage
 //!    subtree holds (`Plan::holds`).
@@ -61,7 +62,7 @@
 //!   during `run` and are dropped before it returns; only the root's output
 //!   is returned.
 //! * `#![forbid(unsafe_code)]`, no `dyn`, no lookups at run time (the `TypeId`
-//!   maps are used only in `Pipeline::build`).
+//!   map of configs is used only in `Pipeline::build`).
 //!
 //! Checked at compile time: every dependency is a component, `update`'s inputs
 //! match the upstream outputs, the graph is acyclic (a cycle is E0275 "overflow
@@ -72,11 +73,13 @@
 //! outside the graph.
 
 #![forbid(unsafe_code)]
-// The plan's constants are hashed from type names.
+// The plan's table starts probing at a hash of the component's type name (a
+// hint; the match is decided by `TypeId`).
 #![feature(const_type_name)]
 // The plan runs the dependency walk in constant evaluation, which calls trait
-// methods from a `const fn`.
-#![feature(const_trait_impl)]
+// methods from a `const fn`, and compares components by `TypeId` (`==` in a
+// `const fn`).
+#![feature(const_trait_impl, const_cmp)]
 // The plan's constants select types (`Mask4<{ Edge::FIRST }, ..>`). Incomplete, but
 // confined to this crate: users of `Pipeline` need no feature gate.
 #![feature(generic_const_exprs)]
@@ -87,10 +90,12 @@ extern crate self as dataflow_flat;
 
 mod build;
 mod component;
+mod identity;
 mod lookup;
 mod pipeline;
 mod plan;
 mod storage;
+mod table;
 mod walk;
 
 pub use build::{BuildError, Configs};

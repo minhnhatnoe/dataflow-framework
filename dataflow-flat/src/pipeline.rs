@@ -1,6 +1,5 @@
 //! The user-facing pipeline: build once, run many times.
 
-use std::collections::HashMap;
 use std::marker::PhantomData;
 
 use crate::build::{BuildError, Configs, ConstructPass};
@@ -35,7 +34,7 @@ impl<A: Root> Pipeline<A> {
     /// graph is a [`BuildError`].
     pub fn build(configs: Configs) -> Result<Self, BuildError> {
         // Configs for components outside the graph are reported before any
-        // constructor runs: the plan of the root says which ids are in it.
+        // constructor runs: the plan of the root says which `TypeId`s are in it.
         let mut unused: Vec<_> =
             configs.map.iter().filter(|(id, _)| !A::in_plan(**id)).map(|(_, e)| e.name()).collect();
         unused.sort_unstable();
@@ -43,7 +42,7 @@ impl<A: Root> Pipeline<A> {
             return Err(BuildError { unused });
         }
 
-        let mut pass = ConstructPass { configs: configs.map, ids: HashMap::new(), order: Vec::new() };
+        let mut pass = ConstructPass { configs: configs.map, order: Vec::new() };
         let states = A::make(&mut pass);
         Ok(Pipeline { states, order: pass.order, _root: PhantomData })
     }

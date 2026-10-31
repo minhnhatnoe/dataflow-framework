@@ -11,7 +11,7 @@ procs=${BENCH_PROCS:-5}; cpu=${BENCH_CPU:-2}
 trap 'python3 bench/gen_bench.py full 20 >/dev/null' EXIT
 python3 bench/gen_bench.py full "$layers" $wide
 timeout 300 cargo build --release -p bench 2>&1 | grep -E "^(error|\s+Finished)" || true
-bin=target/release/bench
+bin=${CARGO_TARGET_DIR:-target}/release/bench
 out=$(mktemp); trap 'rm -f "$out"; python3 bench/gen_bench.py full 20 >/dev/null' EXIT
 for i in $(seq "$procs"); do
     echo "process $i:"

@@ -1,0 +1,9 @@
+# Version 1 of a crate named "foo". The test crate depends on both versions,
+# so it has two distinct types whose `type_name` is the same, "foo::Foo".
+[package]
+name = "foo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dataflow-flat = { path = "../../dataflow-flat" }

@@ -22,7 +22,8 @@
 use std::marker::PhantomData;
 
 use crate::component::{Component, DepList};
-use crate::plan::{Described, Planned};
+use crate::identity::At;
+use crate::plan::Planned;
 use crate::storage::{DepsDone, Placed};
 
 // ---------------------------------------------------------------------------
@@ -97,8 +98,8 @@ impl<R> Span<R> for () {
     const HI: usize = 0;
 }
 impl<R: Planned, C: Placed<R>> Span<R> for Done<R, C> {
-    const LO: usize = R::PLAN.range_of(<C as Described>::ID).0;
-    const HI: usize = R::PLAN.range_of(<C as Described>::ID).1;
+    const LO: usize = R::PLAN.range_of(At::<R, C>::INDEX).0;
+    const HI: usize = R::PLAN.range_of(At::<R, C>::INDEX).1;
 }
 
 macro_rules! span_impl {
@@ -116,7 +117,7 @@ span_impl!(A B C D);
 span_impl!(A B C D E);
 
 const fn plan_position<R: Planned, H: Component>() -> usize {
-    R::PLAN.position(<H as Described>::ID)
+    At::<R, H>::INDEX
 }
 
 // ---------------------------------------------------------------------------
@@ -131,7 +132,7 @@ pub trait Select<R, H: Component> {
     const POS: usize;
 }
 impl<R: Planned, C: Placed<R>, H: Component> Select<R, H> for Done<R, C> {
-    const POS: usize = if <C as Described>::ID == <H as Described>::ID { 0 } else { 1 };
+    const POS: usize = if At::<R, C>::INDEX == At::<R, H>::INDEX { 0 } else { 1 };
 }
 
 macro_rules! select_impl {

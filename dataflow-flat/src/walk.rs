@@ -1,6 +1,8 @@
 //! The run: a fold over the states tree, and the [`Root`] bound that ties a
 //! root component to its storage and walk.
 
+use std::any::TypeId;
+
 use crate::build::ConstructPass;
 use crate::component::Component;
 use crate::lookup::{Context, Done, GatherInputs, Node, Span};
@@ -178,9 +180,9 @@ pub trait Root: Component {
     type States;
     #[doc(hidden)]
     fn make(pass: &mut ConstructPass) -> Self::States;
-    /// Is the component with this id part of the graph?
+    /// Is the component with this `TypeId` part of the graph?
     #[doc(hidden)]
-    fn in_plan(id: u64) -> bool;
+    fn in_plan(id: TypeId) -> bool;
     #[doc(hidden)]
     fn run(states: &mut Self::States) -> Self::Output;
 }
@@ -195,7 +197,7 @@ where
     fn make(pass: &mut ConstructPass) -> Tree<A, A> {
         Tree::make(pass)
     }
-    fn in_plan(id: u64) -> bool {
+    fn in_plan(id: TypeId) -> bool {
         <A as Planned>::PLAN.contains(id)
     }
     #[inline(always)]

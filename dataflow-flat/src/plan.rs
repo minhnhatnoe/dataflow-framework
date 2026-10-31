@@ -30,47 +30,19 @@
 //! nested `&'static` constants is hashed as a tree by incremental
 //! compilation, which is exponential in graph depth.)
 
-use std::any::type_name;
+use std::any::TypeId;
 use std::marker::PhantomData;
 
 use crate::component::Component;
+use crate::identity::{assert_distinct, At, Hashed, BLANK};
+use crate::table::Table;
 
 /// Upper bound on components per pipeline. Compile-time memory grows with
 /// MAX_COMPONENTS x (number of components), so raise it only as needed.
 pub const MAX_COMPONENTS: usize = 512;
-const SET_CAP: usize = MAX_COMPONENTS * 2; // power of two
 
-/// Parent id of the root, and the id that means "no component". Component ids
-/// are never 0 or 1.
-pub(crate) const ROOT: u64 = 0;
-const RESERVED: u64 = 1;
-
-/// FNV-1a of the type name: a compile-time identity for each component.
-/// Collisions are caught when the pipeline is built (see `ConstructPass`).
-const fn component_id(s: &str) -> u64 {
-    let bytes = s.as_bytes();
-    let mut hash: u64 = 0xcbf29ce484222325;
-    let mut i = 0;
-    while i < bytes.len() {
-        hash ^= bytes[i] as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
-        i += 1;
-    }
-    if hash <= RESERVED {
-        hash + 2 // keep ROOT and RESERVED free
-    } else {
-        hash
-    }
-}
-
-/// Compile-time identity of a component.
-#[doc(hidden)]
-pub trait Described {
-    const ID: u64;
-}
-impl<C: Component> Described for C {
-    const ID: u64 = component_id(type_name::<C>());
-}
+/// The first parent of the root: it was not reached from any component.
+const NO_PARENT: u32 = u32::MAX;
 
 // ---------------------------------------------------------------------------
 // The walk
@@ -83,14 +55,14 @@ impl<C: Component> Described for C {
 /// This is a function rather than a trait method on purpose: the only trait
 /// bound it needs is `C::Deps: [const] Upstream`, so the trait solver's proof
 /// that a graph can be walked has one level per layer of the graph, not two.
-const fn visit<C: Component>(plan: &mut Plan, parent: u64)
+const fn visit<C: Component>(plan: &mut Plan, parent: u32)
 where
     C::Deps: [const] Upstream,
 {
-    let id = <C as Described>::ID;
-    let slot = plan.slot(id);
-    if plan.keys[slot] == id {
-        if plan.end[plan.index[slot] as usize - 1] == 0 {
+    let id = TypeId::of::<C>();
+    let slot = plan.table.slot(&plan.ids, <C as Hashed>::HASH, id);
+    if let Some(at) = plan.table.at(slot) {
+        if plan.end[at] == 0 {
             panic!("dependency cycle");
         }
         return;
@@ -99,11 +71,11 @@ where
     if i == MAX_COMPONENTS {
         panic!("too many components: raise dataflow_flat::MAX_COMPONENTS");
     }
-    plan.keys[slot] = id;
-    plan.index[slot] = i as u32 + 1;
+    plan.table.put(slot, i);
+    plan.ids[i] = id;
     plan.first_parent[i] = parent;
     plan.len = i + 1;
-    <C::Deps as Upstream>::visit_all(plan, id);
+    <C::Deps as Upstream>::visit_all(plan, i as u32);
     plan.end[i] = plan.len as u32;
 }
 
@@ -119,31 +91,17 @@ pub const trait Upstream {
     /// Visit each entry, in listing order, as reached from `parent`. Called on
     /// the top node of a component's tree: rejects a dependency listed twice,
     /// also when the two are in different nodes.
-    fn visit_all(plan: &mut Plan, parent: u64);
+    fn visit_all(plan: &mut Plan, parent: u32);
     /// Visit the entries of this node and then its children (no duplicate check).
-    fn visit_rec(plan: &mut Plan, parent: u64);
-    /// Append the ids of this node's entries and then its children's to the
+    fn visit_rec(plan: &mut Plan, parent: u32);
+    /// Append the `TypeId`s of this node's entries and then its children's to the
     /// plan's scratch list, in listing order.
     fn collect_ids(plan: &mut Plan);
 }
 
-const fn assert_distinct(ids: &[u64]) {
-    let mut i = 0;
-    while i < ids.len() {
-        let mut j = i + 1;
-        while j < ids.len() {
-            if ids[i] == ids[j] {
-                panic!("a component lists the same dependency twice");
-            }
-            j += 1;
-        }
-        i += 1;
-    }
-}
-
 const impl Upstream for () {
-    fn visit_all(_: &mut Plan, _: u64) {}
-    fn visit_rec(_: &mut Plan, _: u64) {}
+    fn visit_all(_: &mut Plan, _: u32) {}
+    fn visit_rec(_: &mut Plan, _: u32) {}
     fn collect_ids(_: &mut Plan) {}
 }
 
@@ -152,15 +110,15 @@ macro_rules! upstream_leaf {
         const impl<$($h: Component),+> Upstream for ($($h,)+)
         where $($h::Deps: [const] Upstream,)+
         {
-            fn visit_all(plan: &mut Plan, parent: u64) {
-                assert_distinct(&[$(<$h as Described>::ID),+]);
+            fn visit_all(plan: &mut Plan, parent: u32) {
+                assert_distinct(&[$(TypeId::of::<$h>()),+]);
                 $(visit::<$h>(plan, parent);)+
             }
-            fn visit_rec(plan: &mut Plan, parent: u64) {
+            fn visit_rec(plan: &mut Plan, parent: u32) {
                 $(visit::<$h>(plan, parent);)+
             }
             fn collect_ids(plan: &mut Plan) {
-                $(plan.push_id(<$h as Described>::ID);)+
+                $(plan.push_id(TypeId::of::<$h>());)+
             }
         }
     };
@@ -179,13 +137,13 @@ where
     A2::Deps: [const] Upstream,
     A3::Deps: [const] Upstream,
 {
-    fn visit_all(plan: &mut Plan, parent: u64) {
+    fn visit_all(plan: &mut Plan, parent: u32) {
         plan.scratch_len = 0;
         <Self as Upstream>::collect_ids(plan);
         assert_distinct(plan.scratch_ids());
         <Self as Upstream>::visit_rec(plan, parent);
     }
-    fn visit_rec(plan: &mut Plan, parent: u64) {
+    fn visit_rec(plan: &mut Plan, parent: u32) {
         visit::<A0>(plan, parent);
         visit::<A1>(plan, parent);
         visit::<A2>(plan, parent);
@@ -196,10 +154,10 @@ where
         K3::visit_rec(plan, parent);
     }
     fn collect_ids(plan: &mut Plan) {
-        plan.push_id(<A0 as Described>::ID);
-        plan.push_id(<A1 as Described>::ID);
-        plan.push_id(<A2 as Described>::ID);
-        plan.push_id(<A3 as Described>::ID);
+        plan.push_id(TypeId::of::<A0>());
+        plan.push_id(TypeId::of::<A1>());
+        plan.push_id(TypeId::of::<A2>());
+        plan.push_id(TypeId::of::<A3>());
         K0::collect_ids(plan);
         K1::collect_ids(plan);
         K2::collect_ids(plan);
@@ -211,22 +169,27 @@ where
 // The plan of a root
 // ---------------------------------------------------------------------------
 
-/// The plan of one root: each component's first-reached parent and subtree
-/// extent, found by id through an open-addressing index.
+/// The plan of one root: each component's `TypeId` in first-reached order
+/// (the order is the component's index), its first-reached parent as an
+/// index, and its subtree extent.
 #[doc(hidden)]
 pub struct Plan {
     /// Number of components recorded so far.
     len: usize,
-    /// id -> index + 1 (0 = empty), open addressing on `keys`.
-    keys: [u64; SET_CAP],
-    index: [u32; SET_CAP],
-    first_parent: [u64; MAX_COMPONENTS],
+    /// The components, by index.
+    ids: [TypeId; MAX_COMPONENTS],
+    /// Position by component: hash of the type name to start, `TypeId` to
+    /// decide (see [`table`](crate::table)).
+    table: Table,
+    /// Index of the component each was first reached from (`NO_PARENT` for
+    /// the root).
+    first_parent: [u32; MAX_COMPONENTS],
     /// Components are in first-reached (depth-first pre-)order, so the
     /// storage subtree of entry `i` is the range `i..end[i]`. 0 while the
     /// walk is still inside entry `i`.
     end: [u32; MAX_COMPONENTS],
-    /// The ids listed by the component whose duplicate check is running.
-    scratch: [u64; MAX_COMPONENTS],
+    /// The `TypeId`s listed by the component whose duplicate check is running.
+    scratch: [TypeId; MAX_COMPONENTS],
     scratch_len: usize,
 }
 
@@ -238,18 +201,18 @@ impl Plan {
     {
         let mut plan = Plan {
             len: 0,
-            keys: [0; SET_CAP],
-            index: [0; SET_CAP],
-            first_parent: [0; MAX_COMPONENTS],
+            ids: [BLANK; MAX_COMPONENTS],
+            table: Table::new(),
+            first_parent: [NO_PARENT; MAX_COMPONENTS],
             end: [0; MAX_COMPONENTS],
-            scratch: [0; MAX_COMPONENTS],
+            scratch: [BLANK; MAX_COMPONENTS],
             scratch_len: 0,
         };
-        visit::<A>(&mut plan, ROOT);
+        visit::<A>(&mut plan, NO_PARENT);
         plan
     }
 
-    const fn push_id(&mut self, id: u64) {
+    const fn push_id(&mut self, id: TypeId) {
         if self.scratch_len == MAX_COMPONENTS {
             panic!("too many subscriptions in one component");
         }
@@ -257,52 +220,38 @@ impl Plan {
         self.scratch_len += 1;
     }
 
-    const fn scratch_ids(&self) -> &[u64] {
+    const fn scratch_ids(&self) -> &[TypeId] {
         self.scratch.split_at(self.scratch_len).0
     }
 
-    const fn slot(&self, id: u64) -> usize {
-        let mut i = (id as usize) & (SET_CAP - 1);
-        while self.keys[i] != 0 && self.keys[i] != id {
-            i = (i + 1) & (SET_CAP - 1);
-        }
-        i
+    /// Is the component with this `TypeId` in the plan? (Run time, at build.)
+    pub(crate) fn contains(&self, id: TypeId) -> bool {
+        self.ids[..self.len].contains(&id)
     }
 
-    /// Is the component with this id in the plan?
-    pub(crate) const fn contains(&self, id: u64) -> bool {
-        id != 0 && self.keys[self.slot(id)] == id
-    }
-
-    const fn index_of(&self, id: u64) -> usize {
-        match self.index[self.slot(id)] {
-            0 => panic!("component not in plan"),
-            n => n as usize - 1,
+    /// Plan index of the component with this name hash and `TypeId`.
+    pub(crate) const fn index_of(&self, hash: u64, id: TypeId) -> usize {
+        match self.table.at(self.table.slot(&self.ids, hash, id)) {
+            Some(i) => i,
+            None => panic!("component not in plan"),
         }
     }
 
-    const fn first_parent_of(&self, id: u64) -> u64 {
-        self.first_parent[self.index_of(id)]
+    /// Index of the component that entry `i` was first reached from.
+    pub(crate) const fn first_parent_of(&self, i: usize) -> u32 {
+        self.first_parent[i]
     }
 
-    /// The storage subtree of `id` as the range `lo..hi` of plan indices.
-    pub(crate) const fn range_of(&self, id: u64) -> (usize, usize) {
-        let i = self.index_of(id);
+    /// The storage subtree of entry `i` as the range `lo..hi` of plan indices.
+    pub(crate) const fn range_of(&self, i: usize) -> (usize, usize) {
         (i, self.end[i] as usize)
     }
 
-    /// Plan index of `id`.
-    pub(crate) const fn position(&self, id: u64) -> usize {
-        self.index_of(id)
-    }
-
-    /// Does the storage subtree of `top` hold `id`? Equivalently: is `top` on
-    /// the first-parent chain of `id` (inclusive)?
+    /// Does the storage subtree of entry `top` hold entry `i`? Equivalently:
+    /// is `top` on the first-parent chain of `i` (inclusive)?
     #[cfg(test)]
-    pub(crate) const fn holds(&self, top: u64, id: u64) -> bool {
-        let t = self.index_of(top);
-        let i = self.index_of(id);
-        t <= i && i < self.end[t] as usize
+    pub(crate) const fn holds(&self, top: usize, i: usize) -> bool {
+        top <= i && i < self.end[top] as usize
     }
 }
 
@@ -323,12 +272,13 @@ where
 pub struct Edge<R, P, H>(PhantomData<(R, P, H)>);
 impl<R: Planned, P: Component, H: Component> Edge<R, P, H> {
     /// True if the edge `P -> H` is where the walk first reaches `H`.
-    pub const FIRST: bool = R::PLAN.first_parent_of(<H as Described>::ID) == <P as Described>::ID;
+    pub const FIRST: bool = R::PLAN.first_parent_of(At::<R, H>::INDEX) as usize == At::<R, P>::INDEX;
 }
 
 #[cfg(test)]
 mod trace {
     use super::*;
+    use std::any::type_name;
     use crate::ComponentSubscription;
     use std::collections::HashMap;
 
@@ -368,32 +318,32 @@ mod trace {
 
     comp!(App, [report: Report, count: Len<Tokenize>], ());
 
-    fn names() -> HashMap<u64, &'static str> {
+    fn names() -> HashMap<TypeId, &'static str> {
         let mut m = HashMap::new();
-        m.insert(ROOT, "ROOT");
-        macro_rules! n { ($($t:ty),*) => { $( m.insert(<$t as Described>::ID, type_name::<$t>().rsplit("::").next().unwrap()); )* } }
+        macro_rules! n { ($($t:ty),*) => { $( m.insert(TypeId::of::<$t>(), type_name::<$t>().rsplit("::").next().unwrap()); )* } }
         n!(Source, Tokenize, WordCount, TopWords, Longest, Report, App);
-        m.insert(<Len<Tokenize> as Described>::ID, "Len<Tokenize>");
+        m.insert(TypeId::of::<Len<Tokenize>>(), "Len<Tokenize>");
         m
+    }
+
+    fn parent_name(plan: &Plan, n: &HashMap<TypeId, &'static str>, i: usize) -> &'static str {
+        match plan.first_parent_of(i) {
+            NO_PARENT => "ROOT",
+            p => n[&plan.ids[p as usize]],
+        }
     }
 
     #[test]
     fn plan_trace() {
         let n = names();
         let plan = <App as Planned>::PLAN;
-        // Entries in first-reached order, found by their index.
-        let mut ids = vec![0u64; plan.len];
-        for slot in 0..SET_CAP {
-            if plan.keys[slot] != 0 {
-                ids[plan.index[slot] as usize - 1] = plan.keys[slot];
-            }
-        }
+        // Entries in first-reached order.
         println!("plan (first-reached order, with the parent each was first reached from):");
-        for (i, id) in ids.iter().enumerate() {
+        for i in 0..plan.len {
             println!(
                 "  slot {i}  {:<14} reached from {:<10} subtree {}..{}",
-                n[id],
-                n[&plan.first_parent_of(*id)],
+                n[&plan.ids[i]],
+                parent_name(plan, &n, i),
                 i,
                 plan.end[i]
             );
@@ -409,10 +359,9 @@ mod trace {
             ("Longest", "Report"),
             ("Len<Tokenize>", "App"),
         ];
-        assert_eq!(ids.len(), expected.len());
+        assert_eq!(plan.len, expected.len());
         for (i, (who, from)) in expected.iter().enumerate() {
-            let id = ids[i];
-            assert_eq!((n[&id], n[&plan.first_parent_of(id)]), (*who, *from), "slot {i}");
+            assert_eq!((n[&plan.ids[i]], parent_name(plan, &n, i)), (*who, *from), "slot {i}");
         }
 
         println!("\nedges:");
@@ -434,11 +383,15 @@ mod trace {
 
         // `holds`: the storage subtree of Report holds TopWords..Source and
         // Longest, but not Len<Tokenize> or App.
-        let id = |i: u64| i;
-        assert!(plan.holds(id(<Report as Described>::ID), id(<Source as Described>::ID)));
-        assert!(plan.holds(id(<Report as Described>::ID), id(<Longest as Described>::ID)));
-        assert!(!plan.holds(id(<Report as Described>::ID), id(<Len<Tokenize> as Described>::ID)));
-        assert!(!plan.holds(id(<Report as Described>::ID), id(<App as Described>::ID)));
-        assert!(plan.holds(id(<Tokenize as Described>::ID), id(<Source as Described>::ID)));
+        let at = |id: TypeId| plan.ids[..plan.len].iter().position(|x| *x == id).unwrap();
+        let (report, source) = (at(TypeId::of::<Report>()), at(TypeId::of::<Source>()));
+        assert!(plan.holds(report, source));
+        assert!(plan.holds(report, at(TypeId::of::<Longest>())));
+        assert!(!plan.holds(report, at(TypeId::of::<Len<Tokenize>>())));
+        assert!(!plan.holds(report, at(TypeId::of::<App>())));
+        assert!(plan.holds(at(TypeId::of::<Tokenize>()), source));
+        // A type that is not in the plan is not found.
+        assert!(!plan.contains(TypeId::of::<u8>()));
+        assert!(plan.contains(TypeId::of::<Longest>()));
     }
 }

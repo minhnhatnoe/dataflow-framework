@@ -1,17 +1,15 @@
-//! Configs and the two build passes. These are the only places with runtime
-//! lookups (`TypeId` maps); the run itself has none.
+//! Configs and the construction pass. These are the only places with runtime
+//! lookups (a `TypeId` map); the run itself has none.
 
 use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;
 use std::fmt;
 
 use crate::component::Component;
-use crate::plan::Described;
 
-/// A config supplied for a component, with enough to check it is the right one.
+/// A config supplied for a component, with its name for error messages.
 pub(crate) struct ConfigEntry {
     config: Box<dyn Any>,
-    type_id: TypeId,
     name: &'static str,
 }
 
@@ -21,14 +19,13 @@ impl ConfigEntry {
     }
 }
 
-/// Owned configs, keyed by component type (not config type), so two
-/// components or two instantiations of one generic component never share a
-/// config by accident. Internally the key is the component's compile-time id
-/// (`Described::ID`), with the `TypeId` kept to catch two components whose ids
-/// collide.
+/// Owned configs, keyed by the `TypeId` of the component (not of the config),
+/// so two components or two instantiations of one generic component never
+/// share a config by accident. The key is exact: it is the same identity the
+/// compile-time plan uses.
 #[derive(Default)]
 pub struct Configs {
-    pub(crate) map: HashMap<u64, ConfigEntry>,
+    pub(crate) map: HashMap<TypeId, ConfigEntry>,
 }
 
 impl Configs {
@@ -37,48 +34,25 @@ impl Configs {
     }
 
     pub fn with<C: Component>(mut self, config: C::Config) -> Self {
-        let id = <C as Described>::ID;
-        let entry = ConfigEntry { config: Box::new(config), type_id: TypeId::of::<C>(), name: type_name::<C>() };
-        if let Some(old) = self.map.insert(id, entry) {
-            if old.type_id != TypeId::of::<C>() {
-                collision(old.name, type_name::<C>());
-            }
-        }
+        let entry = ConfigEntry { config: Box::new(config), name: type_name::<C>() };
+        self.map.insert(TypeId::of::<C>(), entry);
         self
     }
 }
 
-fn collision(a: &str, b: &str) -> ! {
-    panic!("component identity collision between {a} and {b}; rename one")
-}
-
 /// Construction state: hands each constructor its config (supplied, or the
-/// default) and records the construction order. Also checks that no two
-/// components of the graph share a compile-time id, which is the only thing the
-/// ids cannot guarantee by themselves (they are hashes of type names).
+/// default) and records the construction order.
 #[doc(hidden)]
 pub struct ConstructPass {
-    pub(crate) configs: HashMap<u64, ConfigEntry>,
-    /// Compile-time id -> TypeId of the component constructed with it.
-    pub(crate) ids: HashMap<u64, (TypeId, &'static str)>,
+    pub(crate) configs: HashMap<TypeId, ConfigEntry>,
     pub(crate) order: Vec<&'static str>,
 }
 
 impl ConstructPass {
     pub(crate) fn take_config<C: Component>(&mut self) -> C::Config {
-        let id = <C as Described>::ID;
-        let type_id = TypeId::of::<C>();
-        if let Some((other_id, other)) = self.ids.insert(id, (type_id, type_name::<C>())) {
-            if other_id != type_id {
-                collision(other, type_name::<C>());
-            }
-        }
-        match self.configs.remove(&id) {
+        match self.configs.remove(&TypeId::of::<C>()) {
             None => C::Config::default(),
-            Some(entry) if entry.type_id == type_id => {
-                *entry.config.downcast::<C::Config>().expect("keyed by component type")
-            }
-            Some(entry) => collision(entry.name, type_name::<C>()),
+            Some(entry) => *entry.config.downcast::<C::Config>().expect("keyed by component type"),
         }
     }
 }
