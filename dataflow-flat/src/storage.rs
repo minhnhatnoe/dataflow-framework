@@ -1,6 +1,7 @@
 //! The states tree: every component stored once, where the walk first reaches
-//! it. Selecting between "store the subtree here" and "stored elsewhere" is the
-//! one place the plan's constants choose types (`generic_const_exprs`).
+//! it. A node stores only the entries whose edge is the first one reaching them
+//! (no placeholders for the others); choosing which is the one place the plan's
+//! constants choose types (`generic_const_exprs`).
 
 use std::any::type_name;
 
@@ -46,35 +47,86 @@ impl<R: Planned, C: Placed<R>> Tree<R, C> {
     }
 }
 
-/// Type-level `if`: selects between the two `Slot` impls with a constant
-/// computed from the plan.
+/// Which of a node's entries are stored here (the edge that first reaches them
+/// is this one): `MaskN<FIRST_0, .., FIRST_{N-1}>`, with the constants from the
+/// plan. This is the one place the plan's constants select types
+/// (`generic_const_exprs`).
 #[doc(hidden)]
-pub struct If<const B: bool>;
-
-/// What an edge to `H` stores: `Tree<R, H>` when `If<true>`, `()` otherwise.
+pub struct Mask1<const A: bool>;
 #[doc(hidden)]
-pub trait Slot<R: Planned, H: Component> {
-    /// The stored subtree.
-    type Out;
-    /// What walking `Out` produces.
-    type Fin: Span<R> + 'static;
-    fn make(pass: &mut ConstructPass) -> Self::Out;
-}
-impl<R: Planned, H: Placed<R>> Slot<R, H> for If<true> {
-    type Out = Tree<R, H>;
-    type Fin = Done<R, H>;
-    fn make(pass: &mut ConstructPass) -> Tree<R, H> {
-        Tree::make(pass)
-    }
-}
-impl<R: Planned, H: Component> Slot<R, H> for If<false> {
-    type Out = ();
-    type Fin = ();
-    fn make(_: &mut ConstructPass) {}
-}
+pub struct Mask2<const A: bool, const B: bool>;
+#[doc(hidden)]
+pub struct Mask3<const A: bool, const B: bool, const C: bool>;
+#[doc(hidden)]
+pub struct Mask4<const A: bool, const B: bool, const C: bool, const D: bool>;
 
-/// The storage of a subscription tree `Self` owned by component `P`, as nested
-/// tuples that mirror the tree.
+/// What a leaf node of N entries stores for a mask: a tuple of the `Tree`s of
+/// the entries whose bit is set, in listing order (`()` if none). Only
+/// the first-edge entries are stored; every other edge costs nothing at run
+/// time and nothing in the type.
+macro_rules! stored_trait {
+    ($Tr:ident [$($E:ident)+]) => {
+        #[doc(hidden)]
+        pub trait $Tr<R: Planned, $($E: Placed<R>),+> {
+            /// The stored subtrees.
+            type S;
+            /// What walking `S` produces.
+            type O: Span<R> + 'static;
+            fn make(pass: &mut ConstructPass) -> Self::S;
+        }
+    };
+}
+stored_trait!(Stored1 [A]);
+stored_trait!(Stored2 [A B]);
+stored_trait!(Stored3 [A B C]);
+stored_trait!(Stored4 [A B C D]);
+
+macro_rules! stored_impl {
+    ($Tr:ident, $Mask:ty, [$($E:ident)+] => [$($P:ident)*]) => {
+        impl<R: Planned, $($E: Placed<R>),+> $Tr<R, $($E),+> for $Mask {
+            type S = ($(Tree<R, $P>,)*);
+            type O = ($(Done<R, $P>,)*);
+            #[allow(unused_variables)]
+            fn make(pass: &mut ConstructPass) -> Self::S {
+                ($(Tree::<R, $P>::make(pass),)*)
+            }
+        }
+    };
+}
+stored_impl!(Stored1, Mask1<true>, [A] => [A]);
+stored_impl!(Stored1, Mask1<false>, [A] => []);
+stored_impl!(Stored2, Mask2<true, true>, [A B] => [A B]);
+stored_impl!(Stored2, Mask2<true, false>, [A B] => [A]);
+stored_impl!(Stored2, Mask2<false, true>, [A B] => [B]);
+stored_impl!(Stored2, Mask2<false, false>, [A B] => []);
+stored_impl!(Stored3, Mask3<true, true, true>, [A B C] => [A B C]);
+stored_impl!(Stored3, Mask3<true, true, false>, [A B C] => [A B]);
+stored_impl!(Stored3, Mask3<true, false, true>, [A B C] => [A C]);
+stored_impl!(Stored3, Mask3<true, false, false>, [A B C] => [A]);
+stored_impl!(Stored3, Mask3<false, true, true>, [A B C] => [B C]);
+stored_impl!(Stored3, Mask3<false, true, false>, [A B C] => [B]);
+stored_impl!(Stored3, Mask3<false, false, true>, [A B C] => [C]);
+stored_impl!(Stored3, Mask3<false, false, false>, [A B C] => []);
+stored_impl!(Stored4, Mask4<true, true, true, true>, [A B C D] => [A B C D]);
+stored_impl!(Stored4, Mask4<true, true, true, false>, [A B C D] => [A B C]);
+stored_impl!(Stored4, Mask4<true, true, false, true>, [A B C D] => [A B D]);
+stored_impl!(Stored4, Mask4<true, true, false, false>, [A B C D] => [A B]);
+stored_impl!(Stored4, Mask4<true, false, true, true>, [A B C D] => [A C D]);
+stored_impl!(Stored4, Mask4<true, false, true, false>, [A B C D] => [A C]);
+stored_impl!(Stored4, Mask4<true, false, false, true>, [A B C D] => [A D]);
+stored_impl!(Stored4, Mask4<true, false, false, false>, [A B C D] => [A]);
+stored_impl!(Stored4, Mask4<false, true, true, true>, [A B C D] => [B C D]);
+stored_impl!(Stored4, Mask4<false, true, true, false>, [A B C D] => [B C]);
+stored_impl!(Stored4, Mask4<false, true, false, true>, [A B C D] => [B D]);
+stored_impl!(Stored4, Mask4<false, true, false, false>, [A B C D] => [B]);
+stored_impl!(Stored4, Mask4<false, false, true, true>, [A B C D] => [C D]);
+stored_impl!(Stored4, Mask4<false, false, true, false>, [A B C D] => [C]);
+stored_impl!(Stored4, Mask4<false, false, false, true>, [A B C D] => [D]);
+stored_impl!(Stored4, Mask4<false, false, false, false>, [A B C D] => []);
+
+/// The storage of a subscription tree `Self` owned by component `P`: for a
+/// leaf, the tuple of the stored subtrees of its entries (see [`Stored1`]);
+/// for an inner node, `(its entries' tuple, child 0, child 1, child 2, child 3)`.
 #[doc(hidden)]
 pub trait DepStorage<R: Planned, P: Component>: DepList {
     /// The stored subtrees.
@@ -89,26 +141,40 @@ impl<R: Planned, P: Component> DepStorage<R, P> for () {
     fn make(_: &mut ConstructPass) {}
 }
 
-macro_rules! dep_storage_impl {
-    ([$($E:ident)+] [$($K:ident)*]) => {
-        impl<R: Planned, P: Component, $($E: Placed<R>,)+ $($K: DepStorage<R, P>,)*> DepStorage<R, P>
-            for ($($E,)+ $($K,)*)
+macro_rules! dep_storage_leaf {
+    ($Tr:ident, $Mask:ident, [$($E:ident)+]) => {
+        impl<R: Planned, P: Component, $($E: Placed<R>),+> DepStorage<R, P> for ($($E,)+)
         where
-            $(If<{ Edge::<R, P, $E>::FIRST }>: Slot<R, $E>,)+
+            $Mask<$({ Edge::<R, P, $E>::FIRST }),+>: $Tr<R, $($E),+>,
         {
-            type S = ($(<If<{ Edge::<R, P, $E>::FIRST }> as Slot<R, $E>>::Out,)+ $($K::S,)*);
-            type O = ($(<If<{ Edge::<R, P, $E>::FIRST }> as Slot<R, $E>>::Fin,)+ $($K::O,)*);
+            type S = <$Mask<$({ Edge::<R, P, $E>::FIRST }),+> as $Tr<R, $($E),+>>::S;
+            type O = <$Mask<$({ Edge::<R, P, $E>::FIRST }),+> as $Tr<R, $($E),+>>::O;
             fn make(pass: &mut ConstructPass) -> Self::S {
-                (
-                    $(<If<{ Edge::<R, P, $E>::FIRST }> as Slot<R, $E>>::make(pass),)+
-                    $($K::make(pass),)*
-                )
+                <$Mask<$({ Edge::<R, P, $E>::FIRST }),+> as $Tr<R, $($E),+>>::make(pass)
             }
         }
     };
 }
-dep_storage_impl!([A][]);
-dep_storage_impl!([A B][]);
-dep_storage_impl!([A B C][]);
-dep_storage_impl!([A B C D][]);
-dep_storage_impl!([A B C D][K0 K1 K2 K3]);
+dep_storage_leaf!(Stored1, Mask1, [A]);
+dep_storage_leaf!(Stored2, Mask2, [A B]);
+dep_storage_leaf!(Stored3, Mask3, [A B C]);
+dep_storage_leaf!(Stored4, Mask4, [A B C D]);
+
+impl<R: Planned, P: Component, A: Placed<R>, B: Placed<R>, C: Placed<R>, D: Placed<R>,
+     K0: DepStorage<R, P>, K1: DepStorage<R, P>, K2: DepStorage<R, P>, K3: DepStorage<R, P>>
+    DepStorage<R, P> for (A, B, C, D, K0, K1, K2, K3)
+where
+    (A, B, C, D): DepStorage<R, P>,
+{
+    type S = (<(A, B, C, D) as DepStorage<R, P>>::S, K0::S, K1::S, K2::S, K3::S);
+    type O = (<(A, B, C, D) as DepStorage<R, P>>::O, K0::O, K1::O, K2::O, K3::O);
+    fn make(pass: &mut ConstructPass) -> Self::S {
+        (
+            <(A, B, C, D) as DepStorage<R, P>>::make(pass),
+            K0::make(pass),
+            K1::make(pass),
+            K2::make(pass),
+            K3::make(pass),
+        )
+    }
+}

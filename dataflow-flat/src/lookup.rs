@@ -113,7 +113,7 @@ span_impl!(A);
 span_impl!(A B);
 span_impl!(A B C);
 span_impl!(A B C D);
-span_impl!(A B C D K0 K1 K2 K3);
+span_impl!(A B C D E);
 
 const fn plan_position<R: Planned, H: Component>() -> usize {
     R::PLAN.position(<H as Described>::ID)
@@ -149,7 +149,7 @@ select_impl!(A 0);
 select_impl!(A 0 B 1);
 select_impl!(A 0 B 1 C 2);
 select_impl!(A 0 B 1 C 2 D 3);
-select_impl!(A 0 B 1 C 2 D 3 K0 4 K1 5 K2 6 K3 7);
+select_impl!(A 0 B 1 C 2 D 3 E 4);
 
 /// `H`'s output inside this finished piece, which holds it at position `P`
 /// (see [`Select`]).
@@ -199,14 +199,11 @@ get_impl!((A B C D) 0 A);
 get_impl!((A B C D) 1 B);
 get_impl!((A B C D) 2 C);
 get_impl!((A B C D) 3 D);
-get_impl!((A B C D K0 K1 K2 K3) 0 A);
-get_impl!((A B C D K0 K1 K2 K3) 1 B);
-get_impl!((A B C D K0 K1 K2 K3) 2 C);
-get_impl!((A B C D K0 K1 K2 K3) 3 D);
-get_impl!((A B C D K0 K1 K2 K3) 4 K0);
-get_impl!((A B C D K0 K1 K2 K3) 5 K1);
-get_impl!((A B C D K0 K1 K2 K3) 6 K2);
-get_impl!((A B C D K0 K1 K2 K3) 7 K3);
+get_impl!((A B C D E) 0 A);
+get_impl!((A B C D E) 1 B);
+get_impl!((A B C D E) 2 C);
+get_impl!((A B C D E) 3 D);
+get_impl!((A B C D E) 4 E);
 
 // ---------------------------------------------------------------------------
 // Context

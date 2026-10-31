@@ -24,7 +24,8 @@
 //! 2. **States tree** (`storage`, types via `generic_const_exprs`).
 //!    `Tree<R, C>` holds a component `C` and, for each of its subscriptions,
 //!    either the subtree of that dependency (if this edge is the first one
-//!    reaching it: `If<{ Edge::FIRST }>` selects `Tree<..>`) or `()`. So every
+//!    reaching it: a mask of `Edge::FIRST` constants selects which entries of a
+//!    node are stored). So every
 //!    component is stored exactly once, constructing it is ordinary safe code,
 //!    and dropping the pipeline is compiler drop glue.
 //! 3. **Fold** (`walk`). `run` walks the states tree structurally. Walking a
@@ -76,7 +77,7 @@
 // The plan runs the dependency walk in constant evaluation, which calls trait
 // methods from a `const fn`.
 #![feature(const_trait_impl)]
-// The plan's constants select types (`If<{ Edge::FIRST }>`). Incomplete, but
+// The plan's constants select types (`Mask4<{ Edge::FIRST }, ..>`). Incomplete, but
 // confined to this crate: users of `Pipeline` need no feature gate.
 #![feature(generic_const_exprs)]
 #![allow(incomplete_features)]

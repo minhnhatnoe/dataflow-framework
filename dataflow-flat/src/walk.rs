@@ -5,7 +5,7 @@ use crate::build::ConstructPass;
 use crate::component::Component;
 use crate::lookup::{Context, Done, GatherInputs, Node, Span};
 use crate::plan::{Planned, Upstream};
-use crate::storage::{DepsDone, DepsStored, If, Placed, Slot, Tree};
+use crate::storage::{DepsDone, DepsStored, Placed, Tree};
 
 /// Run a (piece of a) states tree under context `T`, producing its finished
 /// outputs by value.
@@ -94,40 +94,29 @@ walk_leaf!(A a 0 OA T XA; B b 1 OB XA XB;);
 walk_leaf!(A a 0 OA T XA; B b 1 OB XA XB; C c 2 OC XB XC;);
 walk_leaf!(A a 0 OA T XA; B b 1 OB XA XB; C c 2 OC XB XC; D d 3 OD XC XD;);
 
-/// An inner node: its four entries (each seeing the finished ones before it),
-/// then its four children. The children see the finished entries as one
-/// context entry, and each finished child as one more.
+/// An inner node: the tuple of its stored entries, then its four children, in
+/// this order. The entries tuple pushes the finished entries as one context
+/// entry, and each finished child as one more.
 impl<R: Planned, T: Context,
-     A, OA: Span<R> + 'static, XA: Context,
-     B, OB: Span<R> + 'static, XB: Context,
-     C, OC: Span<R> + 'static, XC: Context,
-     D, OD: Span<R> + 'static, XD: Context,
-     K0, OK0: Span<R> + 'static, Y1: Context,
-     K1, OK1: Span<R> + 'static, Y2: Context,
-     K2, OK2: Span<R> + 'static, Y3: Context,
-     K3, OK3: Span<R> + 'static, Y4: Context>
-    Walk<R, T> for (A, B, C, D, K0, K1, K2, K3)
+     P, OP: Span<R> + 'static, Y1: Context,
+     K0, OK0: Span<R> + 'static, Y2: Context,
+     K1, OK1: Span<R> + 'static, Y3: Context,
+     K2, OK2: Span<R> + 'static, Y4: Context,
+     K3, OK3: Span<R> + 'static, Y5: Context>
+    Walk<R, T> for (P, K0, K1, K2, K3)
 where
-    A: Walk<R, T, Out = OA, After = XA>,
-    B: Walk<R, XA, Out = OB, After = XB>,
-    C: Walk<R, XB, Out = OC, After = XC>,
-    D: Walk<R, XC, Out = OD, After = XD>,
-    K0: Walk<R, (Node<R, (OA, OB, OC, OD)>, T), Out = OK0, After = Y1>,
-    K1: Walk<R, Y1, Out = OK1, After = Y2>,
-    K2: Walk<R, Y2, Out = OK2, After = Y3>,
-    K3: Walk<R, Y3, Out = OK3, After = Y4>,
+    P: Walk<R, T, Out = OP, After = Y1>,
+    K0: Walk<R, Y1, Out = OK0, After = Y2>,
+    K1: Walk<R, Y2, Out = OK1, After = Y3>,
+    K2: Walk<R, Y3, Out = OK2, After = Y4>,
+    K3: Walk<R, Y4, Out = OK3, After = Y5>,
 {
-    type Out = (OA, OB, OC, OD, OK0, OK1, OK2, OK3);
+    type Out = (OP, OK0, OK1, OK2, OK3);
     type After = (Node<R, Self::Out>, T);
     #[inline]
     fn walk<'a>(&mut self, ctx: T::Refs<'a>) -> Self::Out {
-        let outer = ctx;
-        walk_seq!(self, ctx; A a 0 T; B b 1 XA; C c 2 XB; D d 3 XC;);
-        let entries = (a, b, c, d);
-        let ctx = (&entries, T::shorten(outer));
-        walk_seq!(self, ctx; K0 k0 4 (Node<R, (OA, OB, OC, OD)>, T); K1 k1 5 Y1; K2 k2 6 Y2; K3 k3 7 Y3;);
-        let (a, b, c, d) = entries;
-        (a, b, c, d, k0, k1, k2, k3)
+        walk_seq!(self, ctx; P p 0 T; K0 k0 1 Y1; K1 k1 2 Y2; K2 k2 3 Y3; K3 k3 4 Y4;);
+        (p, k0, k1, k2, k3)
     }
     #[inline]
     fn after<'a, 'b>(out: &'b Self::Out, ctx: T::Refs<'a>) -> <Self::After as Context>::Refs<'b>
@@ -204,7 +193,7 @@ where
 {
     type States = Tree<A, A>;
     fn make(pass: &mut ConstructPass) -> Tree<A, A> {
-        <If<true> as Slot<A, A>>::make(pass)
+        Tree::make(pass)
     }
     fn in_plan(id: u64) -> bool {
         <A as Planned>::PLAN.contains(id)
