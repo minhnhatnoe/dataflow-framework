@@ -376,6 +376,19 @@ Timings vary by about ±2% between runs. For the framework-only (`flat`) variant
 
 The compile time no longer depends on the recursion limit at L=20, and the cliff at L=25 is mostly gone (the walk-based plan's proof depth is the graph's depth times two, and a component's own subscriptions no longer add to it). `MAX_COMPONENTS` is 512, so L=26 and above does not fit this generator.
 
+**Which trait solver proves our bounds in user crates.** On this nightly `-Znext-solver=globally` is on by default "for testing" (`-Zhelp` still says `coherence (default)`, which is stale). A crate that enables `generic_const_exprs` is reverted to `-Znext-solver=coherence` (the old solver except for coherence) with the warning `dataflow-flat` prints; user crates are not reverted and print nothing, so they run the **next-generation solver**, and the expensive proofs (`App::Deps: const Upstream`, `Tree<A, A>: Walk`, the `Edge::FIRST` / `TopHolds::YES` consts in where-clauses) are proved by it in the user crate. Evidence: `RUSTFLAGS=-Znext-solver=globally` gives the same times as the default, while `-Znext-solver=coherence` and `-Znext-solver=no` (which behave the same) are 75 times slower. Measured on the `bench` crate alone (`-Ztime-passes`, non-incremental, one run each; the old solver's numbers are the same for `coherence` and `no`):
+
+| graph | solver | debug scratch | release scratch | `type_check_crate` | `coherence_checking` | monomorphization collector |
+|---|---|---|---|---|---|---|
+| full 20 (397) | next (default) | 2.1 s | 3.0 s | 0.52 s | 0.46 s | 0.43 s |
+| full 20 (397) | old (`coherence` / `no`) | 154 s / 152 s | 153 s / 151 s | 22.0 s | 20.6 s | 124.7 s |
+| full 25 (497) | next | 2.7 s | 4.4 s | 0.66 s | 0.59 s | 0.56 s |
+| full 25 (497) | old | 260 s (debug) | not run | 37.0 s | 35.1 s | 211 s |
+| full 20 wide (397) | next | 2.4 s | 3.6 s | 0.57 s | 0.51 s | 0.48 s |
+| full 20 wide (397) | old | 165 s (debug) | not run | 23.2 s | 21.4 s | 134 s |
+
+The old solver is not wrong, just exponential-ish in the number of nested proofs: no warnings or errors differ, and the generated code is the same (release run time `scripts/bench.sh` protocol at full 20: 141.5 ns next, 141.5 ns `coherence`, 141.2 ns `no`; hand-written 141.5 to 142). The solver only changes compile time. At the default recursion limit, with `MAX_COMPONENTS` raised to 2048 in a scratch copy: the next solver builds up to 27 layers (537 components, 3.0 s debug) and fails from 28 layers (557 components) with the misleading `E0080 ... component not in this node` from `Select::POS` (53 errors at 28 layers); `#![recursion_limit = "512"]` fixes it (28 layers 3.1 s, 36 layers 4.2 s). The old solver, slowly, does not hit that limit: 28 layers builds in 343 s and 32 layers (637 components) in 489 s at the default limit, so the cliff above 27 layers is specific to how the next solver reports (or evaluates under) the recursion limit. Recommendation: no flag. The default (next solver in user crates) is the only usable choice; do not pass `-Znext-solver=coherence` or `=no` to user crates. If the default ever flips back to the old solver, the compile times of the large graphs become minutes, so watch the nightly bump.
+
 **Run-time cliff for the largest graphs (fixed by `#[inline(always)]`).** With plain `#[inline]`, from about 477 components LLVM stopped inlining the root's `walk` into `run` (the walk function is about 6,700 lines), and the root's finished-outputs tree (about 4 KB) was returned by value through the return slot. Every `#[inline]` in `walk.rs`, `lookup.rs` and `pipeline.rs` is now `#[inline(always)]`, and LLVM honored it at every size tried (0 calls left in `run_flat`). Release ns/run (min/median of 5, measured before adopting it, `#[inline]` -> `#[inline(always)]`):
 
 | Components | `#[inline]` | `#[inline(always)]` |
