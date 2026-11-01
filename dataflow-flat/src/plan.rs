@@ -58,7 +58,7 @@ pub const MAX_EDGES: usize = 4096;
 pub const MAX_DECISIONS: usize = 512;
 
 /// Upper bound on the terms of one node's condition (after absorption).
-pub const MAX_TERMS: usize = 64;
+pub const MAX_TERMS: usize = 256;
 
 /// Sizes of the push program (see [`Plan::build_program`]): nodes, child
 /// entries, the stack of component lists of the construction, the stack of
@@ -840,7 +840,7 @@ impl Plan {
                     return;
                 }
                 if !insert_term(self, &mut offs, &mut n, t) {
-                    self.fail(name, " has more than ", "64 distinct conditions (MAX_TERMS)");
+                    self.fail(name, " has more than ", "256 distinct conditions (MAX_TERMS)");
                     return;
                 }
                 k += 1;
