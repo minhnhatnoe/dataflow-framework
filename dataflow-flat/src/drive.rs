@@ -6,13 +6,18 @@
 //! inlining a push is straight-line code, as for a hand-written struct of the
 //! components.
 //!
-//! # The condition hook
+//! # The push program
 //!
-//! The push step for position `P` is guarded by [`Cond<P>`]: whether the
-//! component runs in this step, from the `fired` flags of its upstreams, and
-//! whether it must record that it fired. In phase 1a every condition is
-//! "always", so the guard, the flags and their upkeep are all constant-folded
-//! away; phase 1b replaces `Cond`'s impl with the plan's conditions.
+//! A push is a program built by the plan (`Plan::build_program`), not a run of
+//! per-component guards: `Seq` (children in execution order), `Run` (a component,
+//! unconditionally), `RunIf` (guarded by the firing of its edges; only for
+//! conditions the trie cannot express, such as guards) and `Switch` (the key of
+//! the alternative a value is, from `Select::key_of`, evaluated once; then a
+//! decision tree over the sorted constant keys of the sibling decisions, which
+//! LLVM lowers to a jump table). Leaves run their cones straight-line; a
+//! component joined across exclusive terms is repeated in each leaf. Order is
+//! kept: every list is in execution order and a switch covers only a run of
+//! consecutive components.
 
 use std::any::type_name;
 use std::marker::PhantomData;
