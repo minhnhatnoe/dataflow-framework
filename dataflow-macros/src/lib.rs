@@ -17,6 +17,35 @@
 //! nothing stored) and `impl Root`.
 
 use proc_macro::TokenStream;
+
+/// Moves every token of generated code to a fixed location (the macro's own
+/// source), keeping hygiene. Spans are hashed with their line numbers by
+/// incremental compilation, so generated items located at the user's
+/// declaration would turn the queries that read them red when the
+/// declaration moves.
+fn respan(ts: TokenStream2, loc: Span) -> TokenStream2 {
+    use proc_macro2::{Group, TokenTree};
+    ts.into_iter()
+        .map(|tt| match tt {
+            TokenTree::Group(g) => {
+                let mut n = Group::new(g.delimiter(), respan(g.stream(), loc));
+                n.set_span(loc);
+                TokenTree::Group(n)
+            }
+            mut t => {
+                t.set_span(loc);
+                t
+            }
+        })
+        .collect()
+}
+
+fn finish(r: syn::Result<TokenStream2>, loc: Span) -> TokenStream {
+    match r {
+        Ok(ts) => respan(ts, loc).into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
@@ -284,7 +313,8 @@ fn chain_ty(chain: &[Type]) -> TokenStream2 {
 #[proc_macro_derive(ComponentSubscription, attributes(subscribe, listener))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    expand(input, false).unwrap_or_else(|e| e.to_compile_error()).into()
+    let loc = input.ident.span();
+    finish(expand(input, false), loc)
 }
 
 /// `#[derive(Handler)]`: a component defined by `Collect` and `UpdateHandler`
@@ -296,7 +326,8 @@ pub fn derive(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(Handler, attributes(subscribe, handles))]
 pub fn derive_handler(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    expand(input, true).unwrap_or_else(|e| e.to_compile_error()).into()
+    let loc = input.ident.span();
+    finish(expand(input, true), loc)
 }
 
 fn camel(name: &str) -> String {
@@ -734,7 +765,8 @@ fn expand(input: DeriveInput, handler: bool) -> syn::Result<TokenStream2> {
 #[proc_macro_derive(Root)]
 pub fn derive_root(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    expand_root(input).unwrap_or_else(|e| e.to_compile_error()).into()
+    let loc = input.ident.span();
+    finish(expand_root(input), loc)
 }
 
 fn expand_root(input: DeriveInput) -> syn::Result<TokenStream2> {
