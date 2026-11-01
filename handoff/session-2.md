@@ -124,3 +124,45 @@ Query-level reuse has never been measured: the only self-profile attempt could n
 ## Blk result (2026-11-01): not merged, branch `blk-4k`
 
 4,079 release: master 3:52, 14.63 GB; Blk 3:33, 6.17 GB. Typical run time equal (107.5). Typical release app 13.3 vs 14.0 s. Dev initial 17.8 vs 11.3 s. Same-length edit about 1.9 vs 0.85 s. Longer edit (6 alternating rounds) about 2.3 vs 5.05 s. Cold check at 2,704: 26.7 vs 43.6 s. Fails the "no worse on dev rebuilds" condition because of the longer edit. Perps (12,412) on Blk stops at "push program is too large: raise the list pool" (plan.rs), so a pool cap has to be raised to try that size.
+
+## Run-time gap: state and next step (2026-11-01)
+
+This replaces "mostly closed" above: +1.7 ns came from the cloud VM. It is about 8% on the local machine (107.6 vs 99.6 ns, `measure.py` medians).
+
+Typical harness, 823 components, `--mode on`, `taskset -c 2`, per packet:
+
+| | Cycles | Mispredicts | `ls_stlf` | `load_not_complete` |
+|---|---|---|---|---|
+| Framework, random keys | 603.8 | 2.20 | 12.80 | 29.2 |
+| Baseline, random keys | 557.9 | 2.24 | 3.21 | 18.6 |
+| Framework, sorted keys | 491.9 | 0.90 | 14.84 | |
+| Baseline, sorted keys | 488.9 | 0.89 | 3.85 | |
+
+About 46 cycles remain at equal mispredict counts, nearly all only with random keys. Marginal cycles per mispredict are about 85 vs 49.
+
+Ruled out as the main cause: compare tree (the flat chain took about 8 cycles and is merged), mispredict count, code footprint, alignment. Packet copy is at most about 12 cycles. Key in a register is about 9 cycles, not built: it needs a plan table.
+Open suspect, unconfirmed: about 7-9 extra store forwards per packet, from outputs stored and reloaded by readers.
+
+Next step, bounded. The material was in the session scratchpad under `ro/` (`trace.py`, never run; `stat2.py`, `build.sh`, `fw.s`, `base.s`, `gen/`, `t_fw`, `t_base`, `raw0.json`) and may not outlive it. Branch `reg-outputs` has no commits yet.
+1. Trace `1:t` and `1:d` on both sides, pair each load with the latest earlier overlapping store in the same packet, and diff; it should come to about 9.
+2. Experiment A: a local carries one group to its reader. Experiment B: add the store-then-reload to the baseline.
+3. Build a library change only if it is small and takes at least about 15 cycles off. Otherwise accept the gap and move on.
+
+Measurement caveat: changing `-Z` flags on only the timed build forces a near-full rebuild of about 12 s on both sides.
+
+Open question, unanswered by the user: passing the root packet by reference (about 2-3 ns on a slower machine, changes the API). Left as is.
+
+## Handler API direction (after optimization, not built, syntax not confirmed)
+
+Replace `#[derive(Handler)]`/`#[handles]`. Agreed: Oms is a normal component and the annotation stays `#[subscribe]`. The user asked for "more rust syntax" and has not confirmed this form, so show it to them first:
+
+```rust
+#[subscribe(
+    limits: Limits,
+    impl Quoter<Btc>,
+    for S in AllSymbols { impl Quoter<S> },
+    for (X, S) in Product<Venues, Coins> { impl Book<X, S> },
+)]
+```
+
+With `impl<S> UpdateHandler<Quoter<S>>` plus plain `Component::update`, the buffer as a field on `self`, no `Collect`/`begin`/`Buf`. Catalogs are plain nested tuples with `M<X, S>` pairs and `Product`/`Concat`/`Zip`, no filtering.
