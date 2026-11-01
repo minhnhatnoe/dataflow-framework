@@ -260,8 +260,8 @@ pub fn derive(input: TokenStream) -> TokenStream {
 fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     let krate = quote!(::dataflow_flat);
     let name = &input.ident;
-    let input_name = format_ident!("{}Input", name);
-    let init_name = format_ident!("{}Init", name);
+    let input_name = format_ident!("__{}Input", name);
+    let init_name = format_ident!("__{}Init", name);
 
     // Collect every #[subscribe(...)] (several are allowed; they concatenate).
     let mut subs: Vec<Subscription> = Vec::new();
@@ -403,10 +403,6 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     let doc = format!("Inputs of [`{name}`], one reference per subscription, valid during `update`.");
     let init_doc = format!("What [`{name}`]'s `new` receives, one entry per subscription.");
 
-    // The structs live in a private module: `pub` in name (required, since
-    // they appear in a public trait impl), but not reachable by path.
-    // Code gets values of them only as the argument of `update` / `new`.
-    let module = format_ident!("__{}_input", name);
 
     // `Node` for a component. Its bounds are the component's own.
     let listener = input.attrs.iter().any(|a| a.path().is_ident("listener"));
@@ -426,42 +422,39 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     let (_, _, node_where) = node_generics.split_for_impl();
 
     Ok(quote! {
+        #[doc = #doc]
         #[doc(hidden)]
-        #[allow(non_snake_case)]
-        mod #module {
-            #[allow(unused_imports)]
-            use super::*;
+        #[allow(non_camel_case_types)]
+        pub struct #input_name #input_decl_generics #input_where {
+            #( pub #field_names: &#lt #input_types, )*
+            #[doc(hidden)]
+            pub __marker: #marker_ty,
+        }
 
-            #[doc = #doc]
-            pub struct #input_name #input_decl_generics #input_where {
-                #( pub #field_names: &#lt #input_types, )*
-                #[doc(hidden)]
-                pub __marker: #marker_ty,
-            }
-
-            #[doc = #init_doc]
-            pub struct #init_name #input_decl_generics #input_where {
-                #( pub #field_names: #init_types, )*
-                #[doc(hidden)]
-                pub __marker: #marker_ty,
-            }
+        #[doc = #init_doc]
+        #[doc(hidden)]
+        #[allow(non_camel_case_types)]
+        pub struct #init_name #input_decl_generics #input_where {
+            #( pub #field_names: #init_types, )*
+            #[doc(hidden)]
+            pub __marker: #marker_ty,
         }
 
         impl #impl_generics #krate::ComponentSubscription for #name #ty_generics #where_clause {
             type Deps = #deps_ty;
-            type Input<'a> = #module::#input_name<'a, #(#ty_args),*>;
-            type Init<'a> = #module::#init_name<'a, #(#ty_args),*>;
+            type Input<'a> = #input_name<'a, #(#ty_args),*>;
+            type Init<'a> = #init_name<'a, #(#ty_args),*>;
 
             #[inline]
             fn input<'a>(raw: <Self::Deps as #krate::DepList>::Inputs<'a>) -> Self::Input<'a> {
                 let #deps_pat = raw;
-                #module::#input_name { #( #field_names: #field_vars, )* __marker: ::core::marker::PhantomData }
+                #input_name { #( #field_names: #field_vars, )* __marker: ::core::marker::PhantomData }
             }
 
             #[inline]
             fn init<'a>(raw: <Self::Deps as #krate::DepList>::Inits<'a>) -> Self::Init<'a> {
                 let #deps_pat = raw;
-                #module::#init_name { #( #field_names: #field_vars, )* __marker: ::core::marker::PhantomData }
+                #init_name { #( #field_names: #field_vars, )* __marker: ::core::marker::PhantomData }
             }
         }
 
