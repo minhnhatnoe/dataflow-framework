@@ -1014,6 +1014,11 @@ impl Plan {
     /// everything else directly. Near-linear when the terms are the leaves of
     /// a decision tree, as a join of exclusive branches is.
     const fn excl_group(&mut self, lo: usize, hi: usize) -> bool {
+        // The terms without the place are a loop, not a recursion: with many
+        // distinct places the recursion went as deep as the term count and hit
+        // the const-eval frame limit (about 120 frames).
+        let mut hi = hi;
+        loop {
         if hi - lo <= 1 {
             return true;
         }
@@ -1098,9 +1103,6 @@ impl Plan {
             i = j;
         }
         if none_end > lo {
-            if !self.excl_group(lo, none_end) {
-                return false;
-            }
             // The terms without the place against all the others.
             let mut u = lo;
             while u < none_end {
@@ -1113,8 +1115,11 @@ impl Plan {
                 }
                 u += 1;
             }
+            hi = none_end;
+        } else {
+            return true;
         }
-        true
+        }
     }
 
     /// Pairwise check of `sc_ord[lo..hi]`.
