@@ -310,8 +310,11 @@ impl BookCore {{
             self.last_seq = d.seq;
             let i = (d.px as usize) & 7;
             self.ladder[i] = self.ladder[i].wrapping_add(d.qty);
-            if d.bid {{ self.top.bid = d.px; self.top.bq = d.qty }} else {{ self.top.ask = d.px; self.top.aq = d.qty }}
-            self.top.bq = self.top.bq.wrapping_add(self.ladder[(i + 1) & 7] >> 3);
+            let mut t = self.top;
+            if d.bid {{ t.bid = d.px; t.bq = d.qty }} else {{ t.ask = d.px; t.aq = d.qty }}
+            t.bq = t.bq.wrapping_add(self.ladder[(i + 1) & 7] >> 3);
+            self.top = t;
+            return t;
         }}
         self.top
     }}
@@ -326,7 +329,9 @@ impl TradeCore {{
     pub fn apply(&mut self, t: &TradeUpd) -> TradeTop {{
         if t.seq != self.last_seq {{
             self.last_seq = t.seq;
-            self.top = TradeTop {{ px: t.px, qty: t.qty, vol: self.top.vol.wrapping_add(t.qty), n: self.top.n + 1 }};
+            let r = TradeTop {{ px: t.px, qty: t.qty, vol: self.top.vol.wrapping_add(t.qty), n: self.top.n + 1 }};
+            self.top = r;
+            return r;
         }}
         self.top
     }}
