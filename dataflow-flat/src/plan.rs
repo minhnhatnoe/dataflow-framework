@@ -40,7 +40,8 @@ use std::any::{type_name, TypeId};
 
 use crate::component::Sub;
 use crate::identity::{Hashed, BLANK};
-use crate::node::{Node, KIND_ANCHOR, KIND_ROOT};
+use crate::node::{Node, KIND_ANCHOR, KIND_COMPONENT, KIND_ROOT};
+use crate::select::ChainWalk;
 use crate::table::Table;
 
 /// Upper bound on nodes (the root, the components and the anchor) per
@@ -52,24 +53,42 @@ pub const MAX_COMPONENTS: usize = 512;
 /// components.
 pub const MAX_EDGES: usize = 4096;
 
-/// The first parent of the anchor: it was not reached from any node.
+/// Upper bound on distinct selector decisions per pipeline (see
+/// [`Plan::decision`]).
+pub const MAX_DECISIONS: usize = 512;
+
+/// Upper bound on the terms of one node's condition (after absorption).
+pub const MAX_TERMS: usize = 64;
+
+/// Sizes of the pools that hold terms (lists of decisions), the lists of
+/// terms of each node, and the names kept for messages.
+const TPOOL: usize = 16384;
+const OPOOL: usize = 8192;
+const NPOOL: usize = 8192;
+/// Longest name kept for a message.
+const NAME: usize = 96;
+
+/// The first parent of the anchor: it was not reached from any node. Also
+/// "none" in the plan's index arrays.
 const NO_PARENT: u32 = u32::MAX;
+const NONE: u32 = u32::MAX;
+/// `flag` of a component whose firing nobody reads.
+pub(crate) const NO_FLAG: usize = usize::MAX;
 
 // ---------------------------------------------------------------------------
 // Const panics with a name
 // ---------------------------------------------------------------------------
 
 /// Longest error message kept in the plan.
-const MSG: usize = 256;
+const MSG: usize = 512;
 
-/// Assemble `name` followed by `tail` into a byte buffer (`panic!` can't format
-/// in a `const fn`). Returns the buffer and the length used.
-const fn message(name: &str, tail: &str) -> ([u8; MSG], usize) {
+/// Assemble the parts into a byte buffer (`panic!` can't format in a `const
+/// fn`). Returns the buffer and the length used.
+const fn message(parts: [&[u8]; 4]) -> ([u8; MSG], usize) {
     let mut buf = [0u8; MSG];
     let mut n = 0;
-    let parts = [name.as_bytes(), tail.as_bytes()];
     let mut p = 0;
-    while p < 2 {
+    while p < 4 {
         let part = parts[p];
         let mut i = 0;
         while i < part.len() && n < buf.len() {
@@ -86,17 +105,18 @@ const fn message(name: &str, tail: &str) -> ([u8; MSG], usize) {
 // The walk
 // ---------------------------------------------------------------------------
 
-/// Record `N` (reached from `parent`, at position `pos` of its list) unless it
-/// was reached before; either way record the edge `parent -> N`. Returns the
-/// plan index of `N` and whether it is new, i.e. whether its subscriptions
-/// still have to be walked.
+/// Record `N` (reached from `parent`, at position `pos` of its list, through
+/// the selector chain `C`) unless it was reached before; either way record the
+/// edge `parent -> N` and the decisions of its chain. Returns the plan index of
+/// `N` and whether it is new, i.e. whether its subscriptions still have to be
+/// walked.
 ///
 /// This is split from the walk of the subscriptions (and from [`leave`]) so
 /// that the generated [`Upstream`] impls can call them inline around the
 /// recursion into `N::Subs`, which keeps constant evaluation at one stack frame
 /// per graph layer. The trait solver's proof is unaffected: the only bound is
 /// `N::Subs: [const] Upstream`, a trait on the tree rather than on the node.
-const fn enter<N: Node>(plan: &mut Plan, parent: u32, pos: u32) -> (u32, bool) {
+const fn enter<N: Node, C: [const] ChainWalk<N::Output>>(plan: &mut Plan, parent: u32, pos: u32) -> (u32, bool) {
     let id = TypeId::of::<N>();
     let slot = plan.table.slot(&plan.ids, <N as Hashed>::HASH, id);
     let (i, new) = if let Some(at) = plan.table.at(slot) {
@@ -109,12 +129,13 @@ const fn enter<N: Node>(plan: &mut Plan, parent: u32, pos: u32) -> (u32, bool) {
             plan.fail(
                 type_name::<N>(),
                 " is a root, but the pipeline's root is a different type: a pipeline has exactly one root",
+                "",
             );
         }
         let i = plan.len;
         if i == MAX_COMPONENTS {
             // Not recorded, not walked: the plan is not meaningful from here on.
-            plan.fail("too many components: ", "raise dataflow_flat::MAX_COMPONENTS");
+            plan.fail("too many components: ", "raise dataflow_flat::MAX_COMPONENTS", "");
             return (0, false);
         }
         plan.table.put(slot, i);
@@ -129,11 +150,22 @@ const fn enter<N: Node>(plan: &mut Plan, parent: u32, pos: u32) -> (u32, bool) {
     if parent != NO_PARENT {
         let e = plan.n_edges;
         if e == MAX_EDGES {
-            plan.fail("too many subscriptions: ", "raise dataflow_flat::MAX_EDGES");
+            plan.fail("too many subscriptions: ", "raise dataflow_flat::MAX_EDGES", "");
         } else {
-            plan.edge_from[e] = parent;
+            let dn = C::walk(plan, i as u32, NONE);
             plan.edge_to[e] = i as u32;
+            plan.edge_dn[e] = dn;
+            plan.edge_next[e] = NONE;
+            if plan.up_head[parent as usize] == NONE {
+                plan.up_head[parent as usize] = e as u32;
+            } else {
+                plan.edge_next[plan.up_tail[parent as usize] as usize] = e as u32;
+            }
+            plan.up_tail[parent as usize] = e as u32;
             plan.n_edges = e + 1;
+            if dn != NONE {
+                plan.set_edge_name(e, type_name::<N>());
+            }
         }
         // A node reached again is finished: if the root is upstream of it, it
         // is upstream of `parent` too. (A new node reports when it is left.)
@@ -144,8 +176,9 @@ const fn enter<N: Node>(plan: &mut Plan, parent: u32, pos: u32) -> (u32, bool) {
     (i as u32, new)
 }
 
-/// A node's walk is over: record its subtree end and execution position, and
-/// check that it is reachable from the root (some node it subscribes to is).
+/// A node's walk is over: record its subtree end and execution position, check
+/// that it is reachable from the root (some node it subscribes to is), and
+/// compute its condition.
 const fn leave<N: Node>(plan: &mut Plan, i: u32) {
     let i = i as usize;
     plan.end[i] = plan.len as u32;
@@ -154,11 +187,14 @@ const fn leave<N: Node>(plan: &mut Plan, i: u32) {
     plan.done += 1;
     let reach = N::KIND == KIND_ROOT || N::KIND == KIND_ANCHOR || plan.has_up[i];
     if !reach {
-        plan.fail(type_name::<N>(), " is not reachable from the root");
+        plan.fail(type_name::<N>(), " is not reachable from the root", "");
     }
     plan.reach[i] = true;
     if N::KIND == KIND_ROOT {
         plan.root_idx = i as u32;
+        plan.cond_root(i);
+    } else if N::KIND == KIND_COMPONENT {
+        plan.cond_comp(i, type_name::<N>());
     }
     // The node that entered this one now has a reachable subscription.
     let fp = plan.first_parent[i];
@@ -173,7 +209,7 @@ const fn visit<N: Node>(plan: &mut Plan, parent: u32, pos: u32)
 where
     N::Subs: [const] Upstream,
 {
-    let (i, new) = enter::<N>(plan, parent, pos);
+    let (i, new) = enter::<N, ()>(plan, parent, pos);
     if new {
         <N::Subs as Upstream>::visit_all(plan, i);
         leave::<N>(plan, i);
@@ -190,19 +226,19 @@ where
 #[doc(hidden)]
 pub const trait Upstream {
     /// Visit each entry, in listing order, as reached from `parent`; then the
-    /// children. An entry `Sub<E, I>` visits `E` with position `I`.
+    /// children. An entry `Sub<E, C, I>` visits `E` with position `I`.
     fn visit_all(plan: &mut Plan, parent: u32);
 }
 
 macro_rules! upstream_leaf {
-    ([$($h:ident $i:ident)*]) => {
+    ([$($h:ident $c:ident $i:ident)*]) => {
         #[allow(unused_variables)]
-        const impl<$($h: Node, const $i: usize),*> Upstream for ($(Sub<$h, $i>,)*)
+        const impl<$($h: Node, $c: [const] ChainWalk<<$h as Node>::Output>, const $i: usize),*> Upstream for ($(Sub<$h, $c, $i>,)*)
         where $($h::Subs: [const] Upstream,)*
         {
             fn visit_all(plan: &mut Plan, parent: u32) {
                 $({
-                    let (i, new) = enter::<$h>(plan, parent, $i as u32);
+                    let (i, new) = enter::<$h, $c>(plan, parent, $i as u32);
                     if new {
                         <$h::Subs as Upstream>::visit_all(plan, i);
                         leave::<$h>(plan, i);
@@ -231,7 +267,27 @@ dataflow_macros::inner_shape!(upstream_inner);
 
 /// The plan of one pipeline: each node's `TypeId` in first-reached order (the
 /// order is the node's *index*), its kind, first-reached parent, subtree
-/// extent, execution position, and the upstream edges.
+/// extent, execution position, the upstream edges with their selector
+/// decisions, and the conditions.
+///
+/// # Conditions
+///
+/// A *decision* is one selector applied at one place: the node it reads, the
+/// decision before it in its chain, the selector's `TypeId` and `KEY`. Edges
+/// that share a prefix of a chain share its decisions (the per-parent trie).
+/// A *term* is a set of decisions; a node's *condition* is a set of terms, the
+/// ways it can fire in a step (a term holds when all its decisions match):
+///
+/// * the root's condition is the empty term, "always";
+/// * a component's condition is the union over its edges of the edge's
+///   condition: the parent's terms, each extended by the decisions of the
+///   edge's chain.
+///
+/// After every insertion a term that another term implies (is a superset of)
+/// is dropped (*absorption*), so a condition with the empty term is just
+/// "always". The remaining terms must be pairwise *exclusive* (rule 4): two
+/// terms are, when they hold decisions with the same parent and the same
+/// previous decision but different keys (neither a guard).
 #[doc(hidden)]
 pub struct Plan {
     /// Number of nodes recorded so far.
@@ -267,11 +323,49 @@ pub struct Plan {
     reach: [bool; MAX_COMPONENTS],
     /// Has a subscription of this node been found to be reachable so far?
     has_up: [bool; MAX_COMPONENTS],
-    /// The subscription entries: `edge_from[e]` subscribes to `edge_to[e]`
-    /// (both node indices), in the order the walk meets them.
-    edge_from: [u32; MAX_EDGES],
+    /// The subscription entries, in the order the walk meets them: the node
+    /// each reads, the last decision of its selector chain (`NONE` if plain),
+    /// and the next entry of the same subscriber (`NONE` at the end).
     edge_to: [u32; MAX_EDGES],
+    edge_dn: [u32; MAX_EDGES],
+    edge_next: [u32; MAX_EDGES],
+    /// Where the name of the node a selected edge reads is kept (message pool).
+    edge_nm: [u32; MAX_EDGES],
     n_edges: usize,
+    /// First and last entry of each subscriber (`NONE` if it has none).
+    up_head: [u32; MAX_COMPONENTS],
+    up_tail: [u32; MAX_COMPONENTS],
+    /// The decisions: the node whose output is selected, the previous decision
+    /// of the chain, the selector's `TypeId` and its `KEY`.
+    dn_len: usize,
+    dn_node: [u32; MAX_DECISIONS],
+    dn_prev: [u32; MAX_DECISIONS],
+    dn_id: [TypeId; MAX_DECISIONS],
+    dn_key: [u32; MAX_DECISIONS],
+    /// Terms: at `tpool[o]` the number of decisions, then the decisions.
+    /// Offset 0 is the empty term ("always").
+    tpool: [u32; TPOOL],
+    tp_len: usize,
+    /// The terms of each node's condition: `cn[i]` of them, as offsets into
+    /// `tpool`, in `olist[co[i]..]`.
+    olist: [u32; OPOOL],
+    ol_len: usize,
+    co: [u32; MAX_COMPONENTS],
+    cn: [u32; MAX_COMPONENTS],
+    /// Is the node's condition "always"?
+    always: [bool; MAX_COMPONENTS],
+    /// Index into the push's `fired` flags of a component whose firing is
+    /// read by a conditional component (`NONE` if nobody reads it).
+    flag: [u32; MAX_COMPONENTS],
+    n_flags: usize,
+    /// Component position of each component (`NONE` for the root and the
+    /// anchor) and the node index of each component position.
+    cpos: [u32; MAX_COMPONENTS],
+    by_cpos: [u32; MAX_COMPONENTS],
+    n_comp: usize,
+    /// Names for messages.
+    nm_pool: [u8; NPOOL],
+    nm_len: usize,
     /// The pipeline's root type, and its index once the walk has met it.
     root_id: TypeId,
     root_idx: u32,
@@ -305,9 +399,32 @@ impl Plan {
             done: 0,
             reach: [false; MAX_COMPONENTS],
             has_up: [false; MAX_COMPONENTS],
-            edge_from: [0; MAX_EDGES],
             edge_to: [0; MAX_EDGES],
+            edge_dn: [NONE; MAX_EDGES],
+            edge_next: [NONE; MAX_EDGES],
+            edge_nm: [NONE; MAX_EDGES],
             n_edges: 0,
+            up_head: [NONE; MAX_COMPONENTS],
+            up_tail: [NONE; MAX_COMPONENTS],
+            dn_len: 0,
+            dn_node: [0; MAX_DECISIONS],
+            dn_prev: [NONE; MAX_DECISIONS],
+            dn_id: [BLANK; MAX_DECISIONS],
+            dn_key: [0; MAX_DECISIONS],
+            tpool: [0; TPOOL],
+            tp_len: 1,
+            olist: [0; OPOOL],
+            ol_len: 0,
+            co: [0; MAX_COMPONENTS],
+            cn: [0; MAX_COMPONENTS],
+            always: [false; MAX_COMPONENTS],
+            flag: [NONE; MAX_COMPONENTS],
+            n_flags: 0,
+            cpos: [NONE; MAX_COMPONENTS],
+            by_cpos: [NONE; MAX_COMPONENTS],
+            n_comp: 0,
+            nm_pool: [0; NPOOL],
+            nm_len: 0,
             root_id,
             root_idx: NO_PARENT,
             failed: false,
@@ -316,18 +433,28 @@ impl Plan {
         };
         visit::<A>(&mut plan, NO_PARENT, 0);
         if !plan.failed && (plan.root_idx == NO_PARENT || plan.post_of[plan.root_idx as usize] != 0) {
-            plan.fail("the sinks", " do not depend on the root");
+            plan.fail("the sinks", " do not depend on the root", "");
+        }
+        if !plan.failed {
+            plan.number_components();
         }
         plan
     }
 
     /// Record the first error.
-    const fn fail(&mut self, name: &str, tail: &str) {
+    const fn fail(&mut self, a: &str, b: &str, c: &str) {
+        self.fail4(a, b, c, "");
+    }
+
+    const fn fail4(&mut self, a: &str, b: &str, c: &str, d: &str) {
+        self.fail_msg(message([a.as_bytes(), b.as_bytes(), c.as_bytes(), d.as_bytes()]));
+    }
+
+    const fn fail_msg(&mut self, m: ([u8; MSG], usize)) {
         if !self.failed {
-            let (msg, len) = message(name, tail);
             self.failed = true;
-            self.msg = msg;
-            self.msg_len = len;
+            self.msg = m.0;
+            self.msg_len = m.1;
         }
     }
 
@@ -341,6 +468,302 @@ impl Plan {
             }
         }
     }
+
+    // -- names ------------------------------------------------------------
+
+    /// Keep (the start of) `name` for the messages about edge `e`.
+    const fn set_edge_name(&mut self, e: usize, name: &str) {
+        let bytes = name.as_bytes();
+        let n = if bytes.len() < NAME { bytes.len() } else { NAME };
+        if self.nm_len + 1 + n > NPOOL {
+            return;
+        }
+        let at = self.nm_len;
+        self.nm_pool[at] = n as u8;
+        let mut k = 0;
+        while k < n {
+            self.nm_pool[at + 1 + k] = bytes[k];
+            k += 1;
+        }
+        self.nm_len = at + 1 + n;
+        self.edge_nm[e] = at as u32;
+    }
+
+    const fn edge_name(&self, e: usize) -> &str {
+        let at = self.edge_nm[e];
+        if at == NONE {
+            return "a selected node";
+        }
+        let at = at as usize;
+        let n = self.nm_pool[at] as usize;
+        let (_, rest) = self.nm_pool.split_at(at + 1);
+        let (name, _) = rest.split_at(n);
+        match core::str::from_utf8(name) {
+            Ok(s) => s,
+            Err(_) => "a selected node",
+        }
+    }
+
+    // -- decisions and terms ----------------------------------------------
+
+    /// The decision for selector `id` (with `key`) applied to the output of
+    /// node `node` after decision `prev` of its chain (`NONE` for the first):
+    /// found, or recorded. Edges that share a chain prefix share its decisions.
+    pub(crate) const fn decision(&mut self, node: u32, prev: u32, id: TypeId, key: u32) -> u32 {
+        let mut d = 0;
+        while d < self.dn_len {
+            if self.dn_node[d] == node && self.dn_prev[d] == prev && self.dn_id[d] == id {
+                return d as u32;
+            }
+            d += 1;
+        }
+        if self.dn_len == MAX_DECISIONS {
+            self.fail("too many selectors: ", "raise dataflow_flat::MAX_DECISIONS", "");
+            return prev;
+        }
+        let d = self.dn_len;
+        self.dn_node[d] = node;
+        self.dn_prev[d] = prev;
+        self.dn_id[d] = id;
+        self.dn_key[d] = key;
+        self.dn_len = d + 1;
+        d as u32
+    }
+
+    const fn term_len(&self, t: u32) -> usize {
+        self.tpool[t as usize] as usize
+    }
+    const fn term_item(&self, t: u32, k: usize) -> u32 {
+        self.tpool[t as usize + 1 + k]
+    }
+    const fn term_has(&self, t: u32, x: u32) -> bool {
+        let n = self.term_len(t);
+        let mut k = 0;
+        while k < n {
+            if self.term_item(t, k) == x {
+                return true;
+            }
+            k += 1;
+        }
+        false
+    }
+    /// Does term `b` hold every decision of term `a` (a implied by b)?
+    const fn subset(&self, a: u32, b: u32) -> bool {
+        let n = self.term_len(a);
+        let mut k = 0;
+        while k < n {
+            if !self.term_has(b, self.term_item(a, k)) {
+                return false;
+            }
+            k += 1;
+        }
+        true
+    }
+    /// Does term `t` hold decision `d` and every decision before it in its chain?
+    const fn holds_path(&self, t: u32, d: u32) -> bool {
+        let mut x = d;
+        while x != NONE {
+            if !self.term_has(t, x) {
+                return false;
+            }
+            x = self.dn_prev[x as usize];
+        }
+        true
+    }
+    /// The term `t` extended by the decisions of the chain ending at `d`
+    /// (`t` itself if `d` is `NONE`). Returns `NONE` if the pool is full.
+    const fn extend(&mut self, t: u32, d: u32) -> u32 {
+        if d == NONE {
+            return t;
+        }
+        let base = self.tp_len;
+        let mut room = self.term_len(t) + 1;
+        let mut x = d;
+        while x != NONE {
+            room += 1;
+            x = self.dn_prev[x as usize];
+        }
+        if base + room > TPOOL {
+            self.fail("too many conditions: ", "raise dataflow_flat's term pool", "");
+            return NONE;
+        }
+        let n = self.term_len(t);
+        let mut k = 0;
+        while k < n {
+            self.tpool[base + 1 + k] = self.term_item(t, k);
+            k += 1;
+        }
+        let mut count = n;
+        let mut x = d;
+        while x != NONE {
+            if !self.term_has(t, x) {
+                self.tpool[base + 1 + count] = x;
+                count += 1;
+            }
+            x = self.dn_prev[x as usize];
+        }
+        self.tpool[base] = count as u32;
+        self.tp_len = base + 1 + count;
+        base as u32
+    }
+    /// Can terms `a` and `b` never hold in the same step? They can if they hold
+    /// decisions at the same place (same node, same previous decision) with
+    /// different keys, neither a guard.
+    const fn exclusive(&self, a: u32, b: u32) -> bool {
+        let na = self.term_len(a);
+        let nb = self.term_len(b);
+        let mut i = 0;
+        while i < na {
+            let x = self.term_item(a, i) as usize;
+            let mut j = 0;
+            while j < nb {
+                let y = self.term_item(b, j) as usize;
+                if x != y
+                    && self.dn_node[x] == self.dn_node[y]
+                    && self.dn_prev[x] == self.dn_prev[y]
+                    && self.dn_key[x] != self.dn_key[y]
+                    && self.dn_key[x] != crate::select::GUARD
+                    && self.dn_key[y] != crate::select::GUARD
+                {
+                    return true;
+                }
+                j += 1;
+            }
+            i += 1;
+        }
+        false
+    }
+
+    // -- conditions -------------------------------------------------------
+
+    /// The root fires on every push.
+    const fn cond_root(&mut self, i: usize) {
+        self.co[i] = self.ol_len as u32;
+        self.cn[i] = 1;
+        self.always[i] = true;
+        self.olist[self.ol_len] = 0;
+        self.ol_len += 1;
+    }
+
+    /// Compute the condition of component `i` from its edges, and check rules
+    /// 4 (exclusive joins) and 5 (selected edges implied by the condition).
+    const fn cond_comp(&mut self, i: usize, name: &str) {
+        if self.failed {
+            return;
+        }
+        let mut offs = [0u32; MAX_TERMS];
+        let mut n = 0usize;
+        let mut e = self.up_head[i];
+        while e != NONE {
+            let u = self.edge_to[e as usize] as usize;
+            let d = self.edge_dn[e as usize];
+            let cn = self.cn[u] as usize;
+            let mut k = 0;
+            while k < cn {
+                let tp = self.olist[self.co[u] as usize + k];
+                let t = self.extend(tp, d);
+                if t == NONE {
+                    return;
+                }
+                if !insert_term(self, &mut offs, &mut n, t) {
+                    self.fail(name, " has more than ", "64 distinct conditions (MAX_TERMS)");
+                    return;
+                }
+                k += 1;
+            }
+            e = self.edge_next[e as usize];
+        }
+        // Rule 4: after absorption, the terms are pairwise exclusive.
+        let mut a = 0;
+        while a < n {
+            let mut b = a + 1;
+            while b < n {
+                if !self.exclusive(offs[a], offs[b]) {
+                    self.fail(name, " joins branches that can fire in the same step", "");
+                    return;
+                }
+                b += 1;
+            }
+            a += 1;
+        }
+        // Rule 5: every term of the condition implies each selected edge.
+        let mut e = self.up_head[i];
+        while e != NONE {
+            let u = self.edge_to[e as usize] as usize;
+            let d = self.edge_dn[e as usize];
+            if d != NONE {
+                let mut a = 0;
+                while a < n {
+                    let t = offs[a];
+                    let mut ok = false;
+                    let cn = self.cn[u] as usize;
+                    let mut k = 0;
+                    while k < cn {
+                        let tp = self.olist[self.co[u] as usize + k];
+                        if self.subset(tp, t) && self.holds_path(t, d) {
+                            ok = true;
+                        }
+                        k += 1;
+                    }
+                    if !ok {
+                        let m = message([
+                            name.as_bytes(),
+                            b" reads ",
+                            self.edge_name(e as usize).as_bytes(),
+                            b" through selectors in steps where they do not match; subscribe to a component that stores it",
+                        ]);
+                        self.fail_msg(m);
+                        return;
+                    }
+                    a += 1;
+                }
+            }
+            e = self.edge_next[e as usize];
+        }
+        // Store.
+        if self.ol_len + n > OPOOL {
+            self.fail("too many conditions: ", "raise dataflow_flat's term list pool", "");
+            return;
+        }
+        self.co[i] = self.ol_len as u32;
+        self.cn[i] = n as u32;
+        let mut k = 0;
+        while k < n {
+            self.olist[self.ol_len + k] = offs[k];
+            k += 1;
+        }
+        self.ol_len += n;
+        let always = n == 1 && self.term_len(offs[0]) == 0;
+        self.always[i] = always;
+        // The firing of the components this one reads is read by its check.
+        if !always {
+            let mut e = self.up_head[i];
+            while e != NONE {
+                let u = self.edge_to[e as usize] as usize;
+                if self.kind[u] == KIND_COMPONENT && !self.always[u] && self.flag[u] == NONE {
+                    self.flag[u] = self.n_flags as u32;
+                    self.n_flags += 1;
+                }
+                e = self.edge_next[e as usize];
+            }
+        }
+    }
+
+    /// Component positions: the components in execution order.
+    const fn number_components(&mut self) {
+        let mut p = 0;
+        while p < self.done {
+            let i = self.by_post[p] as usize;
+            if self.kind[i] == KIND_COMPONENT {
+                self.cpos[i] = self.n_comp as u32;
+                self.by_cpos[self.n_comp] = i as u32;
+                self.n_comp += 1;
+            }
+            p += 1;
+        }
+    }
+
+    // -- queries ------------------------------------------------------------
 
     /// Is the node with this `TypeId` in the plan? (Run time, at build.)
     pub(crate) fn contains(&self, id: TypeId) -> bool {
@@ -360,6 +783,21 @@ impl Plan {
         self.len
     }
 
+    /// Number of components.
+    pub(crate) const fn n_components(&self) -> usize {
+        self.n_comp
+    }
+
+    /// Plan index of the component at component position `q`.
+    pub(crate) const fn idx_of_comp(&self, q: usize) -> usize {
+        self.by_cpos[q] as usize
+    }
+
+    /// Component position of the component at plan index `i`.
+    pub(crate) const fn comp_pos_of_idx(&self, i: usize) -> usize {
+        self.cpos[i] as usize
+    }
+
     /// Kind (`KIND_*`) of the node at plan index `i`.
     #[allow(dead_code)]
     pub(crate) const fn kind_of(&self, i: usize) -> u8 {
@@ -367,26 +805,51 @@ impl Plan {
     }
 
     /// Execution position of the node at plan index `i`.
+    #[allow(dead_code)]
     pub(crate) const fn post_of_idx(&self, i: usize) -> usize {
         self.post_of[i] as usize
     }
 
     /// Plan index of the node at execution position `p`.
+    #[allow(dead_code)]
     pub(crate) const fn idx_at_post(&self, p: usize) -> usize {
         self.by_post[p] as usize
+    }
+
+    /// Does the component at plan index `i` run in every step?
+    pub(crate) const fn always_idx(&self, i: usize) -> bool {
+        self.always[i]
+    }
+
+    /// The `fired` flag of the component at plan index `i` (`NO_FLAG` if no
+    /// condition reads whether it fired).
+    pub(crate) const fn flag_idx(&self, i: usize) -> usize {
+        if self.flag[i] == NONE {
+            NO_FLAG
+        } else {
+            self.flag[i] as usize
+        }
+    }
+
+    /// Number of `fired` flags a push needs.
+    pub(crate) const fn n_flags(&self) -> usize {
+        self.n_flags
+    }
+
+    /// Number of terms of the condition of the node at plan index `i`.
+    #[allow(dead_code)]
+    pub(crate) const fn n_terms(&self, i: usize) -> usize {
+        self.cn[i] as usize
     }
 
     /// Number of subscription entries of the node at execution position `p`.
     #[allow(dead_code)]
     pub(crate) const fn upstream_count(&self, p: usize) -> usize {
-        let i = self.by_post[p] as usize;
+        let mut e = self.up_head[self.by_post[p] as usize];
         let mut n = 0;
-        let mut e = 0;
-        while e < self.n_edges {
-            if self.edge_from[e] as usize == i {
-                n += 1;
-            }
-            e += 1;
+        while e != NONE {
+            n += 1;
+            e = self.edge_next[e as usize];
         }
         n
     }
@@ -395,17 +858,14 @@ impl Plan {
     /// aliases counted separately) of the node at execution position `p`.
     #[allow(dead_code)]
     pub(crate) const fn upstream(&self, p: usize, k: usize) -> usize {
-        let i = self.by_post[p] as usize;
+        let mut e = self.up_head[self.by_post[p] as usize];
         let mut seen = 0;
-        let mut e = 0;
-        while e < self.n_edges {
-            if self.edge_from[e] as usize == i {
-                if seen == k {
-                    return self.post_of[self.edge_to[e] as usize] as usize;
-                }
-                seen += 1;
+        while e != NONE {
+            if seen == k {
+                return self.post_of[self.edge_to[e as usize] as usize] as usize;
             }
-            e += 1;
+            seen += 1;
+            e = self.edge_next[e as usize];
         }
         panic!("no such subscription")
     }
@@ -441,6 +901,35 @@ impl Plan {
     pub(crate) const fn first_pos_of(&self, i: usize) -> u32 {
         self.first_pos[i]
     }
+}
+
+/// Add term `t` to the set `offs[..*n]` unless a term already there implies it
+/// is redundant (is a subset of `t`); drop the terms `t` makes redundant.
+/// Returns false if the set is full.
+const fn insert_term(plan: &Plan, offs: &mut [u32; MAX_TERMS], n: &mut usize, t: u32) -> bool {
+    let mut k = 0;
+    while k < *n {
+        if plan.subset(offs[k], t) {
+            return true;
+        }
+        k += 1;
+    }
+    let mut w = 0;
+    k = 0;
+    while k < *n {
+        if !plan.subset(t, offs[k]) {
+            offs[w] = offs[k];
+            w += 1;
+        }
+        k += 1;
+    }
+    *n = w;
+    if *n == MAX_TERMS {
+        return false;
+    }
+    offs[*n] = t;
+    *n += 1;
+    true
 }
 
 /// An anchor whose plan has been computed, evaluated once per pipeline type.
@@ -494,5 +983,61 @@ mod trace {
         assert_eq!((plan.upstream_count(4), plan.upstream(4, 0), plan.upstream(4, 1)), (2, 2, 3));
         assert_eq!(plan.upstream_count(0), 0);
         assert!(plan.contains(TypeId::of::<A>()) && !plan.contains(TypeId::of::<u8>()));
+    }
+
+    // Conditions and flags.
+    pub struct K0;
+    pub struct K1;
+    impl crate::Select<Poll> for K0 {
+        type Out = Poll;
+        const KEY: u32 = 0;
+        fn select(x: &Poll) -> Option<&Poll> { Some(x) }
+    }
+    impl crate::Select<Poll> for K1 {
+        type Out = Poll;
+        const KEY: u32 = 1;
+        fn select(x: &Poll) -> Option<&Poll> { Some(x) }
+    }
+    macro_rules! scomp {
+        ($name:ident, [$($sub:tt)*]) => {
+            #[derive(ComponentSubscription)]
+            #[subscribe($($sub)*)]
+            pub struct $name;
+            impl Component for $name {
+                type Config = ();
+                type Output = u8;
+                fn new((): (), _: Self::Init<'_>) -> (Self, u8) { ($name, 0) }
+                fn update(&mut self, _: Self::Input<'_>) -> u8 { 0 }
+            }
+        };
+    }
+    scomp!(X, [p: Poll => K0]);
+    scomp!(Y, [p: Poll => K1]);
+    scomp!(Z, [x: X, y: Y]);
+    scomp!(W, [z: Z, p: Poll => K0]);
+
+    #[test]
+    fn conditions_terms_and_flags() {
+        let plan = <Anchor<Poll, (Z,)> as Planned>::PLAN;
+        plan.check();
+        // Poll, X, Y, Z, anchor.
+        let at = |p: usize| plan.idx_at_post(p);
+        assert!(plan.always_idx(at(0)));
+        assert!(!plan.always_idx(at(1)) && !plan.always_idx(at(2)) && !plan.always_idx(at(3)));
+        assert_eq!((plan.n_terms(at(1)), plan.n_terms(at(2)), plan.n_terms(at(3))), (1, 1, 2));
+        // X and Y are read by the conditional Z; Z is read by nobody.
+        assert_eq!(plan.n_flags(), 2);
+        assert_ne!(plan.flag_idx(at(1)), plan.flag_idx(at(2)));
+        assert_eq!(plan.flag_idx(at(3)), NO_FLAG);
+        assert_eq!(plan.n_components(), 3);
+    }
+
+    #[test]
+    fn rule_5_is_reported_by_check() {
+        // W = [z: Z (terms K0, K1), p: Poll => K0]: its condition has the K1 term, which does not imply K0.
+        let plan = <Anchor<Poll, (W,)> as Planned>::PLAN;
+        assert!(plan.failed);
+        let msg = core::str::from_utf8(&plan.msg[..plan.msg_len]).unwrap();
+        assert!(msg.contains("through selectors in steps where they do not match"), "{msg}");
     }
 }

@@ -26,10 +26,6 @@ pub mod __private {
 pub const KIND_ROOT: u8 = 0;
 #[doc(hidden)]
 pub const KIND_COMPONENT: u8 = 1;
-/// Reserved for demuxers (phase 1b).
-#[doc(hidden)]
-#[allow(dead_code)]
-pub const KIND_DEMUX: u8 = 2;
 #[doc(hidden)]
 pub const KIND_ANCHOR: u8 = 3;
 

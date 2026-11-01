@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 
 use crate::build::ConstructPass;
 use crate::component::{DepList, Sub};
-use crate::drive::{ConstructCtx, ConstructPh, Drive, Fired, PushCtx, PushPh, RgCl};
+use crate::drive::{ConstructCtx, ConstructPh, Drive, Fired, FiredOps, PushCtx, PushPh, RgCl};
 use crate::flat::{FlatTop, Whole};
 use crate::gather::Layout;
 use crate::node::{AnchorKind, Comp, Node, Root, KIND_ANCHOR};
@@ -26,7 +26,7 @@ pub trait SinkList: 'static {
 macro_rules! sink_list_impl {
     ($($C:ident $i:tt)+) => {
         impl<$($C: Comp,)+> SinkList for ($($C,)+) {
-            type Subs = ($(Sub<$C, $i>,)+);
+            type Subs = ($(Sub<$C, (), $i>,)+);
         }
     };
 }
@@ -59,6 +59,7 @@ where
         + FlatTop<OutM>
         + FlatTop<StateOptM>
         + FlatTop<OutOptM>,
+
     <Anchor<R, S> as FlatTop<StateOptM>>::Of: Empty + Finish<Done = <Anchor<R, S> as FlatTop<StateM>>::Of>,
     <Anchor<R, S> as FlatTop<OutOptM>>::Of: Empty + Finish<Done = <Anchor<R, S> as FlatTop<OutM>>::Of>,
 {
@@ -67,6 +68,7 @@ where
     type Outs = <Anchor<R, S> as FlatTop<OutM>>::Of;
     type StatesOpt = <Anchor<R, S> as FlatTop<StateOptM>>::Of;
     type OutsOpt = <Anchor<R, S> as FlatTop<OutOptM>>::Of;
+    type Fired = Fired;
 }
 
 /// The storage of a pipeline.
@@ -143,7 +145,7 @@ where
     fn push(store: &mut Self::Store, root: R) {
         type A<R, S> = Anchor<R, S>;
         let mut ctx =
-            PushCtx::<A<R, S>> { root: &root, states: &mut store.states, outs: &mut store.outs, fired: Fired::new() };
+            PushCtx::<A<R, S>> { root: &root, states: &mut store.states, outs: &mut store.outs, fired: <<A<R, S> as Layout>::Fired as FiredOps>::new() };
         <Whole<A<R, S>> as Drive<A<R, S>, PushPh<A<R, S>>, <Whole<A<R, S>> as RgCl>::Cl>>::drive(&mut ctx);
     }
 }

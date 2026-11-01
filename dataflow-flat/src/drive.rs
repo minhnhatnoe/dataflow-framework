@@ -19,10 +19,11 @@ use std::marker::PhantomData;
 
 use crate::build::ConstructPass;
 use crate::component::{Component, ComponentSubscription};
-use crate::flat::{bound, class, ClassOf, Inner, Leaf, NthT, Whole};
+use crate::flat::{bound, class, ClassOf, Inner, Leaf, Loc, NthT, Whole};
+use crate::gather::Ready;
 use crate::gather::{GatherIn, GatherInit, Layout};
 use crate::node::{Comp, Node};
-use crate::plan::{Planned, MAX_COMPONENTS};
+use crate::plan::{Planned, MAX_COMPONENTS, NO_FLAG};
 use crate::store::AtPos;
 
 // ---------------------------------------------------------------------------
@@ -171,57 +172,51 @@ where
 // Push
 // ---------------------------------------------------------------------------
 
-/// Which nodes fired in this step, by execution position (the root is 0).
-/// In phase 1a nothing reads it: every condition is "always".
+/// Which components fired in this step, by flag (see
+/// [`Plan`](crate::plan::Plan): only components whose firing a conditional
+/// component reads have a flag), indexed by constants. After inlining the
+/// array is split into locals and the unused flags vanish: with no conditions
+/// there is no `fired` state in the generated code.
 #[doc(hidden)]
 pub struct Fired {
-    #[allow(dead_code)]
     bits: [bool; MAX_COMPONENTS],
 }
-impl Fired {
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    pub(crate) fn new() -> Fired {
-        // The root fires on every push.
-        let mut bits = [false; MAX_COMPONENTS];
-        bits[0] = true;
-        Fired { bits }
-    }
-    /// Record that the node at execution position `p` fired.
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    #[allow(dead_code)]
-    pub(crate) fn set(&mut self, p: usize) {
-        self.bits[p] = true;
-    }
-    /// Did any of the nodes at these execution positions fire?
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    #[allow(dead_code)]
-    pub(crate) fn any(&self, ups: &[usize]) -> bool {
-        ups.iter().any(|&u| self.bits[u])
-    }
-}
-
-/// The condition of the component at component position `P`: the hook that
-/// phase 1b fills in. A component runs iff `ALWAYS || ready(fired)`; if
-/// `MARKS`, running it records that it fired (some other condition reads it).
+/// Operations on the `fired` flags (of whichever size the pipeline needs).
 #[doc(hidden)]
-pub trait Cond<const P: usize>: Planned {
-    const ALWAYS: bool;
-    const MARKS: bool;
-    fn ready(fired: &Fired) -> bool;
+pub trait FiredOps {
+    fn new() -> Self;
+    fn set(&mut self, flag: usize);
+    fn get(&self, flag: usize) -> bool;
 }
-impl<A: Planned, const P: usize> Cond<P> for A {
-    // Phase 1a: no demuxers, every component downstream of the root runs on
-    // every push, and nothing reads the flags.
-    const ALWAYS: bool = true;
-    const MARKS: bool = false;
+impl FiredOps for Fired {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn ready(_: &Fired) -> bool {
-        true
+    fn new() -> Fired {
+        Fired { bits: [false; MAX_COMPONENTS] }
     }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn set(&mut self, flag: usize) {
+        self.bits[flag] = true;
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn get(&self, flag: usize) -> bool {
+        self.bits[flag]
+    }
+}
+/// The `fired` flags of pipeline `A`.
+#[doc(hidden)]
+pub type FiredOf<A> = <A as Layout>::Fired;
+
+/// The condition of the component at component position `P`, from the plan: a
+/// component runs iff `ALWAYS || ready(..)` (the OR over its edges, see
+/// [`Ready`]); if it has a `FLAG`, running it records that it fired.
+#[doc(hidden)]
+pub struct CondAt<A, const P: usize>(PhantomData<A>);
+impl<A: Planned, const P: usize> CondAt<A, P> {
+    pub const ALWAYS: bool = A::PLAN.always_idx(Loc::<A, P>::IDX);
+    pub const FLAG: usize = A::PLAN.flag_idx(Loc::<A, P>::IDX);
 }
 
 #[doc(hidden)]
@@ -231,7 +226,7 @@ pub struct PushCtx<'c, A: Layout> {
     pub(crate) root: &'c A::Root,
     pub(crate) states: &'c mut A::States,
     pub(crate) outs: &'c mut A::Outs,
-    pub(crate) fired: Fired,
+    pub(crate) fired: FiredOf<A>,
 }
 impl<A: Layout> Phase for PushPh<A> {
     type Ctx<'c> = PushCtx<'c, A>;
@@ -239,7 +234,8 @@ impl<A: Layout> Phase for PushPh<A> {
 
 impl<A: Layout, const P: usize> StepAt<PushPh<A>, P> for A
 where
-    A: NthT<P> + Cond<P>,
+    A: NthT<P>,
+    <<A as NthT<P>>::T as ComponentSubscription>::Deps: Ready<A>,
     <A as NthT<P>>::T: Comp,
     <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A>,
     A::States: AtPos<<A as NthT<P>>::T, P>,
@@ -249,7 +245,9 @@ where
     #[cfg_attr(debug_assertions, inline)]
     fn step(ctx: &mut PushCtx<'_, A>) {
         type C<A, const P: usize> = <A as NthT<P>>::T;
-        if <A as Cond<P>>::ALWAYS || <A as Cond<P>>::ready(&ctx.fired) {
+        if CondAt::<A, P>::ALWAYS
+            || <<<A as NthT<P>>::T as ComponentSubscription>::Deps as Ready<A>>::ready(ctx.root, &*ctx.outs, &ctx.fired)
+        {
             // The inputs borrow the stored outputs and the root only while
             // `update` runs; the write to the output comes after.
             let out = {
@@ -258,8 +256,8 @@ where
                     .update(<C<A, P> as ComponentSubscription>::input(inputs))
             };
             *<A::Outs as AtPos<<C<A, P> as Node>::Output, P>>::at_mut(&mut *ctx.outs) = out;
-            if <A as Cond<P>>::MARKS {
-                ctx.fired.set(P + 1);
+            if CondAt::<A, P>::FLAG != NO_FLAG {
+                ctx.fired.set(CondAt::<A, P>::FLAG);
             }
         }
     }
