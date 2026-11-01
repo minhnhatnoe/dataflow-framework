@@ -577,7 +577,7 @@ where
 /// The decision tree over the sorted keys of the range `Q`.
 #[doc(hidden)]
 pub trait BstExec<A: Layout, Ph, Cl>: Rg {
-    fn bst(ctx: &mut PushCtx<'_, A>, key: u32);
+    fn bst(ctx: &mut PushCtx<'_, A>, key: u32) -> bool;
 }
 macro_rules! bst_leaf {
     ($n:literal; $($k:literal)*) => {
@@ -588,11 +588,12 @@ macro_rules! bst_leaf {
             #[cfg_attr(not(debug_assertions), inline(always))]
             #[cfg_attr(debug_assertions, inline)]
             #[allow(unused_variables)]
-            fn bst(ctx: &mut PushCtx<'_, A>, key: u32) {
+            fn bst(ctx: &mut PushCtx<'_, A>, key: u32) -> bool {
                 $(if key == ChOf::<A, Q, $k>::KEY {
                     <Pn<A, { ChOf::<A, Q, $k>::NODE }> as Exec<A, Ph>>::exec(ctx);
-                    return;
+                    return true;
                 })*
+                false
             }
         }
     };
@@ -607,12 +608,9 @@ where
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn bst(ctx: &mut PushCtx<'_, A>, key: u32) {
-        if key < MidKey::<A, Q>::KEY {
-            <LeftOf<Q> as BstExec<A, Ph, <LeftOf<Q> as RgCl>::Cl>>::bst(ctx, key)
-        } else {
-            <RightOf<Q> as BstExec<A, Ph, <RightOf<Q> as RgCl>::Cl>>::bst(ctx, key)
-        }
+    fn bst(ctx: &mut PushCtx<'_, A>, key: u32) -> bool {
+        <LeftOf<Q> as BstExec<A, Ph, <LeftOf<Q> as RgCl>::Cl>>::bst(ctx, key)
+            || <RightOf<Q> as BstExec<A, Ph, <RightOf<Q> as RgCl>::Cl>>::bst(ctx, key)
     }
 }
 
@@ -626,6 +624,6 @@ where
     #[cfg_attr(debug_assertions, inline)]
     fn exec_k(ctx: &mut PushCtx<'_, A>) {
         let key = <Pn<A, N> as SwitchKey<A, Ph>>::key(ctx.root, &*ctx.outs);
-        <NodeRg<A, N> as BstExec<A, Ph, <NodeRg<A, N> as RgCl>::Cl>>::bst(ctx, key)
+        <NodeRg<A, N> as BstExec<A, Ph, <NodeRg<A, N> as RgCl>::Cl>>::bst(ctx, key);
     }
 }
