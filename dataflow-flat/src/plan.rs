@@ -71,6 +71,8 @@ const MAX_PROG: usize = 32768;
 const MAX_PCH: usize = 32768;
 const MAX_LST: usize = 32768;
 const KPOOL: usize = 32768;
+/// `lst_t` value: the entry's candidates are all terms of its component.
+const ALLT: u32 = u32::MAX - 1;
 const MAX_CTX: usize = 32;
 
 /// Program node kinds.
@@ -475,8 +477,29 @@ pub struct Plan {
     ib_len: usize,
     kpool: [u32; KPOOL],
     kp_len: usize,
-    ctx: [u32; MAX_CTX],
+    /// The decisions of the context, by place: the held decision + 1 (0 = none), and the
+    /// value each push replaced (restored by the pop).
+    cur: [u32; MAX_DECISIONS],
+    ctx_old: [u32; MAX_CTX],
     ctx_len: usize,
+    /// Per entry of `lst`: the candidate terms of the component in the current context (a list
+    /// in `cp_t`/`cp_next`, `ALLT` = all its terms), their number, and the list's tail.
+    lst_t: [u32; MAX_LST],
+    lst_n: [u32; MAX_LST],
+    lst_tail: [u32; MAX_LST],
+    cp_t: [u32; MAX_LST],
+    cp_next: [u32; MAX_LST],
+    cp_len: usize,
+    /// Per entry of `lst` that is a handler: its candidate handled edges in the current context
+    /// (a list in `hp_e`/`hp_next`, `ALLT` = all its handled edges) and the list's tail. A switch
+    /// puts each edge only in the branches whose decision does not exclude it.
+    lst_h: [u32; MAX_LST],
+    lst_htail: [u32; MAX_LST],
+    hp_e: [u32; MAX_LST],
+    hp_next: [u32; MAX_LST],
+    hp_len: usize,
+    /// Handlers whose flags were already requested for a guarded run.
+    hg_done: [bool; MAX_COMPONENTS],
     /// Names for messages.
     nm_pool: [u8; NPOOL],
     nm_len: usize,
@@ -587,8 +610,21 @@ impl Plan {
             ib_len: 0,
             kpool: [0; KPOOL],
             kp_len: 0,
-            ctx: [0; MAX_CTX],
+            cur: [0; MAX_DECISIONS],
+            ctx_old: [0; MAX_CTX],
             ctx_len: 0,
+            lst_t: [0; MAX_LST],
+            lst_n: [0; MAX_LST],
+            lst_tail: [0; MAX_LST],
+            cp_t: [0; MAX_LST],
+            cp_next: [0; MAX_LST],
+            cp_len: 0,
+            lst_h: [0; MAX_LST],
+            lst_htail: [0; MAX_LST],
+            hp_e: [0; MAX_LST],
+            hp_next: [0; MAX_LST],
+            hp_len: 0,
+            hg_done: [false; MAX_COMPONENTS],
             nm_pool: [0; NPOOL],
             nm_len: 0,
             root_id,
@@ -1286,43 +1322,33 @@ impl Plan {
     // added. Order is kept: every list is in execution order and a segment is
     // a run of consecutive entries of the list.
 
-    const fn dec_equiv(&self, a: u32, b: u32) -> bool {
-        let (a, b) = (a as usize, b as usize);
-        a == b
-            || (self.dn_node[a] == self.dn_node[b]
-                && self.dn_prev[a] == self.dn_prev[b]
-                && self.dn_key[a] == self.dn_key[b]
-                && self.dn_key[a] != crate::select::GUARD)
-    }
+    /// Is decision `d` (or an equal one at its place) in the context? The context holds at most
+    /// one decision per place, never a guard.
     const fn held(&self, d: u32) -> bool {
-        let mut k = 0;
-        while k < self.ctx_len {
-            if self.dec_equiv(self.ctx[k], d) {
-                return true;
-            }
-            k += 1;
+        let du = d as usize;
+        let key = self.dn_key[du];
+        if key == crate::select::GUARD {
+            return false;
         }
-        false
+        let c = self.cur[self.dn_place[du] as usize];
+        c != 0 && (c - 1 == d || self.dn_key[(c - 1) as usize] == key)
+    }
+    /// Does decision `x` exclude the decision of the context at its place?
+    const fn dec_conflicts(&self, x: usize) -> bool {
+        let key = self.dn_key[x];
+        if key == crate::select::GUARD {
+            return false;
+        }
+        let c = self.cur[self.dn_place[x] as usize];
+        c != 0 && c as usize - 1 != x && self.dn_key[c as usize - 1] != key
     }
     /// Does a decision of term `t` exclude a decision of the context?
     const fn conflicts(&self, t: u32) -> bool {
         let n = self.term_len(t);
         let mut i = 0;
         while i < n {
-            let x = self.term_item(t, i) as usize;
-            let mut j = 0;
-            while j < self.ctx_len {
-                let y = self.ctx[j] as usize;
-                if x != y
-                    && self.dn_node[x] == self.dn_node[y]
-                    && self.dn_prev[x] == self.dn_prev[y]
-                    && self.dn_key[x] != self.dn_key[y]
-                    && self.dn_key[x] != crate::select::GUARD
-                    && self.dn_key[y] != crate::select::GUARD
-                {
-                    return true;
-                }
-                j += 1;
+            if self.dec_conflicts(self.term_item(t, i) as usize) {
+                return true;
             }
             i += 1;
         }
@@ -1339,20 +1365,77 @@ impl Plan {
         }
         true
     }
-    /// (some term is consistent with the context, some such term holds in it)
-    const fn consistent_static(&self, i: usize) -> (bool, bool) {
+    // Candidate terms of entry `q` of `lst`: a cursor `c` over them.
+    const fn c_start(&self, q: usize) -> u32 {
+        let h = self.lst_t[q];
+        if h == ALLT {
+            0
+        } else {
+            h
+        }
+    }
+    const fn c_end(&self, q: usize, c: u32) -> bool {
+        if self.lst_t[q] == ALLT {
+            c >= self.cn[self.lst[q] as usize]
+        } else {
+            c == NONE
+        }
+    }
+    const fn c_term(&self, q: usize, c: u32) -> u32 {
+        if self.lst_t[q] == ALLT {
+            self.olist[(self.co[self.lst[q] as usize] + c) as usize]
+        } else {
+            self.cp_t[c as usize]
+        }
+    }
+    const fn c_next(&self, q: usize, c: u32) -> u32 {
+        if self.lst_t[q] == ALLT {
+            c + 1
+        } else {
+            self.cp_next[c as usize]
+        }
+    }
+    // Candidate handled edges of entry `q` of `lst`: a cursor `c` (`NONE` = end).
+    const fn h_skip(&self, mut e: u32) -> u32 {
+        while e != NONE && !self.edge_h[e as usize] {
+            e = self.edge_next[e as usize];
+        }
+        e
+    }
+    const fn h_start(&self, q: usize) -> u32 {
+        if self.lst_h[q] == ALLT {
+            self.h_skip(self.up_head[self.lst[q] as usize])
+        } else {
+            self.lst_h[q]
+        }
+    }
+    const fn h_edge(&self, q: usize, c: u32) -> u32 {
+        if self.lst_h[q] == ALLT {
+            c
+        } else {
+            self.hp_e[c as usize]
+        }
+    }
+    const fn h_next(&self, q: usize, c: u32) -> u32 {
+        if self.lst_h[q] == ALLT {
+            self.h_skip(self.edge_next[c as usize])
+        } else {
+            self.hp_next[c as usize]
+        }
+    }
+    /// (some term of entry `q` is consistent with the context, some such term holds in it)
+    const fn consistent_static(&self, q: usize) -> (bool, bool) {
         let mut cons = false;
-        let mut k = 0;
-        let cn = self.cn[i] as usize;
-        while k < cn {
-            let t = self.olist[self.co[i] as usize + k];
+        let mut c = self.c_start(q);
+        while !self.c_end(q, c) {
+            let t = self.c_term(q, c);
             if !self.conflicts(t) {
                 cons = true;
                 if self.term_held(t) {
                     return (true, true);
                 }
             }
-            k += 1;
+            c = self.c_next(q, c);
         }
         (cons, false)
     }
@@ -1390,29 +1473,27 @@ impl Plan {
         }
         NONE
     }
-    /// Does component `i` wait, in every consistent term, for a keyed decision at `(x, prev)`?
-    const fn can_pend_at(&self, i: usize, x: u32, prev: u32) -> bool {
+    /// Does entry `q` wait, in every consistent term, for a keyed decision at `(x, prev)`?
+    const fn can_pend_at(&self, q: usize, x: u32, prev: u32) -> bool {
         let mut any = false;
-        let cn = self.cn[i] as usize;
-        let mut k = 0;
-        while k < cn {
-            let t = self.olist[self.co[i] as usize + k];
+        let mut c = self.c_start(q);
+        while !self.c_end(q, c) {
+            let t = self.c_term(q, c);
             if !self.conflicts(t) {
                 if self.term_held(t) || self.dec_at(t, x, prev) == NONE {
                     return false;
                 }
                 any = true;
             }
-            k += 1;
+            c = self.c_next(q, c);
         }
         any
     }
-    /// The first place at which component `i` can wait for a keyed decision.
-    const fn first_pend(&self, i: usize) -> (bool, u32, u32) {
-        let cn = self.cn[i] as usize;
-        let mut k = 0;
-        while k < cn {
-            let t = self.olist[self.co[i] as usize + k];
+    /// The first place at which entry `q` can wait for a keyed decision.
+    const fn first_pend(&self, q: usize) -> (bool, u32, u32) {
+        let mut c = self.c_start(q);
+        while !self.c_end(q, c) {
+            let t = self.c_term(q, c);
             if !self.conflicts(t) {
                 let n = self.term_len(t);
                 let mut j = 0;
@@ -1424,7 +1505,7 @@ impl Plan {
                         && !self.held(d)
                         && (prev == NONE || self.held(prev))
                         && self.node_ready(x as usize)
-                        && self.can_pend_at(i, x, prev)
+                        && self.can_pend_at(q, x, prev)
                     {
                         return (true, x, prev);
                     }
@@ -1432,7 +1513,7 @@ impl Plan {
                 }
                 return (false, 0, 0);
             }
-            k += 1;
+            c = self.c_next(q, c);
         }
         (false, 0, 0)
     }
@@ -1447,24 +1528,6 @@ impl Plan {
     // is tested at run time). Edges that did not fire are not in the list; the
     // others are listed in execution order of their parents.
 
-    /// Does decision `x` exclude a decision of the context?
-    const fn dec_conflicts(&self, x: usize) -> bool {
-        let mut j = 0;
-        while j < self.ctx_len {
-            let y = self.ctx[j] as usize;
-            if x != y
-                && self.dn_node[x] == self.dn_node[y]
-                && self.dn_prev[x] == self.dn_prev[y]
-                && self.dn_key[x] != self.dn_key[y]
-                && self.dn_key[x] != crate::select::GUARD
-                && self.dn_key[y] != crate::select::GUARD
-            {
-                return true;
-            }
-            j += 1;
-        }
-        false
-    }
     /// The chain ending at decision `d` under the context: 0 excluded, 1 held, 2 unknown.
     const fn path_state(&self, d: u32) -> u8 {
         let mut all = true;
@@ -1509,16 +1572,24 @@ impl Plan {
         }
     }
 
-    const fn mk_hrun(&mut self, i: usize, guarded: bool) -> u32 {
+    const fn mk_hrun(&mut self, i: usize, guarded: bool, q: usize) -> u32 {
         let start = self.hi_len;
-        let mut e = self.up_head[i];
-        while e != NONE {
-            let eu = e as usize;
-            let u = self.edge_to[eu] as usize;
-            if guarded && self.kind[u] == KIND_COMPONENT && !self.always[u] {
-                self.flag_need[u] = true;
+        if guarded && !self.hg_done[i] {
+            self.hg_done[i] = true;
+            let mut e = self.up_head[i];
+            while e != NONE {
+                let u = self.edge_to[e as usize] as usize;
+                if self.kind[u] == KIND_COMPONENT && !self.always[u] {
+                    self.flag_need[u] = true;
+                }
+                e = self.edge_next[e as usize];
             }
-            if self.edge_h[eu] {
+        }
+        let mut c = self.h_start(q);
+        while c != NONE {
+            let eu = self.h_edge(q, c) as usize;
+            let u = self.edge_to[eu] as usize;
+            {
                 let ps = self.ran_state(u);
                 let cs = if self.edge_dn[eu] == NONE { 1 } else { self.path_state(self.edge_dn[eu]) };
                 if ps != 0 && cs != 0 {
@@ -1547,7 +1618,7 @@ impl Plan {
                     self.hi_len += 1;
                 }
             }
-            e = self.edge_next[eu];
+            c = self.h_next(q, c);
         }
         let n = self.new_node(PG_HRUN, self.cpos[i], guarded as u32);
         self.pg_c[n as usize] = start as u32;
@@ -1607,9 +1678,9 @@ impl Plan {
         self.ib[self.ib_len] = n;
         self.ib_len += 1;
     }
-    const fn mk_run(&mut self, i: usize, guarded: bool) -> u32 {
+    const fn mk_run(&mut self, i: usize, guarded: bool, q: usize) -> u32 {
         if self.handler[i] {
-            return self.mk_hrun(i, guarded);
+            return self.mk_hrun(i, guarded, q);
         }
         if guarded {
             let mut e = self.up_head[i];
@@ -1642,15 +1713,22 @@ impl Plan {
         (false, lo)
     }
 
+    /// The first decision with this node, previous decision and key.
     const fn find_decision(&self, x: u32, prev: u32, key: u32) -> u32 {
-        let mut d = 0;
-        while d < self.dn_len {
-            if self.dn_node[d] == x && self.dn_prev[d] == prev && self.dn_key[d] == key {
-                return d as u32;
+        let mut sl = mix3(x, prev, key) & (DCAP - 1);
+        let mut best = NONE;
+        loop {
+            let h = self.dtab[sl];
+            if h == 0 {
+                return best;
             }
-            d += 1;
+            let d = h - 1;
+            let du = d as usize;
+            if self.dn_node[du] == x && self.dn_prev[du] == prev && self.dn_key[du] == key && d < best {
+                best = d;
+            }
+            sl = (sl + 1) & (DCAP - 1);
         }
-        NONE
     }
 
     /// The program for the components `lst[lo..hi]` under the current context.
@@ -1659,29 +1737,28 @@ impl Plan {
         let mut k = lo;
         while k < hi && !self.failed {
             let i = self.lst[k] as usize;
-            let (cons, stat) = self.consistent_static(i);
+            let (cons, stat) = self.consistent_static(k);
             if !cons {
                 k += 1;
                 continue;
             }
             if stat {
-                let n = self.mk_run(i, false);
+                let n = self.mk_run(i, false, k);
                 self.push_item(n);
                 k += 1;
                 continue;
             }
-            let (found, x, prev) = self.first_pend(i);
+            let (found, x, prev) = self.first_pend(k);
             if !found {
-                let n = self.mk_run(i, true);
+                let n = self.mk_run(i, true, k);
                 self.push_item(n);
                 k += 1;
                 continue;
             }
             let mut j = k + 1;
             while j < hi {
-                let i2 = self.lst[j] as usize;
-                let (c2, s2) = self.consistent_static(i2);
-                if c2 && (s2 || !self.can_pend_at(i2, x, prev)) {
+                let (c2, s2) = self.consistent_static(j);
+                if c2 && (s2 || !self.can_pend_at(j, x, prev)) {
                     break;
                 }
                 j += 1;
@@ -1719,11 +1796,9 @@ impl Plan {
         let mut nk = 0;
         let mut q = lo;
         while q < hi {
-            let i = self.lst[q] as usize;
-            let cn = self.cn[i] as usize;
-            let mut k = 0;
-            while k < cn {
-                let t = self.olist[self.co[i] as usize + k];
+            let mut cc = self.c_start(q);
+            while !self.c_end(q, cc) {
+                let t = self.c_term(q, cc);
                 if !self.conflicts(t) {
                     let d = self.dec_at(t, x, prev);
                     if d != NONE {
@@ -1744,15 +1819,17 @@ impl Plan {
                         }
                     }
                 }
-                k += 1;
+                cc = self.c_next(q, cc);
             }
             q += 1;
         }
-        // layout: keys | start (nk+1) | stamp (nk) | child (nk)
+        // layout: keys | start (nk+1) | stamp (nk) | child (nk) | entry (nk) | edge stamp (nk)
         let st = m + nk;
         let sm = st + nk + 1;
         let ch = sm + nk;
-        if ch + nk > KPOOL {
+        let en = ch + nk;
+        let hs = en + nk;
+        if hs + nk > KPOOL {
             self.fail("the push program is too large: ", "raise dataflow_flat's key pool", "");
             return 0;
         }
@@ -1761,8 +1838,16 @@ impl Plan {
             self.kpool[st + z] = 0;
             z += 1;
         }
+        let mut z = 0;
+        while z < nk {
+            self.kpool[hs + z] = 0;
+            z += 1;
+        }
+        let mut hstamp = 0u32;
+        let hpbase = self.hp_len;
         // 2. count and bucket (pass 0 counts, pass 1 fills)
         let base = self.lst_len;
+        let cpbase = self.cp_len;
         let mut pass = 0;
         while pass < 2 {
             let mut z = 0;
@@ -1790,10 +1875,9 @@ impl Plan {
             while q < hi {
                 let i = self.lst[q] as usize;
                 let ord = (q - lo + 1) as u32;
-                let cn = self.cn[i] as usize;
-                let mut k = 0;
-                while k < cn {
-                    let t = self.olist[self.co[i] as usize + k];
+                let mut cc = self.c_start(q);
+                while !self.c_end(q, cc) {
+                    let t = self.c_term(q, cc);
                     if !self.conflicts(t) {
                         let d = self.dec_at(t, x, prev);
                         if d != NONE {
@@ -1805,12 +1889,118 @@ impl Plan {
                                 } else {
                                     let at = self.kpool[ch + r] as usize;
                                     self.lst[base + at] = i as u32;
+                                    self.lst_t[base + at] = NONE;
+                                    self.lst_n[base + at] = 0;
+                                    self.lst_tail[base + at] = NONE;
+                                    self.lst_h[base + at] = NONE;
+                                    self.lst_htail[base + at] = NONE;
+                                    self.kpool[en + r] = (base + at) as u32;
                                     self.kpool[ch + r] += 1;
                                 }
                             }
+                            if pass == 1 {
+                                // the term joins its component's candidates in this branch
+                                let e = base + self.kpool[ch + r] as usize - 1;
+                                let nd = self.cp_len;
+                                if nd == MAX_LST {
+                                    self.fail("the push program is too large: ", "raise dataflow_flat's list pool", "");
+                                    return 0;
+                                }
+                                self.cp_t[nd] = t;
+                                self.cp_next[nd] = NONE;
+                                if self.lst_tail[e] == NONE {
+                                    self.lst_t[e] = nd as u32;
+                                } else {
+                                    self.cp_next[self.lst_tail[e] as usize] = nd as u32;
+                                }
+                                self.lst_tail[e] = nd as u32;
+                                self.lst_n[e] += 1;
+                                self.cp_len = nd + 1;
+                            }
                         }
                     }
-                    k += 1;
+                    cc = self.c_next(q, cc);
+                }
+                if pass == 1 && self.handler[i] {
+                    // the handled edges of the entry go to the branches that do not exclude them
+                    let mut c = self.h_start(q);
+                    while c != NONE {
+                        let e = self.h_edge(q, c);
+                        let eu = e as usize;
+                        let u = self.edge_to[eu] as usize;
+                        hstamp += 1;
+                        // the key the edge's own selector needs at this place
+                        let mut has_c = false;
+                        let mut ckey = 0;
+                        let mut dx = self.edge_dn[eu];
+                        while dx != NONE {
+                            let du = dx as usize;
+                            if self.dn_node[du] == x
+                                && self.dn_prev[du] == prev
+                                && self.dn_key[du] != crate::select::GUARD
+                                && !self.held(dx)
+                            {
+                                has_c = true;
+                                ckey = self.dn_key[du];
+                                break;
+                            }
+                            dx = self.dn_prev[du];
+                        }
+                        // does the parent run in every branch (some live term of it has no keyed decision here)?
+                        let mut universal = self.kind[u] == KIND_ROOT;
+                        if !universal {
+                            let cn = self.cn[u] as usize;
+                            let mut k2 = 0;
+                            while k2 < cn {
+                                let t = self.olist[self.co[u] as usize + k2];
+                                if !self.conflicts(t) && self.dec_at(t, x, prev) == NONE {
+                                    universal = true;
+                                    break;
+                                }
+                                k2 += 1;
+                            }
+                        }
+                        let cn = self.cn[u] as usize;
+                        let mut k2 = 0;
+                        let lim = if universal { nk } else { cn };
+                        while k2 < lim {
+                            let mut r = nk;
+                            if universal {
+                                r = k2;
+                            } else {
+                                let t = self.olist[self.co[u] as usize + k2];
+                                if !self.conflicts(t) {
+                                    let d = self.dec_at(t, x, prev);
+                                    if d != NONE {
+                                        let (found, rr) = self.find_key(m, nk, self.dn_key[d as usize]);
+                                        if found && self.kpool[hs + rr] != hstamp {
+                                            self.kpool[hs + rr] = hstamp;
+                                            r = rr;
+                                        }
+                                    }
+                                }
+                            }
+                            if r < nk && self.kpool[sm + r] == ord && (!has_c || self.kpool[m + r] == ckey) {
+                                let ent = self.kpool[en + r] as usize;
+                                let nd = self.hp_len;
+                                if nd == MAX_LST {
+                                    self.fail("the push program is too large: ", "raise dataflow_flat's list pool", "");
+                                    return 0;
+                                }
+                                self.hp_e[nd] = e;
+                                self.hp_next[nd] = NONE;
+                                if self.lst_htail[ent] == NONE {
+                                    self.lst_h[ent] = nd as u32;
+                                } else {
+                                    self.hp_next[self.lst_htail[ent] as usize] = nd as u32;
+                                }
+                                self.lst_htail[ent] = nd as u32;
+                                self.hp_len = nd + 1;
+                            }
+                            k2 += 1;
+                        }
+                        c = self.h_next(q, c);
+                    }
                 }
                 q += 1;
             }
@@ -1818,7 +2008,7 @@ impl Plan {
         }
         let total = self.kpool[st + nk] as usize;
         self.lst_len = base + total;
-        self.kp_len = ch + nk;
+        self.kp_len = hs + nk;
         // 3. the branches
         let mut r = 0;
         while r < nk && !self.failed {
@@ -1828,11 +2018,14 @@ impl Plan {
                 self.fail("selectors are nested too deeply for the push program", "", "");
                 return 0;
             }
-            self.ctx[self.ctx_len] = d;
+            let pl = self.dn_place[d as usize] as usize;
+            self.ctx_old[self.ctx_len] = self.cur[pl];
+            self.cur[pl] = d + 1;
             self.ctx_len += 1;
             let (blo, bhi) = (base + self.kpool[st + r] as usize, base + self.kpool[st + r + 1] as usize);
             let c = self.emit(blo, bhi);
             self.ctx_len -= 1;
+            self.cur[pl] = self.ctx_old[self.ctx_len];
             self.kpool[ch + r] = c;
             r += 1;
         }
@@ -1866,6 +2059,8 @@ impl Plan {
         self.pg_d[n as usize] = self.dn_opos[d0 as usize];
         self.pg_e[n as usize] = depth;
         self.lst_len = base;
+        self.cp_len = cpbase;
+        self.hp_len = hpbase;
         self.kp_len = m;
         n
     }
@@ -1875,9 +2070,12 @@ impl Plan {
         let mut q = 0;
         while q < n {
             self.lst[q] = self.by_cpos[q];
+            self.lst_t[q] = ALLT;
+            self.lst_h[q] = ALLT;
             q += 1;
         }
         self.lst_len = n;
+        self.cp_len = 0;
         self.ctx_len = 0;
         self.root_prog = self.emit(0, n);
     }
@@ -1901,6 +2099,41 @@ impl Plan {
     }
 
     /// Number of nodes: the root, the components and the anchor.
+    /// FNV digest of the push program (nodes, children, handler items, flags); a test compares
+    /// program shapes before and after changes to the builder.
+    #[cfg(test)]
+    pub(crate) fn shape_digest(&self) -> u64 {
+        let mut h = 0xcbf29ce484222325u64;
+        let mut feed = |v: u64| {
+            h ^= v;
+            h = h.wrapping_mul(0x100000001b3);
+        };
+        feed(self.root_prog as u64);
+        feed(self.pg_len as u64);
+        for n in 0..self.pg_len {
+            for v in [self.pg_kind[n] as u32, self.pg_a[n], self.pg_b[n], self.pg_c[n], self.pg_d[n], self.pg_e[n]] {
+                feed(v as u64);
+            }
+        }
+        feed(self.ch_len as u64);
+        for k in 0..self.ch_len {
+            feed(self.ch_node[k] as u64);
+            feed(self.ch_key[k] as u64);
+        }
+        feed(self.hi_len as u64);
+        for k in 0..self.hi_len {
+            feed(self.hi_pos[k] as u64);
+            feed(self.hi_mode[k] as u64);
+            feed(self.hi_key[k] as u64);
+        }
+        feed(self.n_flags as u64);
+        for i in 0..self.len {
+            feed(self.flag[i] as u64);
+            feed(self.always[i] as u64);
+            feed(self.flag_need[i] as u64);
+        }
+        h
+    }
     pub(crate) const fn len(&self) -> usize {
         self.len
     }
@@ -2299,4 +2532,111 @@ mod handler_trace {
         plan.check();
         assert!(plan.n_flags() >= 2);
     }
+}
+
+#[cfg(test)]
+mod shapes {
+    use super::*;
+    use crate::sinks::Anchor;
+    use crate::{Collect, Component, ComponentSubscription, Handler, Root, UpdateHandler};
+
+    #[derive(Root)]
+    pub struct Poll;
+    macro_rules! key {
+        ($k:ident, $n:expr) => {
+            pub struct $k;
+            impl crate::Select<Poll> for $k {
+                type Out = Poll;
+                const KEY: u32 = $n;
+                fn select(x: &Poll) -> Option<&Poll> { Some(x) }
+                fn key_of(_: &Poll) -> u32 { $n }
+            }
+        };
+    }
+    macro_rules! comp {
+        ($name:ident, [$($sub:tt)*]) => {
+            #[derive(ComponentSubscription)]
+            #[subscribe($($sub)*)]
+            pub struct $name;
+            impl Component for $name {
+                type Config = ();
+                type Output = u8;
+                fn new((): (), _: Self::Init<'_>) -> (Self, u8) { ($name, 0) }
+                fn update(&mut self, _: Self::Input<'_>) -> u8 { 0 }
+            }
+        };
+    }
+    key!(K0, 0);
+    key!(K1, 1);
+    key!(K2, 2);
+    key!(K3, 5);
+    key!(K4, 7);
+    key!(K5, 9);
+    comp!(X0, [p: Poll => K0]);
+    comp!(X1, [p: Poll => K1]);
+    comp!(X2, [p: Poll => K2]);
+    comp!(X3, [p: Poll => K3]);
+    comp!(X4, [p: Poll => K4]);
+    comp!(X5, [p: Poll => K5]);
+    comp!(Z, [p: Poll]);
+    comp!(Join, [a: X0, b: X1, c: X2, d: X3, e: X4, f: X5]);
+    comp!(Mixed, [z: Z, a: X0, b: X3]);
+    comp!(Tail, [j: Join, m: Mixed]);
+    comp!(Plain, [z: Z]);
+    // two-level: X0 under K0 then a nested keyed read
+    comp!(Deep, [x: X0, p: Poll => K0]);
+
+    #[derive(Handler)]
+    #[handles(X0, X1, X2, X3, X4, X5)]
+    pub struct HH;
+    impl Collect for HH {
+        type Config = ();
+        type Output = u8;
+        type Buf = ();
+        fn new((): ()) -> Self { HH }
+        fn begin(&mut self) {}
+        fn finish(&mut self, (): (), _: Self::Input<'_>) -> u8 { 0 }
+    }
+    macro_rules! upd { ($($x:ident),*) => { $(impl UpdateHandler<$x> for HH { fn on_update(&mut self, _: &mut (), _: &u8) {} })* }; }
+    upd!(X0, X1, X2, X3, X4, X5);
+
+    #[derive(Handler)]
+    #[handles(X0, X1, X2, X3, X4, X5)]
+    #[subscribe(z: Z)]
+    pub struct HZ;
+    impl Collect for HZ {
+        type Config = ();
+        type Output = u8;
+        type Buf = ();
+        fn new((): ()) -> Self { HZ }
+        fn begin(&mut self) {}
+        fn finish(&mut self, (): (), _: Self::Input<'_>) -> u8 { 0 }
+    }
+    macro_rules! updz { ($($x:ident),*) => { $(impl UpdateHandler<$x> for HZ { fn on_update(&mut self, _: &mut (), _: &u8) {} })* }; }
+    updz!(X0, X1, X2, X3, X4, X5);
+
+    /// Program shapes of a few graphs: join of exclusive keys, mixed, handlers, plain.
+    #[test]
+    fn program_shapes_are_stable() {
+        for plan in [
+            <Anchor<Poll, (Join,)> as Planned>::PLAN,
+            <Anchor<Poll, (Tail, Plain)> as Planned>::PLAN,
+            <Anchor<Poll, (Mixed, Deep)> as Planned>::PLAN,
+            <Anchor<Poll, (HH,)> as Planned>::PLAN,
+            <Anchor<Poll, (HZ, Join)> as Planned>::PLAN,
+        ] {
+            assert!(!plan.failed);
+        }
+        let d = [
+            <Anchor<Poll, (Join,)> as Planned>::PLAN.shape_digest(),
+            <Anchor<Poll, (Tail, Plain)> as Planned>::PLAN.shape_digest(),
+            <Anchor<Poll, (Mixed, Deep)> as Planned>::PLAN.shape_digest(),
+            <Anchor<Poll, (HH,)> as Planned>::PLAN.shape_digest(),
+            <Anchor<Poll, (HZ, Join)> as Planned>::PLAN.shape_digest(),
+        ];
+        eprintln!("DIGESTS {d:x?}");
+        let expected: [u64; 5] = EXPECTED;
+        assert_eq!(d, expected);
+    }
+    const EXPECTED: [u64; 5] = [0x16a4e2240a908108, 0xa825552f737152ec, 0xfa05ea63fd51c686, 0x0eab1e5f15e96d75, 0x1b8ff799605ad5ba];
 }

@@ -310,8 +310,11 @@ impl BookCore {{
             self.last_seq = d.seq;
             let i = (d.px as usize) & 7;
             self.ladder[i] = self.ladder[i].wrapping_add(d.qty);
-            if d.bid {{ self.top.bid = d.px; self.top.bq = d.qty }} else {{ self.top.ask = d.px; self.top.aq = d.qty }}
-            self.top.bq = self.top.bq.wrapping_add(self.ladder[(i + 1) & 7] >> 3);
+            let mut t = self.top;
+            if d.bid {{ t.bid = d.px; t.bq = d.qty }} else {{ t.ask = d.px; t.aq = d.qty }}
+            t.bq = t.bq.wrapping_add(self.ladder[(i + 1) & 7] >> 3);
+            self.top = t;
+            return t;
         }}
         self.top
     }}
@@ -326,7 +329,9 @@ impl TradeCore {{
     pub fn apply(&mut self, t: &TradeUpd) -> TradeTop {{
         if t.seq != self.last_seq {{
             self.last_seq = t.seq;
-            self.top = TradeTop {{ px: t.px, qty: t.qty, vol: self.top.vol.wrapping_add(t.qty), n: self.top.n + 1 }};
+            let r = TradeTop {{ px: t.px, qty: t.qty, vol: self.top.vol.wrapping_add(t.qty), n: self.top.n + 1 }};
+            self.top = r;
+            return r;
         }}
         self.top
     }}
@@ -569,7 +574,7 @@ def big_math(M, acc):
     return lines
 
 
-def gen_app(out, M, MODE):
+def gen_app(out, M, MODE, big_inline=False):
     app = f"{out}/app"
     write(f"{app}/Cargo.toml", f"""[package]
 name = "app"
@@ -583,7 +588,6 @@ marketlib = {{ path = "../marketlib" }}
     mods = "\n".join(f"pub mod {m};" for m, _, _ in EX)
     write(f"{app}/src/lib.rs", f"""//! The app: wiring only. Components come from `marketlib`; this crate says which markets exist, joins
 //! them across venues and defines the sinks.
-#![allow(long_running_const_eval)]
 {mods}
 pub mod big;
 pub mod cross;
@@ -679,6 +683,7 @@ impl Component for Risk {{
     bsubs = ",\n    ".join(f"f{j}: marketlib::Fair<marketlib::{EX[e][2]}, marketlib::catalog::{EX[e][0]}::M{k}>"
                            for j, (e, k) in enumerate(M.big_deps))
     body = "\n        ".join(big_math(M, lambda j: f"i.f{j}"))
+    big_attr = "#[inline(always)]" if big_inline else ""
     write(f"{app}/src/big.rs", f"""//! The big component: wide, with a long body. Lives alone in its file.
 use dataflow_flat::{{Component, ComponentSubscription}};
 use marketlib::DigestCore;
@@ -694,6 +699,7 @@ impl Component for Big {{
     type Config = ();
     type Output = ();
     fn new((): (), _: Self::Init<'_>) -> (Self, ()) {{ (Big {{ core: DigestCore::default() }}, ()) }}
+    {big_attr}
     fn update(&mut self, i: Self::Input<'_>) {{
         {body}
         self.core.step(acc, &BIG);
@@ -924,7 +930,7 @@ pub fn run_all_batch(h: &mut Hand, pkts: &[Wire]) {{
 """)
 
 
-def gen_runner(out, M):
+def gen_runner(out, M, mode):
     r = f"{out}/runner"
     write(f"{r}/Cargo.toml", """[package]
 name = "runner"
@@ -942,11 +948,26 @@ app = { path = "../app", optional = true }
 baseline = { path = "../baseline", optional = true }
 dataflow-flat = { path = "%s/dataflow-flat", optional = true }
 """ % LIB)
+    KINDF = "" if mode == "enum" else """    // --kind E:B (E = 0 lighter, 1 binance, 2 hyper; B = d depth, t trade): time only those packets
+    let pk = match std::env::args().skip_while(|x| x != "--kind").nth(1) {
+        None => pk,
+        Some(k) => {
+            let (e, b) = k.split_once(':').unwrap();
+            let (e, d) = (e.parse::<usize>().unwrap(), b == "d");
+            pk.into_iter().filter(|w| {
+                let (we, f) = match w { Wire::Lighter(f) => (0, f), Wire::Binance(f) => (1, f), Wire::Hyper(f) => (2, f) };
+                we == e && matches!(f.body, Body::Depth(_)) == d
+            }).collect::<Vec<_>>()
+        }
+    };
+    let npk = pk.len();
+    eprintln!("packets {npk}");
+"""
     write(f"{r}/src/main.rs", f"""//! usage: runner [--packets N] [--reps R] [--rounds K] [--all]
-#![allow(long_running_const_eval)]
 //! Verifies framework == baseline (checksums), then times them in alternating rounds and prints
 //! `RESULT <side> min=<ns/packet> median=<ns/packet>` lines.
 use marketlib::{{feed_gen, stats}};
+#[allow(unused_imports)] use marketlib::wire::*;
 use std::time::Instant;
 
 const COUNTS: [u32; 3] = [{M.n[0]}, {M.n[1]}, {M.n[2]}];
@@ -962,7 +983,7 @@ fn main() {{
     let rounds = arg("--rounds", 11);
     let with_all = std::env::args().any(|x| x == "--all");
     let pk = feed_gen::packets(npk, COUNTS, 0x5EED);
-
+{KINDF}
     #[cfg(feature = "fw")]
     let mut fw = app::build();
     #[cfg(feature = "fw")]
@@ -1035,6 +1056,7 @@ def main():
     ap.add_argument("--markets", help="L,B,H overrides the size")
     ap.add_argument("--sink-scan", default="8", help="how many of its inputs each order sender / risk samples (or 'all')")
     ap.add_argument("--big-width", type=int, default=42)
+    ap.add_argument("--big-inline", action="store_true", help="mark the framework Big::update #[inline(always)] (user-side hint)")
     ap.add_argument("--core-inline", default="hint", choices=["none", "hint"])
     a = ap.parse_args()
     if a.markets:
@@ -1060,9 +1082,9 @@ members = ["marketlib", "app", "baseline", "runner"]
     if os.path.exists(f"{LIB}/Cargo.lock") and not os.path.exists(f"{out}/Cargo.lock"):
         shutil.copy(f"{LIB}/Cargo.lock", f"{out}/Cargo.lock")
     gen_lib(out, M, a.mode, a.core_inline)
-    gen_app(out, M, a.mode)
+    gen_app(out, M, a.mode, a.big_inline)
     gen_baseline(out, M, a.mode, a.core_inline)
-    gen_runner(out, M)
+    gen_runner(out, M, a.mode)
     print(f"{out}: mode={a.mode} markets L/B/H={M.n} components={M.components()} crosses={len(M.cross)} edges~{M.edges()}")
 
 
