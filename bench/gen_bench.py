@@ -1,7 +1,8 @@
 # usage: python3 bench/gen_bench.py full|flat|hand [layers=20] [wide]  -> writes bench/src/main.rs
 # `wide`: the root subscribes to the last 5 layers (100 components at 20 wide) instead of the last one.
-# `flat` generates one root component `App` (subscribes to the last layer, returns the XOR
-# checksum as u64); `full` also generates the hand-written baseline and asserts the results agree.
+# `flat` generates the root `Poll`, the layer-0 components subscribe to it, and one sink `App`
+# (subscribes to the last layer, stores the XOR checksum in a static); every component runs on every
+# push (event-model phase 1a, no demuxers); `full` also generates the hand-written baseline and asserts the results agree.
 import random, sys
 mode = sys.argv[1]
 random.seed(1)
@@ -45,17 +46,20 @@ impl {nm} {{
 
 def components_flat():
     # Nightly `dataflow-flat` crate: derive syntax.
-    out=["use dataflow_flat::{Component, ComponentSubscription};"]
+    out=["use dataflow_flat::{Component, ComponentSubscription, Root};",
+         "use std::sync::atomic::{AtomicU64, Ordering};",
+         "#[derive(Root)]\npub struct Poll;",
+         "pub static OUT: AtomicU64 = AtomicU64::new(0);"]
     for n, ds in deps.items():
         nm = name(n)
-        subs = ", ".join(f"s{i}: {name(d)}" for i, d in enumerate(ds))
-        attr = f"#[subscribe({subs})]\n" if ds else ""
+        subs = ", ".join(f"s{i}: {name(d)}" for i, d in enumerate(ds)) if ds else "p: Poll"
+        attr = f"#[subscribe({subs})]\n"
         out.append(f"""#[derive(ComponentSubscription)]
 {attr}pub struct {nm}(pub u64);
 impl Component for {nm} {{
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self {{ {nm}({n[1]}) }}
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) {{ ({nm}({n[1]}), 0) }}
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 {{ {body_of(n, [f"input.s{i}" for i in range(len(ds))])} }}
 }}""")
@@ -67,10 +71,10 @@ impl Component for {nm} {{
 pub struct App;
 impl Component for App {{
     type Config = ();
-    type Output = u64;
-    fn new((): ()) -> Self {{ App }}
+    type Output = ();
+    fn new((): (), _: Self::Init<'_>) -> (Self, ()) {{ (App, ()) }}
     #[inline]
-    fn update(&mut self, input: Self::Input<'_>) -> u64 {{ {xor_in} }}
+    fn update(&mut self, input: Self::Input<'_>) {{ OUT.store({xor_in}, Ordering::Relaxed) }}
 }}""")
     return "\n".join(out)
 
@@ -99,7 +103,7 @@ fn stats(v: &mut Vec<f64>) -> (f64, f64) {
     (v[0], v[v.len() / 2])
 }""")
 body = ["fn main() {"]
-if use_flat: body.append("""    let mut b = dataflow_flat::Pipeline::<flat::App>::build(dataflow_flat::Configs::new()).unwrap();
+if use_flat: body.append("""    let mut b = dataflow_flat::Pipeline::<flat::Poll, (flat::App,)>::build(dataflow_flat::Configs::new()).unwrap();
     let mut xb = 0;
     let mut tf: Vec<f64> = Vec::new();
     for _ in 0..WARMUP { xb = run_flat(&mut b); }""")
@@ -119,7 +123,7 @@ if use_hand: body.append("""    let (mn, md) = stats(&mut th);
     println!("hand-written: min {:>6.1}  median {:>6.1} ns/run", mn, md);""")
 if use_flat and use_hand: body.append('    assert_eq!(xb, xh); println!("results agree");')
 body.append("}")
-if use_flat: out.append("#[inline(never)]\nfn run_flat(p: &mut dataflow_flat::Pipeline<flat::App>) -> u64 { p.run() }")
+if use_flat: out.append("#[inline(never)]\nfn run_flat(p: &mut dataflow_flat::Pipeline<flat::Poll, (flat::App,)>) -> u64 { p.push(flat::Poll); flat::OUT.load(std::sync::atomic::Ordering::Relaxed) }")
 out += body
 open(__import__("os").path.join(__import__("os").path.dirname(__file__), "src", "main.rs"),"w").write("\n".join(out))
 print(f"mode={mode}: {len(order)} components, {sum(len(deps[n]) for n in order)} edges")

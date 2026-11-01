@@ -3,184 +3,208 @@ use std::hint::black_box;
 use std::time::Instant;
 
 mod flat {
-use dataflow_flat::{Component, ComponentSubscription};
+use dataflow_flat::{Component, ComponentSubscription, Root};
+use std::sync::atomic::{AtomicU64, Ordering};
+#[derive(Root)]
+pub struct Poll;
+pub static OUT: AtomicU64 = AtomicU64::new(0);
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_0(pub u64);
 impl Component for C0_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1); self.0 }
 }
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_1(pub u64);
 impl Component for C0_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(2); self.0 }
 }
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_2(pub u64);
 impl Component for C0_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(3); self.0 }
 }
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_3(pub u64);
 impl Component for C0_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(4); self.0 }
 }
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_4(pub u64);
 impl Component for C0_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(5); self.0 }
 }
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_5(pub u64);
 impl Component for C0_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(6); self.0 }
 }
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_6(pub u64);
 impl Component for C0_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(7); self.0 }
 }
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_7(pub u64);
 impl Component for C0_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(8); self.0 }
 }
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_8(pub u64);
 impl Component for C0_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(9); self.0 }
 }
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_9(pub u64);
 impl Component for C0_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(10); self.0 }
 }
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_10(pub u64);
 impl Component for C0_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(11); self.0 }
 }
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_11(pub u64);
 impl Component for C0_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(12); self.0 }
 }
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_12(pub u64);
 impl Component for C0_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(13); self.0 }
 }
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_13(pub u64);
 impl Component for C0_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(14); self.0 }
 }
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_14(pub u64);
 impl Component for C0_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(15); self.0 }
 }
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_15(pub u64);
 impl Component for C0_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(16); self.0 }
 }
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_16(pub u64);
 impl Component for C0_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(17); self.0 }
 }
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_17(pub u64);
 impl Component for C0_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(18); self.0 }
 }
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_18(pub u64);
 impl Component for C0_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(19); self.0 }
 }
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct C0_19(pub u64);
 impl Component for C0_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C0_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C0_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(20); self.0 }
 }
@@ -190,7 +214,7 @@ pub struct C1_0(pub u64);
 impl Component for C1_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(31) }
 }
@@ -200,7 +224,7 @@ pub struct C1_1(pub u64);
 impl Component for C1_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(32) }
 }
@@ -210,7 +234,7 @@ pub struct C1_2(pub u64);
 impl Component for C1_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(33) }
 }
@@ -220,7 +244,7 @@ pub struct C1_3(pub u64);
 impl Component for C1_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(34) }
 }
@@ -230,7 +254,7 @@ pub struct C1_4(pub u64);
 impl Component for C1_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(35) }
 }
@@ -240,7 +264,7 @@ pub struct C1_5(pub u64);
 impl Component for C1_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(36) }
 }
@@ -250,7 +274,7 @@ pub struct C1_6(pub u64);
 impl Component for C1_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(37) }
 }
@@ -260,7 +284,7 @@ pub struct C1_7(pub u64);
 impl Component for C1_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(38) }
 }
@@ -270,7 +294,7 @@ pub struct C1_8(pub u64);
 impl Component for C1_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(39) }
 }
@@ -280,7 +304,7 @@ pub struct C1_9(pub u64);
 impl Component for C1_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(40) }
 }
@@ -290,7 +314,7 @@ pub struct C1_10(pub u64);
 impl Component for C1_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(41) }
 }
@@ -300,7 +324,7 @@ pub struct C1_11(pub u64);
 impl Component for C1_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(42) }
 }
@@ -310,7 +334,7 @@ pub struct C1_12(pub u64);
 impl Component for C1_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(43) }
 }
@@ -320,7 +344,7 @@ pub struct C1_13(pub u64);
 impl Component for C1_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(44) }
 }
@@ -330,7 +354,7 @@ pub struct C1_14(pub u64);
 impl Component for C1_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(45) }
 }
@@ -340,7 +364,7 @@ pub struct C1_15(pub u64);
 impl Component for C1_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(46) }
 }
@@ -350,7 +374,7 @@ pub struct C1_16(pub u64);
 impl Component for C1_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(47) }
 }
@@ -360,7 +384,7 @@ pub struct C1_17(pub u64);
 impl Component for C1_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(48) }
 }
@@ -370,7 +394,7 @@ pub struct C1_18(pub u64);
 impl Component for C1_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(49) }
 }
@@ -380,7 +404,7 @@ pub struct C1_19(pub u64);
 impl Component for C1_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C1_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C1_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(50) }
 }
@@ -390,7 +414,7 @@ pub struct C2_0(pub u64);
 impl Component for C2_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(62) }
 }
@@ -400,7 +424,7 @@ pub struct C2_1(pub u64);
 impl Component for C2_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(63) }
 }
@@ -410,7 +434,7 @@ pub struct C2_2(pub u64);
 impl Component for C2_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(64) }
 }
@@ -420,7 +444,7 @@ pub struct C2_3(pub u64);
 impl Component for C2_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(65) }
 }
@@ -430,7 +454,7 @@ pub struct C2_4(pub u64);
 impl Component for C2_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(66) }
 }
@@ -440,7 +464,7 @@ pub struct C2_5(pub u64);
 impl Component for C2_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(67) }
 }
@@ -450,7 +474,7 @@ pub struct C2_6(pub u64);
 impl Component for C2_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(68) }
 }
@@ -460,7 +484,7 @@ pub struct C2_7(pub u64);
 impl Component for C2_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(69) }
 }
@@ -470,7 +494,7 @@ pub struct C2_8(pub u64);
 impl Component for C2_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(70) }
 }
@@ -480,7 +504,7 @@ pub struct C2_9(pub u64);
 impl Component for C2_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(71) }
 }
@@ -490,7 +514,7 @@ pub struct C2_10(pub u64);
 impl Component for C2_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(72) }
 }
@@ -500,7 +524,7 @@ pub struct C2_11(pub u64);
 impl Component for C2_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(73) }
 }
@@ -510,7 +534,7 @@ pub struct C2_12(pub u64);
 impl Component for C2_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(74) }
 }
@@ -520,7 +544,7 @@ pub struct C2_13(pub u64);
 impl Component for C2_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(75) }
 }
@@ -530,7 +554,7 @@ pub struct C2_14(pub u64);
 impl Component for C2_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(76) }
 }
@@ -540,7 +564,7 @@ pub struct C2_15(pub u64);
 impl Component for C2_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(77) }
 }
@@ -550,7 +574,7 @@ pub struct C2_16(pub u64);
 impl Component for C2_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(78) }
 }
@@ -560,7 +584,7 @@ pub struct C2_17(pub u64);
 impl Component for C2_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(79) }
 }
@@ -570,7 +594,7 @@ pub struct C2_18(pub u64);
 impl Component for C2_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(80) }
 }
@@ -580,7 +604,7 @@ pub struct C2_19(pub u64);
 impl Component for C2_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C2_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C2_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(81) }
 }
@@ -590,7 +614,7 @@ pub struct C3_0(pub u64);
 impl Component for C3_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(93) }
 }
@@ -600,7 +624,7 @@ pub struct C3_1(pub u64);
 impl Component for C3_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(94) }
 }
@@ -610,7 +634,7 @@ pub struct C3_2(pub u64);
 impl Component for C3_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(95) }
 }
@@ -620,7 +644,7 @@ pub struct C3_3(pub u64);
 impl Component for C3_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(96) }
 }
@@ -630,7 +654,7 @@ pub struct C3_4(pub u64);
 impl Component for C3_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(97) }
 }
@@ -640,7 +664,7 @@ pub struct C3_5(pub u64);
 impl Component for C3_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(98) }
 }
@@ -650,7 +674,7 @@ pub struct C3_6(pub u64);
 impl Component for C3_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(99) }
 }
@@ -660,7 +684,7 @@ pub struct C3_7(pub u64);
 impl Component for C3_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(100) }
 }
@@ -670,7 +694,7 @@ pub struct C3_8(pub u64);
 impl Component for C3_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(101) }
 }
@@ -680,7 +704,7 @@ pub struct C3_9(pub u64);
 impl Component for C3_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(102) }
 }
@@ -690,7 +714,7 @@ pub struct C3_10(pub u64);
 impl Component for C3_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(103) }
 }
@@ -700,7 +724,7 @@ pub struct C3_11(pub u64);
 impl Component for C3_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(104) }
 }
@@ -710,7 +734,7 @@ pub struct C3_12(pub u64);
 impl Component for C3_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(105) }
 }
@@ -720,7 +744,7 @@ pub struct C3_13(pub u64);
 impl Component for C3_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(106) }
 }
@@ -730,7 +754,7 @@ pub struct C3_14(pub u64);
 impl Component for C3_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(107) }
 }
@@ -740,7 +764,7 @@ pub struct C3_15(pub u64);
 impl Component for C3_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(108) }
 }
@@ -750,7 +774,7 @@ pub struct C3_16(pub u64);
 impl Component for C3_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(109) }
 }
@@ -760,7 +784,7 @@ pub struct C3_17(pub u64);
 impl Component for C3_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(110) }
 }
@@ -770,7 +794,7 @@ pub struct C3_18(pub u64);
 impl Component for C3_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(111) }
 }
@@ -780,7 +804,7 @@ pub struct C3_19(pub u64);
 impl Component for C3_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C3_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C3_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(112) }
 }
@@ -790,7 +814,7 @@ pub struct C4_0(pub u64);
 impl Component for C4_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(124) }
 }
@@ -800,7 +824,7 @@ pub struct C4_1(pub u64);
 impl Component for C4_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(125) }
 }
@@ -810,7 +834,7 @@ pub struct C4_2(pub u64);
 impl Component for C4_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(126) }
 }
@@ -820,7 +844,7 @@ pub struct C4_3(pub u64);
 impl Component for C4_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(127) }
 }
@@ -830,7 +854,7 @@ pub struct C4_4(pub u64);
 impl Component for C4_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(128) }
 }
@@ -840,7 +864,7 @@ pub struct C4_5(pub u64);
 impl Component for C4_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(129) }
 }
@@ -850,7 +874,7 @@ pub struct C4_6(pub u64);
 impl Component for C4_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(130) }
 }
@@ -860,7 +884,7 @@ pub struct C4_7(pub u64);
 impl Component for C4_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(131) }
 }
@@ -870,7 +894,7 @@ pub struct C4_8(pub u64);
 impl Component for C4_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(132) }
 }
@@ -880,7 +904,7 @@ pub struct C4_9(pub u64);
 impl Component for C4_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(133) }
 }
@@ -890,7 +914,7 @@ pub struct C4_10(pub u64);
 impl Component for C4_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(134) }
 }
@@ -900,7 +924,7 @@ pub struct C4_11(pub u64);
 impl Component for C4_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(135) }
 }
@@ -910,7 +934,7 @@ pub struct C4_12(pub u64);
 impl Component for C4_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(136) }
 }
@@ -920,7 +944,7 @@ pub struct C4_13(pub u64);
 impl Component for C4_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(137) }
 }
@@ -930,7 +954,7 @@ pub struct C4_14(pub u64);
 impl Component for C4_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(138) }
 }
@@ -940,7 +964,7 @@ pub struct C4_15(pub u64);
 impl Component for C4_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(139) }
 }
@@ -950,7 +974,7 @@ pub struct C4_16(pub u64);
 impl Component for C4_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(140) }
 }
@@ -960,7 +984,7 @@ pub struct C4_17(pub u64);
 impl Component for C4_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(141) }
 }
@@ -970,7 +994,7 @@ pub struct C4_18(pub u64);
 impl Component for C4_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(142) }
 }
@@ -980,7 +1004,7 @@ pub struct C4_19(pub u64);
 impl Component for C4_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C4_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C4_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(143) }
 }
@@ -990,7 +1014,7 @@ pub struct C5_0(pub u64);
 impl Component for C5_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(155) }
 }
@@ -1000,7 +1024,7 @@ pub struct C5_1(pub u64);
 impl Component for C5_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(156) }
 }
@@ -1010,7 +1034,7 @@ pub struct C5_2(pub u64);
 impl Component for C5_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(157) }
 }
@@ -1020,7 +1044,7 @@ pub struct C5_3(pub u64);
 impl Component for C5_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(158) }
 }
@@ -1030,7 +1054,7 @@ pub struct C5_4(pub u64);
 impl Component for C5_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(159) }
 }
@@ -1040,7 +1064,7 @@ pub struct C5_5(pub u64);
 impl Component for C5_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(160) }
 }
@@ -1050,7 +1074,7 @@ pub struct C5_6(pub u64);
 impl Component for C5_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(161) }
 }
@@ -1060,7 +1084,7 @@ pub struct C5_7(pub u64);
 impl Component for C5_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(162) }
 }
@@ -1070,7 +1094,7 @@ pub struct C5_8(pub u64);
 impl Component for C5_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(163) }
 }
@@ -1080,7 +1104,7 @@ pub struct C5_9(pub u64);
 impl Component for C5_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(164) }
 }
@@ -1090,7 +1114,7 @@ pub struct C5_10(pub u64);
 impl Component for C5_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(165) }
 }
@@ -1100,7 +1124,7 @@ pub struct C5_11(pub u64);
 impl Component for C5_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(166) }
 }
@@ -1110,7 +1134,7 @@ pub struct C5_12(pub u64);
 impl Component for C5_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(167) }
 }
@@ -1120,7 +1144,7 @@ pub struct C5_13(pub u64);
 impl Component for C5_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(168) }
 }
@@ -1130,7 +1154,7 @@ pub struct C5_14(pub u64);
 impl Component for C5_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(169) }
 }
@@ -1140,7 +1164,7 @@ pub struct C5_15(pub u64);
 impl Component for C5_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(170) }
 }
@@ -1150,7 +1174,7 @@ pub struct C5_16(pub u64);
 impl Component for C5_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(171) }
 }
@@ -1160,7 +1184,7 @@ pub struct C5_17(pub u64);
 impl Component for C5_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(172) }
 }
@@ -1170,7 +1194,7 @@ pub struct C5_18(pub u64);
 impl Component for C5_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(173) }
 }
@@ -1180,7 +1204,7 @@ pub struct C5_19(pub u64);
 impl Component for C5_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C5_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C5_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(174) }
 }
@@ -1190,7 +1214,7 @@ pub struct C6_0(pub u64);
 impl Component for C6_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(186) }
 }
@@ -1200,7 +1224,7 @@ pub struct C6_1(pub u64);
 impl Component for C6_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(187) }
 }
@@ -1210,7 +1234,7 @@ pub struct C6_2(pub u64);
 impl Component for C6_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(188) }
 }
@@ -1220,7 +1244,7 @@ pub struct C6_3(pub u64);
 impl Component for C6_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(189) }
 }
@@ -1230,7 +1254,7 @@ pub struct C6_4(pub u64);
 impl Component for C6_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(190) }
 }
@@ -1240,7 +1264,7 @@ pub struct C6_5(pub u64);
 impl Component for C6_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(191) }
 }
@@ -1250,7 +1274,7 @@ pub struct C6_6(pub u64);
 impl Component for C6_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(192) }
 }
@@ -1260,7 +1284,7 @@ pub struct C6_7(pub u64);
 impl Component for C6_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(193) }
 }
@@ -1270,7 +1294,7 @@ pub struct C6_8(pub u64);
 impl Component for C6_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(194) }
 }
@@ -1280,7 +1304,7 @@ pub struct C6_9(pub u64);
 impl Component for C6_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(195) }
 }
@@ -1290,7 +1314,7 @@ pub struct C6_10(pub u64);
 impl Component for C6_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(196) }
 }
@@ -1300,7 +1324,7 @@ pub struct C6_11(pub u64);
 impl Component for C6_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(197) }
 }
@@ -1310,7 +1334,7 @@ pub struct C6_12(pub u64);
 impl Component for C6_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(198) }
 }
@@ -1320,7 +1344,7 @@ pub struct C6_13(pub u64);
 impl Component for C6_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(199) }
 }
@@ -1330,7 +1354,7 @@ pub struct C6_14(pub u64);
 impl Component for C6_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(200) }
 }
@@ -1340,7 +1364,7 @@ pub struct C6_15(pub u64);
 impl Component for C6_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(201) }
 }
@@ -1350,7 +1374,7 @@ pub struct C6_16(pub u64);
 impl Component for C6_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(202) }
 }
@@ -1360,7 +1384,7 @@ pub struct C6_17(pub u64);
 impl Component for C6_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(203) }
 }
@@ -1370,7 +1394,7 @@ pub struct C6_18(pub u64);
 impl Component for C6_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(204) }
 }
@@ -1380,7 +1404,7 @@ pub struct C6_19(pub u64);
 impl Component for C6_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C6_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C6_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(205) }
 }
@@ -1390,7 +1414,7 @@ pub struct C7_0(pub u64);
 impl Component for C7_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(217) }
 }
@@ -1400,7 +1424,7 @@ pub struct C7_1(pub u64);
 impl Component for C7_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(218) }
 }
@@ -1410,7 +1434,7 @@ pub struct C7_2(pub u64);
 impl Component for C7_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(219) }
 }
@@ -1420,7 +1444,7 @@ pub struct C7_3(pub u64);
 impl Component for C7_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(220) }
 }
@@ -1430,7 +1454,7 @@ pub struct C7_4(pub u64);
 impl Component for C7_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(221) }
 }
@@ -1440,7 +1464,7 @@ pub struct C7_5(pub u64);
 impl Component for C7_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(222) }
 }
@@ -1450,7 +1474,7 @@ pub struct C7_6(pub u64);
 impl Component for C7_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(223) }
 }
@@ -1460,7 +1484,7 @@ pub struct C7_7(pub u64);
 impl Component for C7_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(224) }
 }
@@ -1470,7 +1494,7 @@ pub struct C7_8(pub u64);
 impl Component for C7_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(225) }
 }
@@ -1480,7 +1504,7 @@ pub struct C7_9(pub u64);
 impl Component for C7_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(226) }
 }
@@ -1490,7 +1514,7 @@ pub struct C7_10(pub u64);
 impl Component for C7_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(227) }
 }
@@ -1500,7 +1524,7 @@ pub struct C7_11(pub u64);
 impl Component for C7_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(228) }
 }
@@ -1510,7 +1534,7 @@ pub struct C7_12(pub u64);
 impl Component for C7_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(229) }
 }
@@ -1520,7 +1544,7 @@ pub struct C7_13(pub u64);
 impl Component for C7_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(230) }
 }
@@ -1530,7 +1554,7 @@ pub struct C7_14(pub u64);
 impl Component for C7_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(231) }
 }
@@ -1540,7 +1564,7 @@ pub struct C7_15(pub u64);
 impl Component for C7_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(232) }
 }
@@ -1550,7 +1574,7 @@ pub struct C7_16(pub u64);
 impl Component for C7_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(233) }
 }
@@ -1560,7 +1584,7 @@ pub struct C7_17(pub u64);
 impl Component for C7_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(234) }
 }
@@ -1570,7 +1594,7 @@ pub struct C7_18(pub u64);
 impl Component for C7_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(235) }
 }
@@ -1580,7 +1604,7 @@ pub struct C7_19(pub u64);
 impl Component for C7_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C7_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C7_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(236) }
 }
@@ -1590,7 +1614,7 @@ pub struct C8_0(pub u64);
 impl Component for C8_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(248) }
 }
@@ -1600,7 +1624,7 @@ pub struct C8_1(pub u64);
 impl Component for C8_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(249) }
 }
@@ -1610,7 +1634,7 @@ pub struct C8_2(pub u64);
 impl Component for C8_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(250) }
 }
@@ -1620,7 +1644,7 @@ pub struct C8_3(pub u64);
 impl Component for C8_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(251) }
 }
@@ -1630,7 +1654,7 @@ pub struct C8_4(pub u64);
 impl Component for C8_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(252) }
 }
@@ -1640,7 +1664,7 @@ pub struct C8_5(pub u64);
 impl Component for C8_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(253) }
 }
@@ -1650,7 +1674,7 @@ pub struct C8_6(pub u64);
 impl Component for C8_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(254) }
 }
@@ -1660,7 +1684,7 @@ pub struct C8_7(pub u64);
 impl Component for C8_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(255) }
 }
@@ -1670,7 +1694,7 @@ pub struct C8_8(pub u64);
 impl Component for C8_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(256) }
 }
@@ -1680,7 +1704,7 @@ pub struct C8_9(pub u64);
 impl Component for C8_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(257) }
 }
@@ -1690,7 +1714,7 @@ pub struct C8_10(pub u64);
 impl Component for C8_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(258) }
 }
@@ -1700,7 +1724,7 @@ pub struct C8_11(pub u64);
 impl Component for C8_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(259) }
 }
@@ -1710,7 +1734,7 @@ pub struct C8_12(pub u64);
 impl Component for C8_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(260) }
 }
@@ -1720,7 +1744,7 @@ pub struct C8_13(pub u64);
 impl Component for C8_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(261) }
 }
@@ -1730,7 +1754,7 @@ pub struct C8_14(pub u64);
 impl Component for C8_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(262) }
 }
@@ -1740,7 +1764,7 @@ pub struct C8_15(pub u64);
 impl Component for C8_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(263) }
 }
@@ -1750,7 +1774,7 @@ pub struct C8_16(pub u64);
 impl Component for C8_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(264) }
 }
@@ -1760,7 +1784,7 @@ pub struct C8_17(pub u64);
 impl Component for C8_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(265) }
 }
@@ -1770,7 +1794,7 @@ pub struct C8_18(pub u64);
 impl Component for C8_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(266) }
 }
@@ -1780,7 +1804,7 @@ pub struct C8_19(pub u64);
 impl Component for C8_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C8_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C8_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(267) }
 }
@@ -1790,7 +1814,7 @@ pub struct C9_0(pub u64);
 impl Component for C9_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(279) }
 }
@@ -1800,7 +1824,7 @@ pub struct C9_1(pub u64);
 impl Component for C9_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(280) }
 }
@@ -1810,7 +1834,7 @@ pub struct C9_2(pub u64);
 impl Component for C9_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(281) }
 }
@@ -1820,7 +1844,7 @@ pub struct C9_3(pub u64);
 impl Component for C9_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(282) }
 }
@@ -1830,7 +1854,7 @@ pub struct C9_4(pub u64);
 impl Component for C9_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(283) }
 }
@@ -1840,7 +1864,7 @@ pub struct C9_5(pub u64);
 impl Component for C9_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(284) }
 }
@@ -1850,7 +1874,7 @@ pub struct C9_6(pub u64);
 impl Component for C9_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(285) }
 }
@@ -1860,7 +1884,7 @@ pub struct C9_7(pub u64);
 impl Component for C9_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(286) }
 }
@@ -1870,7 +1894,7 @@ pub struct C9_8(pub u64);
 impl Component for C9_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(287) }
 }
@@ -1880,7 +1904,7 @@ pub struct C9_9(pub u64);
 impl Component for C9_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(288) }
 }
@@ -1890,7 +1914,7 @@ pub struct C9_10(pub u64);
 impl Component for C9_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(289) }
 }
@@ -1900,7 +1924,7 @@ pub struct C9_11(pub u64);
 impl Component for C9_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(290) }
 }
@@ -1910,7 +1934,7 @@ pub struct C9_12(pub u64);
 impl Component for C9_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(291) }
 }
@@ -1920,7 +1944,7 @@ pub struct C9_13(pub u64);
 impl Component for C9_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(292) }
 }
@@ -1930,7 +1954,7 @@ pub struct C9_14(pub u64);
 impl Component for C9_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(293) }
 }
@@ -1940,7 +1964,7 @@ pub struct C9_15(pub u64);
 impl Component for C9_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(294) }
 }
@@ -1950,7 +1974,7 @@ pub struct C9_16(pub u64);
 impl Component for C9_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(295) }
 }
@@ -1960,7 +1984,7 @@ pub struct C9_17(pub u64);
 impl Component for C9_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(296) }
 }
@@ -1970,7 +1994,7 @@ pub struct C9_18(pub u64);
 impl Component for C9_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(297) }
 }
@@ -1980,7 +2004,7 @@ pub struct C9_19(pub u64);
 impl Component for C9_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C9_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C9_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(298) }
 }
@@ -1990,7 +2014,7 @@ pub struct C10_0(pub u64);
 impl Component for C10_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(310) }
 }
@@ -2000,7 +2024,7 @@ pub struct C10_1(pub u64);
 impl Component for C10_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(311) }
 }
@@ -2010,7 +2034,7 @@ pub struct C10_2(pub u64);
 impl Component for C10_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(312) }
 }
@@ -2020,7 +2044,7 @@ pub struct C10_3(pub u64);
 impl Component for C10_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(313) }
 }
@@ -2030,7 +2054,7 @@ pub struct C10_4(pub u64);
 impl Component for C10_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(314) }
 }
@@ -2040,7 +2064,7 @@ pub struct C10_5(pub u64);
 impl Component for C10_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(315) }
 }
@@ -2050,7 +2074,7 @@ pub struct C10_6(pub u64);
 impl Component for C10_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(316) }
 }
@@ -2060,7 +2084,7 @@ pub struct C10_7(pub u64);
 impl Component for C10_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(317) }
 }
@@ -2070,7 +2094,7 @@ pub struct C10_8(pub u64);
 impl Component for C10_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(318) }
 }
@@ -2080,7 +2104,7 @@ pub struct C10_9(pub u64);
 impl Component for C10_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(319) }
 }
@@ -2090,7 +2114,7 @@ pub struct C10_10(pub u64);
 impl Component for C10_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(320) }
 }
@@ -2100,7 +2124,7 @@ pub struct C10_11(pub u64);
 impl Component for C10_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(321) }
 }
@@ -2110,7 +2134,7 @@ pub struct C10_12(pub u64);
 impl Component for C10_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(322) }
 }
@@ -2120,7 +2144,7 @@ pub struct C10_13(pub u64);
 impl Component for C10_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(323) }
 }
@@ -2130,7 +2154,7 @@ pub struct C10_14(pub u64);
 impl Component for C10_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(324) }
 }
@@ -2140,7 +2164,7 @@ pub struct C10_15(pub u64);
 impl Component for C10_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(325) }
 }
@@ -2150,7 +2174,7 @@ pub struct C10_16(pub u64);
 impl Component for C10_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(326) }
 }
@@ -2160,7 +2184,7 @@ pub struct C10_17(pub u64);
 impl Component for C10_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(327) }
 }
@@ -2170,7 +2194,7 @@ pub struct C10_18(pub u64);
 impl Component for C10_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(328) }
 }
@@ -2180,7 +2204,7 @@ pub struct C10_19(pub u64);
 impl Component for C10_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C10_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C10_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(329) }
 }
@@ -2190,7 +2214,7 @@ pub struct C11_0(pub u64);
 impl Component for C11_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(341) }
 }
@@ -2200,7 +2224,7 @@ pub struct C11_1(pub u64);
 impl Component for C11_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(342) }
 }
@@ -2210,7 +2234,7 @@ pub struct C11_2(pub u64);
 impl Component for C11_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(343) }
 }
@@ -2220,7 +2244,7 @@ pub struct C11_3(pub u64);
 impl Component for C11_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(344) }
 }
@@ -2230,7 +2254,7 @@ pub struct C11_4(pub u64);
 impl Component for C11_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(345) }
 }
@@ -2240,7 +2264,7 @@ pub struct C11_5(pub u64);
 impl Component for C11_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(346) }
 }
@@ -2250,7 +2274,7 @@ pub struct C11_6(pub u64);
 impl Component for C11_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(347) }
 }
@@ -2260,7 +2284,7 @@ pub struct C11_7(pub u64);
 impl Component for C11_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(348) }
 }
@@ -2270,7 +2294,7 @@ pub struct C11_8(pub u64);
 impl Component for C11_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(349) }
 }
@@ -2280,7 +2304,7 @@ pub struct C11_9(pub u64);
 impl Component for C11_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(350) }
 }
@@ -2290,7 +2314,7 @@ pub struct C11_10(pub u64);
 impl Component for C11_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(351) }
 }
@@ -2300,7 +2324,7 @@ pub struct C11_11(pub u64);
 impl Component for C11_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(352) }
 }
@@ -2310,7 +2334,7 @@ pub struct C11_12(pub u64);
 impl Component for C11_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(353) }
 }
@@ -2320,7 +2344,7 @@ pub struct C11_13(pub u64);
 impl Component for C11_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(354) }
 }
@@ -2330,7 +2354,7 @@ pub struct C11_14(pub u64);
 impl Component for C11_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(355) }
 }
@@ -2340,7 +2364,7 @@ pub struct C11_15(pub u64);
 impl Component for C11_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(356) }
 }
@@ -2350,7 +2374,7 @@ pub struct C11_16(pub u64);
 impl Component for C11_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(357) }
 }
@@ -2360,7 +2384,7 @@ pub struct C11_17(pub u64);
 impl Component for C11_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(358) }
 }
@@ -2370,7 +2394,7 @@ pub struct C11_18(pub u64);
 impl Component for C11_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(359) }
 }
@@ -2380,7 +2404,7 @@ pub struct C11_19(pub u64);
 impl Component for C11_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C11_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C11_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(360) }
 }
@@ -2390,7 +2414,7 @@ pub struct C12_0(pub u64);
 impl Component for C12_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(372) }
 }
@@ -2400,7 +2424,7 @@ pub struct C12_1(pub u64);
 impl Component for C12_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(373) }
 }
@@ -2410,7 +2434,7 @@ pub struct C12_2(pub u64);
 impl Component for C12_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(374) }
 }
@@ -2420,7 +2444,7 @@ pub struct C12_3(pub u64);
 impl Component for C12_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(375) }
 }
@@ -2430,7 +2454,7 @@ pub struct C12_4(pub u64);
 impl Component for C12_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(376) }
 }
@@ -2440,7 +2464,7 @@ pub struct C12_5(pub u64);
 impl Component for C12_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(377) }
 }
@@ -2450,7 +2474,7 @@ pub struct C12_6(pub u64);
 impl Component for C12_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(378) }
 }
@@ -2460,7 +2484,7 @@ pub struct C12_7(pub u64);
 impl Component for C12_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(379) }
 }
@@ -2470,7 +2494,7 @@ pub struct C12_8(pub u64);
 impl Component for C12_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(380) }
 }
@@ -2480,7 +2504,7 @@ pub struct C12_9(pub u64);
 impl Component for C12_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(381) }
 }
@@ -2490,7 +2514,7 @@ pub struct C12_10(pub u64);
 impl Component for C12_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(382) }
 }
@@ -2500,7 +2524,7 @@ pub struct C12_11(pub u64);
 impl Component for C12_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(383) }
 }
@@ -2510,7 +2534,7 @@ pub struct C12_12(pub u64);
 impl Component for C12_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(384) }
 }
@@ -2520,7 +2544,7 @@ pub struct C12_13(pub u64);
 impl Component for C12_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(385) }
 }
@@ -2530,7 +2554,7 @@ pub struct C12_14(pub u64);
 impl Component for C12_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(386) }
 }
@@ -2540,7 +2564,7 @@ pub struct C12_15(pub u64);
 impl Component for C12_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(387) }
 }
@@ -2550,7 +2574,7 @@ pub struct C12_16(pub u64);
 impl Component for C12_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(388) }
 }
@@ -2560,7 +2584,7 @@ pub struct C12_17(pub u64);
 impl Component for C12_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(389) }
 }
@@ -2570,7 +2594,7 @@ pub struct C12_18(pub u64);
 impl Component for C12_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(390) }
 }
@@ -2580,7 +2604,7 @@ pub struct C12_19(pub u64);
 impl Component for C12_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C12_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C12_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(391) }
 }
@@ -2590,7 +2614,7 @@ pub struct C13_0(pub u64);
 impl Component for C13_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(403) }
 }
@@ -2600,7 +2624,7 @@ pub struct C13_1(pub u64);
 impl Component for C13_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(404) }
 }
@@ -2610,7 +2634,7 @@ pub struct C13_2(pub u64);
 impl Component for C13_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(405) }
 }
@@ -2620,7 +2644,7 @@ pub struct C13_3(pub u64);
 impl Component for C13_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(406) }
 }
@@ -2630,7 +2654,7 @@ pub struct C13_4(pub u64);
 impl Component for C13_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(407) }
 }
@@ -2640,7 +2664,7 @@ pub struct C13_5(pub u64);
 impl Component for C13_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(408) }
 }
@@ -2650,7 +2674,7 @@ pub struct C13_6(pub u64);
 impl Component for C13_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(409) }
 }
@@ -2660,7 +2684,7 @@ pub struct C13_7(pub u64);
 impl Component for C13_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(410) }
 }
@@ -2670,7 +2694,7 @@ pub struct C13_8(pub u64);
 impl Component for C13_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(411) }
 }
@@ -2680,7 +2704,7 @@ pub struct C13_9(pub u64);
 impl Component for C13_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(412) }
 }
@@ -2690,7 +2714,7 @@ pub struct C13_10(pub u64);
 impl Component for C13_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(413) }
 }
@@ -2700,7 +2724,7 @@ pub struct C13_11(pub u64);
 impl Component for C13_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(414) }
 }
@@ -2710,7 +2734,7 @@ pub struct C13_12(pub u64);
 impl Component for C13_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(415) }
 }
@@ -2720,7 +2744,7 @@ pub struct C13_13(pub u64);
 impl Component for C13_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(416) }
 }
@@ -2730,7 +2754,7 @@ pub struct C13_14(pub u64);
 impl Component for C13_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(417) }
 }
@@ -2740,7 +2764,7 @@ pub struct C13_15(pub u64);
 impl Component for C13_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(418) }
 }
@@ -2750,7 +2774,7 @@ pub struct C13_16(pub u64);
 impl Component for C13_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(419) }
 }
@@ -2760,7 +2784,7 @@ pub struct C13_17(pub u64);
 impl Component for C13_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(420) }
 }
@@ -2770,7 +2794,7 @@ pub struct C13_18(pub u64);
 impl Component for C13_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(421) }
 }
@@ -2780,7 +2804,7 @@ pub struct C13_19(pub u64);
 impl Component for C13_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C13_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C13_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(422) }
 }
@@ -2790,7 +2814,7 @@ pub struct C14_0(pub u64);
 impl Component for C14_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(434) }
 }
@@ -2800,7 +2824,7 @@ pub struct C14_1(pub u64);
 impl Component for C14_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(435) }
 }
@@ -2810,7 +2834,7 @@ pub struct C14_2(pub u64);
 impl Component for C14_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(436) }
 }
@@ -2820,7 +2844,7 @@ pub struct C14_3(pub u64);
 impl Component for C14_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(437) }
 }
@@ -2830,7 +2854,7 @@ pub struct C14_4(pub u64);
 impl Component for C14_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(438) }
 }
@@ -2840,7 +2864,7 @@ pub struct C14_5(pub u64);
 impl Component for C14_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(439) }
 }
@@ -2850,7 +2874,7 @@ pub struct C14_6(pub u64);
 impl Component for C14_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(440) }
 }
@@ -2860,7 +2884,7 @@ pub struct C14_7(pub u64);
 impl Component for C14_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(441) }
 }
@@ -2870,7 +2894,7 @@ pub struct C14_8(pub u64);
 impl Component for C14_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(442) }
 }
@@ -2880,7 +2904,7 @@ pub struct C14_9(pub u64);
 impl Component for C14_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(443) }
 }
@@ -2890,7 +2914,7 @@ pub struct C14_10(pub u64);
 impl Component for C14_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(444) }
 }
@@ -2900,7 +2924,7 @@ pub struct C14_11(pub u64);
 impl Component for C14_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(445) }
 }
@@ -2910,7 +2934,7 @@ pub struct C14_12(pub u64);
 impl Component for C14_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(446) }
 }
@@ -2920,7 +2944,7 @@ pub struct C14_13(pub u64);
 impl Component for C14_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(447) }
 }
@@ -2930,7 +2954,7 @@ pub struct C14_14(pub u64);
 impl Component for C14_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(448) }
 }
@@ -2940,7 +2964,7 @@ pub struct C14_15(pub u64);
 impl Component for C14_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(449) }
 }
@@ -2950,7 +2974,7 @@ pub struct C14_16(pub u64);
 impl Component for C14_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(450) }
 }
@@ -2960,7 +2984,7 @@ pub struct C14_17(pub u64);
 impl Component for C14_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(451) }
 }
@@ -2970,7 +2994,7 @@ pub struct C14_18(pub u64);
 impl Component for C14_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(452) }
 }
@@ -2980,7 +3004,7 @@ pub struct C14_19(pub u64);
 impl Component for C14_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C14_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C14_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(453) }
 }
@@ -2990,7 +3014,7 @@ pub struct C15_0(pub u64);
 impl Component for C15_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(465) }
 }
@@ -3000,7 +3024,7 @@ pub struct C15_1(pub u64);
 impl Component for C15_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(466) }
 }
@@ -3010,7 +3034,7 @@ pub struct C15_2(pub u64);
 impl Component for C15_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(467) }
 }
@@ -3020,7 +3044,7 @@ pub struct C15_3(pub u64);
 impl Component for C15_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(468) }
 }
@@ -3030,7 +3054,7 @@ pub struct C15_4(pub u64);
 impl Component for C15_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(469) }
 }
@@ -3040,7 +3064,7 @@ pub struct C15_5(pub u64);
 impl Component for C15_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(470) }
 }
@@ -3050,7 +3074,7 @@ pub struct C15_6(pub u64);
 impl Component for C15_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(471) }
 }
@@ -3060,7 +3084,7 @@ pub struct C15_7(pub u64);
 impl Component for C15_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(472) }
 }
@@ -3070,7 +3094,7 @@ pub struct C15_8(pub u64);
 impl Component for C15_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(473) }
 }
@@ -3080,7 +3104,7 @@ pub struct C15_9(pub u64);
 impl Component for C15_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(474) }
 }
@@ -3090,7 +3114,7 @@ pub struct C15_10(pub u64);
 impl Component for C15_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(475) }
 }
@@ -3100,7 +3124,7 @@ pub struct C15_11(pub u64);
 impl Component for C15_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(476) }
 }
@@ -3110,7 +3134,7 @@ pub struct C15_12(pub u64);
 impl Component for C15_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(477) }
 }
@@ -3120,7 +3144,7 @@ pub struct C15_13(pub u64);
 impl Component for C15_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(478) }
 }
@@ -3130,7 +3154,7 @@ pub struct C15_14(pub u64);
 impl Component for C15_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(479) }
 }
@@ -3140,7 +3164,7 @@ pub struct C15_15(pub u64);
 impl Component for C15_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(480) }
 }
@@ -3150,7 +3174,7 @@ pub struct C15_16(pub u64);
 impl Component for C15_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(481) }
 }
@@ -3160,7 +3184,7 @@ pub struct C15_17(pub u64);
 impl Component for C15_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(482) }
 }
@@ -3170,7 +3194,7 @@ pub struct C15_18(pub u64);
 impl Component for C15_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(483) }
 }
@@ -3180,7 +3204,7 @@ pub struct C15_19(pub u64);
 impl Component for C15_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C15_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C15_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(484) }
 }
@@ -3190,7 +3214,7 @@ pub struct C16_0(pub u64);
 impl Component for C16_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(496) }
 }
@@ -3200,7 +3224,7 @@ pub struct C16_1(pub u64);
 impl Component for C16_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(497) }
 }
@@ -3210,7 +3234,7 @@ pub struct C16_2(pub u64);
 impl Component for C16_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(498) }
 }
@@ -3220,7 +3244,7 @@ pub struct C16_3(pub u64);
 impl Component for C16_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(499) }
 }
@@ -3230,7 +3254,7 @@ pub struct C16_4(pub u64);
 impl Component for C16_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(500) }
 }
@@ -3240,7 +3264,7 @@ pub struct C16_5(pub u64);
 impl Component for C16_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(501) }
 }
@@ -3250,7 +3274,7 @@ pub struct C16_6(pub u64);
 impl Component for C16_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(502) }
 }
@@ -3260,7 +3284,7 @@ pub struct C16_7(pub u64);
 impl Component for C16_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(503) }
 }
@@ -3270,7 +3294,7 @@ pub struct C16_8(pub u64);
 impl Component for C16_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(504) }
 }
@@ -3280,7 +3304,7 @@ pub struct C16_9(pub u64);
 impl Component for C16_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(505) }
 }
@@ -3290,7 +3314,7 @@ pub struct C16_10(pub u64);
 impl Component for C16_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(506) }
 }
@@ -3300,7 +3324,7 @@ pub struct C16_11(pub u64);
 impl Component for C16_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(507) }
 }
@@ -3310,7 +3334,7 @@ pub struct C16_12(pub u64);
 impl Component for C16_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(508) }
 }
@@ -3320,7 +3344,7 @@ pub struct C16_13(pub u64);
 impl Component for C16_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(509) }
 }
@@ -3330,7 +3354,7 @@ pub struct C16_14(pub u64);
 impl Component for C16_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(510) }
 }
@@ -3340,7 +3364,7 @@ pub struct C16_15(pub u64);
 impl Component for C16_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(511) }
 }
@@ -3350,7 +3374,7 @@ pub struct C16_16(pub u64);
 impl Component for C16_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(512) }
 }
@@ -3360,7 +3384,7 @@ pub struct C16_17(pub u64);
 impl Component for C16_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(513) }
 }
@@ -3370,7 +3394,7 @@ pub struct C16_18(pub u64);
 impl Component for C16_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(514) }
 }
@@ -3380,7 +3404,7 @@ pub struct C16_19(pub u64);
 impl Component for C16_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C16_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C16_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(515) }
 }
@@ -3390,7 +3414,7 @@ pub struct C17_0(pub u64);
 impl Component for C17_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(527) }
 }
@@ -3400,7 +3424,7 @@ pub struct C17_1(pub u64);
 impl Component for C17_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(528) }
 }
@@ -3410,7 +3434,7 @@ pub struct C17_2(pub u64);
 impl Component for C17_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(529) }
 }
@@ -3420,7 +3444,7 @@ pub struct C17_3(pub u64);
 impl Component for C17_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(530) }
 }
@@ -3430,7 +3454,7 @@ pub struct C17_4(pub u64);
 impl Component for C17_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(531) }
 }
@@ -3440,7 +3464,7 @@ pub struct C17_5(pub u64);
 impl Component for C17_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(532) }
 }
@@ -3450,7 +3474,7 @@ pub struct C17_6(pub u64);
 impl Component for C17_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(533) }
 }
@@ -3460,7 +3484,7 @@ pub struct C17_7(pub u64);
 impl Component for C17_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(534) }
 }
@@ -3470,7 +3494,7 @@ pub struct C17_8(pub u64);
 impl Component for C17_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(535) }
 }
@@ -3480,7 +3504,7 @@ pub struct C17_9(pub u64);
 impl Component for C17_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(536) }
 }
@@ -3490,7 +3514,7 @@ pub struct C17_10(pub u64);
 impl Component for C17_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(537) }
 }
@@ -3500,7 +3524,7 @@ pub struct C17_11(pub u64);
 impl Component for C17_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(538) }
 }
@@ -3510,7 +3534,7 @@ pub struct C17_12(pub u64);
 impl Component for C17_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(539) }
 }
@@ -3520,7 +3544,7 @@ pub struct C17_13(pub u64);
 impl Component for C17_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(540) }
 }
@@ -3530,7 +3554,7 @@ pub struct C17_14(pub u64);
 impl Component for C17_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(541) }
 }
@@ -3540,7 +3564,7 @@ pub struct C17_15(pub u64);
 impl Component for C17_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(542) }
 }
@@ -3550,7 +3574,7 @@ pub struct C17_16(pub u64);
 impl Component for C17_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(543) }
 }
@@ -3560,7 +3584,7 @@ pub struct C17_17(pub u64);
 impl Component for C17_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(544) }
 }
@@ -3570,7 +3594,7 @@ pub struct C17_18(pub u64);
 impl Component for C17_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(545) }
 }
@@ -3580,7 +3604,7 @@ pub struct C17_19(pub u64);
 impl Component for C17_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C17_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C17_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(546) }
 }
@@ -3590,7 +3614,7 @@ pub struct C18_0(pub u64);
 impl Component for C18_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(558) }
 }
@@ -3600,7 +3624,7 @@ pub struct C18_1(pub u64);
 impl Component for C18_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(559) }
 }
@@ -3610,7 +3634,7 @@ pub struct C18_2(pub u64);
 impl Component for C18_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(560) }
 }
@@ -3620,7 +3644,7 @@ pub struct C18_3(pub u64);
 impl Component for C18_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(561) }
 }
@@ -3630,7 +3654,7 @@ pub struct C18_4(pub u64);
 impl Component for C18_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(562) }
 }
@@ -3640,7 +3664,7 @@ pub struct C18_5(pub u64);
 impl Component for C18_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(563) }
 }
@@ -3650,7 +3674,7 @@ pub struct C18_6(pub u64);
 impl Component for C18_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(564) }
 }
@@ -3660,7 +3684,7 @@ pub struct C18_7(pub u64);
 impl Component for C18_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(565) }
 }
@@ -3670,7 +3694,7 @@ pub struct C18_8(pub u64);
 impl Component for C18_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(566) }
 }
@@ -3680,7 +3704,7 @@ pub struct C18_9(pub u64);
 impl Component for C18_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(567) }
 }
@@ -3690,7 +3714,7 @@ pub struct C18_10(pub u64);
 impl Component for C18_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(568) }
 }
@@ -3700,7 +3724,7 @@ pub struct C18_11(pub u64);
 impl Component for C18_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(569) }
 }
@@ -3710,7 +3734,7 @@ pub struct C18_12(pub u64);
 impl Component for C18_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(570) }
 }
@@ -3720,7 +3744,7 @@ pub struct C18_13(pub u64);
 impl Component for C18_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(571) }
 }
@@ -3730,7 +3754,7 @@ pub struct C18_14(pub u64);
 impl Component for C18_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(572) }
 }
@@ -3740,7 +3764,7 @@ pub struct C18_15(pub u64);
 impl Component for C18_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(573) }
 }
@@ -3750,7 +3774,7 @@ pub struct C18_16(pub u64);
 impl Component for C18_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(574) }
 }
@@ -3760,7 +3784,7 @@ pub struct C18_17(pub u64);
 impl Component for C18_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(575) }
 }
@@ -3770,7 +3794,7 @@ pub struct C18_18(pub u64);
 impl Component for C18_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(576) }
 }
@@ -3780,7 +3804,7 @@ pub struct C18_19(pub u64);
 impl Component for C18_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C18_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C18_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(577) }
 }
@@ -3790,7 +3814,7 @@ pub struct C19_0(pub u64);
 impl Component for C19_0 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_0(0) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_0(0), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(589) }
 }
@@ -3800,7 +3824,7 @@ pub struct C19_1(pub u64);
 impl Component for C19_1 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_1(1) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_1(1), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(590) }
 }
@@ -3810,7 +3834,7 @@ pub struct C19_2(pub u64);
 impl Component for C19_2 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_2(2) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_2(2), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(591) }
 }
@@ -3820,7 +3844,7 @@ pub struct C19_3(pub u64);
 impl Component for C19_3 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_3(3) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_3(3), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(592) }
 }
@@ -3830,7 +3854,7 @@ pub struct C19_4(pub u64);
 impl Component for C19_4 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_4(4) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_4(4), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(593) }
 }
@@ -3840,7 +3864,7 @@ pub struct C19_5(pub u64);
 impl Component for C19_5 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_5(5) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_5(5), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(594) }
 }
@@ -3850,7 +3874,7 @@ pub struct C19_6(pub u64);
 impl Component for C19_6 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_6(6) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_6(6), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(595) }
 }
@@ -3860,7 +3884,7 @@ pub struct C19_7(pub u64);
 impl Component for C19_7 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_7(7) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_7(7), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(596) }
 }
@@ -3870,7 +3894,7 @@ pub struct C19_8(pub u64);
 impl Component for C19_8 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_8(8) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_8(8), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(597) }
 }
@@ -3880,7 +3904,7 @@ pub struct C19_9(pub u64);
 impl Component for C19_9 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_9(9) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_9(9), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(598) }
 }
@@ -3890,7 +3914,7 @@ pub struct C19_10(pub u64);
 impl Component for C19_10 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_10(10) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_10(10), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(599) }
 }
@@ -3900,7 +3924,7 @@ pub struct C19_11(pub u64);
 impl Component for C19_11 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_11(11) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_11(11), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(600) }
 }
@@ -3910,7 +3934,7 @@ pub struct C19_12(pub u64);
 impl Component for C19_12 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_12(12) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_12(12), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(601) }
 }
@@ -3920,7 +3944,7 @@ pub struct C19_13(pub u64);
 impl Component for C19_13 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_13(13) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_13(13), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(602) }
 }
@@ -3930,7 +3954,7 @@ pub struct C19_14(pub u64);
 impl Component for C19_14 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_14(14) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_14(14), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(603) }
 }
@@ -3940,7 +3964,7 @@ pub struct C19_15(pub u64);
 impl Component for C19_15 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_15(15) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_15(15), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(604) }
 }
@@ -3950,7 +3974,7 @@ pub struct C19_16(pub u64);
 impl Component for C19_16 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_16(16) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_16(16), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(605) }
 }
@@ -3960,7 +3984,7 @@ pub struct C19_17(pub u64);
 impl Component for C19_17 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_17(17) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_17(17), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(606) }
 }
@@ -3970,7 +3994,7 @@ pub struct C19_18(pub u64);
 impl Component for C19_18 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_18(18) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_18(18), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(607) }
 }
@@ -3980,7 +4004,7 @@ pub struct C19_19(pub u64);
 impl Component for C19_19 {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { C19_19(19) }
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (C19_19(19), 0) }
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(608) }
 }
@@ -3989,10 +4013,10 @@ impl Component for C19_19 {
 pub struct App;
 impl Component for App {
     type Config = ();
-    type Output = u64;
-    fn new((): ()) -> Self { App }
+    type Output = ();
+    fn new((): (), _: Self::Init<'_>) -> (Self, ()) { (App, ()) }
     #[inline]
-    fn update(&mut self, input: Self::Input<'_>) -> u64 { *input.r0 ^ *input.r1 ^ *input.r2 ^ *input.r3 ^ *input.r4 ^ *input.r5 ^ *input.r6 ^ *input.r7 ^ *input.r8 ^ *input.r9 ^ *input.r10 ^ *input.r11 ^ *input.r12 ^ *input.r13 ^ *input.r14 ^ *input.r15 ^ *input.r16 ^ *input.r17 ^ *input.r18 ^ *input.r19 }
+    fn update(&mut self, input: Self::Input<'_>) { OUT.store(*input.r0 ^ *input.r1 ^ *input.r2 ^ *input.r3 ^ *input.r4 ^ *input.r5 ^ *input.r6 ^ *input.r7 ^ *input.r8 ^ *input.r9 ^ *input.r10 ^ *input.r11 ^ *input.r12 ^ *input.r13 ^ *input.r14 ^ *input.r15 ^ *input.r16 ^ *input.r17 ^ *input.r18 ^ *input.r19, Ordering::Relaxed) }
 }
 }
 mod hand_components {
@@ -7604,9 +7628,9 @@ fn stats(v: &mut Vec<f64>) -> (f64, f64) {
     (v[0], v[v.len() / 2])
 }
 #[inline(never)]
-fn run_flat(p: &mut dataflow_flat::Pipeline<flat::App>) -> u64 { p.run() }
+fn run_flat(p: &mut dataflow_flat::Pipeline<flat::Poll, (flat::App,)>) -> u64 { p.push(flat::Poll); flat::OUT.load(std::sync::atomic::Ordering::Relaxed) }
 fn main() {
-    let mut b = dataflow_flat::Pipeline::<flat::App>::build(dataflow_flat::Configs::new()).unwrap();
+    let mut b = dataflow_flat::Pipeline::<flat::Poll, (flat::App,)>::build(dataflow_flat::Configs::new()).unwrap();
     let mut xb = 0;
     let mut tf: Vec<f64> = Vec::new();
     for _ in 0..WARMUP { xb = run_flat(&mut b); }
