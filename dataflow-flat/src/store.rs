@@ -268,9 +268,7 @@ impl<R: Fields<M, LO, HI>, M: Mapper, const LO: usize, const HI: usize> Empty fo
 where
     <R as Fields<M, LO, HI>>::F: Empty,
 {
-    fn empty() -> Self {
-        Blk(<<R as Fields<M, LO, HI>>::F as Empty>::empty())
-    }
+    const EMPTY: Self = Blk(<<R as Fields<M, LO, HI>>::F as Empty>::EMPTY);
 }
 
 /// A mapper for a value still being constructed, and the mapper it becomes.
