@@ -38,3 +38,8 @@ run builds at the same time as you.
    A change that trades one of these for another stays on its branch and is reported, not merged.
 7. Check claims by building small artifacts and measuring, not by reasoning. Report numbers with the
    exact command that produced them. Never invent or estimate a number you didn't measure.
+8. Disk: the session has a fixed disk allowance (~39 GB in total, shared by every agent; it filled up
+   once). Keep your scratch dir plus your worktree's target/ under 6 GB: delete generated app
+   workspaces and their target dirs as soon as you've recorded their numbers, prefer one master
+   checkout reused across measurements, and check `du -sh` of your dirs before big builds. On
+   "no space left on device", delete only your own build output and report it; never delete other agents' files.

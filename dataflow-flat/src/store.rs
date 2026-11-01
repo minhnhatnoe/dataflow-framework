@@ -191,20 +191,17 @@ where
 
 /// A tuple of empty `Option` slots.
 #[doc(hidden)]
-pub trait Empty {
-    fn empty() -> Self;
+pub trait Empty: Sized {
+    /// A constant, not a fn: no mono item per slot.
+    const EMPTY: Self;
 }
 impl<const P: usize, V> Empty for Slot<P, Option<V>> {
-    fn empty() -> Self {
-        Slot(None)
-    }
+    const EMPTY: Self = Slot(None);
 }
 macro_rules! empty_impl {
     ($($g:ident)*) => {
         impl<$($g: Empty),*> Empty for ($($g,)*) {
-            fn empty() -> Self {
-                ($(<$g as Empty>::empty(),)*)
-            }
+            const EMPTY: Self = ($(<$g as Empty>::EMPTY,)*);
         }
     };
 }

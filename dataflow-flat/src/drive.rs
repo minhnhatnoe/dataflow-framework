@@ -257,34 +257,30 @@ pub struct PushCtx<'c, A: Layout> {
 #[doc(hidden)]
 pub struct PushPh<A>(PhantomData<A>);
 
+/// The body of running one component (shared by `RunAt::run` and the guarded
+/// `RunIfAt::run_if`; a macro, not a fn, so it costs no mono item per component).
+macro_rules! run_body {
+    ($A:ident, $P:ident, $ctx:ident) => {{
+        type C<A, const P: usize> = <A as NthT<P>>::T;
+        // The inputs borrow the stored outputs and the root only while
+        // `update` runs; the write to the output comes after.
+        let out = {
+            let inputs = <<C<$A, $P> as ComponentSubscription>::Deps as GatherIn<$A>>::gather($ctx.root, &*$ctx.outs);
+            <$A::States as AtPos<C<$A, $P>, $P>>::at_mut(&mut *$ctx.states).update(<C<$A, $P> as ComponentSubscription>::input(inputs))
+        };
+        *<$A::Outs as AtPos<<C<$A, $P> as Node>::Output, $P>>::at_mut(&mut *$ctx.outs) = out;
+        if CondAt::<$A, $P>::FLAG != NO_FLAG {
+            $ctx.fired.set(CondAt::<$A, $P>::FLAG);
+        }
+    }};
+}
+
 /// Run the component at component position `P` unconditionally: gather its
 /// inputs, update it, store its output, and record that it fired if a guarded
 /// component reads that.
 #[doc(hidden)]
 pub trait RunAt<Ph, const P: usize>: Layout {
     fn run(ctx: &mut PushCtx<'_, Self>);
-}
-#[cfg_attr(not(debug_assertions), inline(always))]
-#[cfg_attr(debug_assertions, inline)]
-fn run_at<A: Layout, const P: usize>(ctx: &mut PushCtx<'_, A>)
-where
-    A: NthT<P>,
-    <A as NthT<P>>::T: Comp,
-    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A>,
-    A::States: AtPos<<A as NthT<P>>::T, P>,
-    A::Outs: AtPos<<<A as NthT<P>>::T as Node>::Output, P>,
-{
-    type C<A, const P: usize> = <A as NthT<P>>::T;
-    // The inputs borrow the stored outputs and the root only while
-    // `update` runs; the write to the output comes after.
-    let out = {
-        let inputs = <<C<A, P> as ComponentSubscription>::Deps as GatherIn<A>>::gather(ctx.root, &*ctx.outs);
-        <A::States as AtPos<C<A, P>, P>>::at_mut(&mut *ctx.states).update(<C<A, P> as ComponentSubscription>::input(inputs))
-    };
-    *<A::Outs as AtPos<<C<A, P> as Node>::Output, P>>::at_mut(&mut *ctx.outs) = out;
-    if CondAt::<A, P>::FLAG != NO_FLAG {
-        ctx.fired.set(CondAt::<A, P>::FLAG);
-    }
 }
 impl<A: Layout, const P: usize> RunAt<PushPh<A>, P> for A
 where
@@ -297,7 +293,7 @@ where
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
     fn run(ctx: &mut PushCtx<'_, A>) {
-        run_at::<A, P>(ctx)
+        run_body!(A, P, ctx);
     }
 }
 
@@ -318,7 +314,7 @@ where
     #[cfg_attr(debug_assertions, inline)]
     fn run_if(ctx: &mut PushCtx<'_, A>) {
         if <<<A as NthT<P>>::T as ComponentSubscription>::Deps as Ready<A>>::ready(ctx.root, &*ctx.outs, &ctx.fired) {
-            run_at::<A, P>(ctx);
+            run_body!(A, P, ctx);
         }
     }
 }

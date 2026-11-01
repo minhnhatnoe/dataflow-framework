@@ -2,6 +2,8 @@
 
 The root `README.md` and `CLAUDE.md` still describe the **old** model. This file and `handoff/event-spec.md` are the current picture.
 
+**Latest:** `handoff/session-2.md` (what session 2 merged, measured and left next) supersedes sections 4–6 below where they differ.
+
 `event-spec.md` is the source of truth for the model. It was copied here from the session scratchpad in `/tmp`, which doesn't survive a reboot.
 
 Contents:

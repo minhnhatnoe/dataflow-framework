@@ -81,11 +81,13 @@ impl<In: 'static> SelectChain<In> for () {
     type Out = In;
     type Init<'a, N: Node<Output = In>> = crate::node::InitOf<'a, N>;
     const PLAIN: bool = true;
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn matches(_: &In) -> bool {
         true
     }
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn get(x: &In) -> &In {
         x
     }
@@ -94,14 +96,16 @@ impl<In: 'static, S: Select<In>, T: SelectChain<S::Out>> SelectChain<In> for (S,
     type Out = T::Out;
     type Init<'a, N: Node<Output = In>> = ();
     const PLAIN: bool = false;
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn matches(x: &In) -> bool {
         match S::select(x) {
             Some(y) => T::matches(y),
             None => false,
         }
     }
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn get(x: &In) -> &T::Out {
         match S::select(x) {
             Some(y) => T::get(y),
@@ -125,7 +129,8 @@ pub trait ChainKey<In: 'static, const J: usize>: SelectChain<In> {
     fn key(x: &In) -> u32;
 }
 impl<In: 'static, const J: usize> ChainKey<In, J> for () {
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn key(_: &In) -> u32 {
         GUARD
     }
@@ -138,7 +143,8 @@ pub(crate) const fn dec(j: usize) -> usize {
     }
 }
 impl<In: 'static, S: Select<In>, T: ChainKey<S::Out, { dec(J) }>, const J: usize> ChainKey<In, J> for (S, T) {
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn key(x: &In) -> u32 {
         if J == 0 {
             S::key_of(x)
@@ -216,7 +222,8 @@ impl<In: Keyed, S: Symbol> Select<In> for On<S> {
     const KEY: u32 = S::KEY;
     const KEYED: bool = true;
     const LABEL: &'static str = S::NAME;
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn select(x: &In) -> Option<&In::Item> {
         if x.key() == Option::Some(S::KEY) {
             Option::Some(x.item())
@@ -224,7 +231,8 @@ impl<In: Keyed, S: Symbol> Select<In> for On<S> {
             Option::None
         }
     }
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn key_of(x: &In) -> u32 {
         match x.key() {
             Option::Some(k) => k,
@@ -255,11 +263,13 @@ pub mod option {
     impl<T: 'static> Select<Option<T>> for Some {
         type Out = T;
         const KEY: u32 = 0;
-        #[inline(always)]
+        #[cfg_attr(not(debug_assertions), inline(always))]
+        #[cfg_attr(debug_assertions, inline)]
         fn select(x: &Option<T>) -> Option<&T> {
             x.as_ref()
         }
-        #[inline(always)]
+        #[cfg_attr(not(debug_assertions), inline(always))]
+        #[cfg_attr(debug_assertions, inline)]
         fn key_of(x: &Option<T>) -> u32 {
             if x.is_some() {
                 0
@@ -271,7 +281,8 @@ pub mod option {
     impl<T: 'static> Select<Option<T>> for None {
         type Out = ();
         const KEY: u32 = 1;
-        #[inline(always)]
+        #[cfg_attr(not(debug_assertions), inline(always))]
+        #[cfg_attr(debug_assertions, inline)]
         fn select(x: &Option<T>) -> Option<&()> {
             if x.is_none() {
                 Option::Some(&())
@@ -279,7 +290,8 @@ pub mod option {
                 Option::None
             }
         }
-        #[inline(always)]
+        #[cfg_attr(not(debug_assertions), inline(always))]
+        #[cfg_attr(debug_assertions, inline)]
         fn key_of(x: &Option<T>) -> u32 {
             if x.is_some() {
                 0
