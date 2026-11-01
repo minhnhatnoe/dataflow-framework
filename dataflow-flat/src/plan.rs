@@ -1,104 +1,180 @@
 //! The compile-time plan, computed by constant evaluation.
 //!
-//! The run needs one kind of fact: for every edge `parent -> dependency`,
-//! whether this is where the depth-first walk from the root *first* reaches
-//! the dependency ([`Edge::FIRST`]). An edge is an entry of the parent's
-//! subscription tree, `Sub<dependency, position>`, so two entries of one parent
-//! that name the same type (through an alias) are two edges, and exactly one of
-//! them is the first. Each component is stored (and later run)
-//! at that edge only. The plan also gives the range of plan indices each
-//! storage subtree covers ([`Plan::range_of`]), which steers the input lookups.
+//! The plan is the depth-first walk from the pipeline's *anchor* (the node that
+//! stands for the sinks), run inside constant evaluation ([`visit`]): visiting
+//! a node records it, with the node it was reached from, unless it was reached
+//! before; then visits its subscriptions in listing order. This needs
+//! `const_trait_impl`, because the walk calls trait methods
+//! ([`Upstream::visit_all`]) on the types of the graph from inside a `const fn`.
 //!
-//! The plan is computed by running the depth-first walk itself inside constant
-//! evaluation ([`visit`]): visiting a component records it, with the component
-//! it was reached from, unless it was reached before; then visits its
-//! dependencies in listing order. This needs `const_trait_impl`, because the
-//! walk calls trait methods ([`Upstream::visit_all`]) on the types of the
-//! graph from inside a `const fn`. There is no check for a component listing a
-//! dependency twice: the second entry is just a later visit of a component
-//! already recorded. The walk records components in first-reached
-//! order, which is a pre-order of the first-parent tree, so the storage subtree
-//! of a component is a contiguous range of the plan.
+//! What the plan records, all as integer arrays (no references, so that
+//! incremental compilation stays linear):
+//!
+//! * for every node, its `TypeId` (identity), its **kind** (root, component,
+//!   anchor; demuxers in phase 1b), the node it was first reached from and the
+//!   position of the entry that reached it, the extent of its subtree, its depth
+//!   in the first-parent tree;
+//! * the **execution position** of every node: its place in the post-order of
+//!   the walk. The root is always position 0 (it is the only node without
+//!   subscriptions, and a component without subscriptions is an error), the
+//!   anchor is last. The components are positions `1..len-1`, and *component
+//!   position* `p` below is that minus one;
+//! * the **upstream lists**: every subscription entry as an edge
+//!   `(subscriber, node)`, in the order the walk visits the entries, which is
+//!   listing order per subscriber ([`Plan::upstream`]). Phase 1b computes
+//!   conditions from these.
+//!
+//! The checks that need only the walk are made in it, as const panics with the
+//! component's name: a graph with a second root or a root that is not the
+//! pipeline's `R`, and a component that is not reachable from the root.
 //!
 //! A dependency cycle is found before the walk runs: the walk's trait bounds
-//! (`C::Deps: const Upstream`, which mention the dependencies' bounds in turn)
+//! (`N::Subs: const Upstream`, which mention the dependencies' bounds in turn)
 //! are proved by the trait solver, and on a cyclic graph the proof needs itself.
 //! That is reported as "overflow evaluating the requirement `(B,): Upstream`",
-//! naming a component of the cycle. (The walk would also catch it, as a const
-//! panic, but never gets to run.) The proof is as deep as the graph, so graphs
-//! deeper than about 17 layers of 4 dependencies make the compiler's recursion
-//! limit (128) a cost, and much deeper ones need `#![recursion_limit = "256"]`
-//! in the user's crate. A component's own subscriptions add little depth: they
-//! are a tree of 8-ary nodes, so 100 subscriptions are 3 levels.
-//!
-//! Every constant is a plain value with no references inside. (A graph of
-//! nested `&'static` constants is hashed as a tree by incremental
-//! compilation, which is exponential in graph depth.)
+//! naming a component of the cycle. The proof is as deep as the graph, so
+//! graphs deeper than about 40 layers need `#![recursion_limit = "256"]` in the
+//! user's crate (README, "Graph depth").
 
-use std::any::TypeId;
-use std::marker::PhantomData;
+use std::any::{type_name, TypeId};
 
-use crate::component::{Component, Sub};
-use crate::identity::{At, Hashed, BLANK};
+use crate::component::Sub;
+use crate::identity::{Hashed, BLANK};
+use crate::node::{Node, KIND_ANCHOR, KIND_ROOT};
 use crate::table::Table;
 
-/// Upper bound on components per pipeline. Compile-time memory grows with
-/// MAX_COMPONENTS x (number of components), so raise it only as needed.
+/// Upper bound on nodes (the root, the components and the anchor) per
+/// pipeline. Compile-time memory grows with MAX_COMPONENTS x (number of
+/// nodes), so raise it only as needed.
 pub const MAX_COMPONENTS: usize = 512;
 
-/// The first parent of the root: it was not reached from any component.
+/// Upper bound on subscription entries per pipeline, summed over all
+/// components.
+pub const MAX_EDGES: usize = 4096;
+
+/// The first parent of the anchor: it was not reached from any node.
 const NO_PARENT: u32 = u32::MAX;
+
+// ---------------------------------------------------------------------------
+// Const panics with a name
+// ---------------------------------------------------------------------------
+
+/// Panic in constant evaluation with `name` followed by `tail`. (`panic!` can't
+/// format in a `const fn`, so the message is assembled in a byte buffer.)
+const fn panic_named(name: &str, tail: &str) -> ! {
+    let mut buf = [0u8; 512];
+    let mut n = 0;
+    let parts = [name.as_bytes(), tail.as_bytes()];
+    let mut p = 0;
+    while p < 2 {
+        let part = parts[p];
+        let mut i = 0;
+        while i < part.len() && n < buf.len() {
+            buf[n] = part[i];
+            n += 1;
+            i += 1;
+        }
+        p += 1;
+    }
+    let (msg, _) = buf.split_at(n);
+    match core::str::from_utf8(msg) {
+        Ok(s) => core::panicking::panic_display(&s),
+        Err(_) => panic!("invalid message"),
+    }
+}
 
 // ---------------------------------------------------------------------------
 // The walk
 // ---------------------------------------------------------------------------
 
-/// The depth-first walk over a component and everything upstream of it: record
-/// `C` (reached from `parent`, at position `pos` of its list) and walk its
-/// dependencies, unless it was reached before.
+/// Record `N` (reached from `parent`, at position `pos` of its list) unless it
+/// was reached before; either way record the edge `parent -> N`. Returns the
+/// plan index of `N` and whether it is new, i.e. whether its subscriptions
+/// still have to be walked.
 ///
-/// This is split into `enter` (record `C`; returns its index, or `None` if it
-/// was reached before) and `leave` (record its subtree end), both non-recursive.
-/// The generated [`Upstream`] impls call them inline around the recursion into
-/// `C::Deps`, so constant evaluation uses one stack frame per graph layer
-/// (`visit_all`) instead of two (`visit` + `visit_all`). The trait solver's
-/// proof is unaffected: the only bound is `C::Deps: [const] Upstream`, a trait
-/// on the tree rather than on the component.
-const fn enter<C: Component>(plan: &mut Plan, parent: u32, pos: u32) -> Option<u32> {
-    let id = TypeId::of::<C>();
-    let slot = plan.table.slot(&plan.ids, <C as Hashed>::HASH, id);
-    if let Some(at) = plan.table.at(slot) {
+/// This is split from the walk of the subscriptions (and from [`leave`]) so
+/// that the generated [`Upstream`] impls can call them inline around the
+/// recursion into `N::Subs`, which keeps constant evaluation at one stack frame
+/// per graph layer. The trait solver's proof is unaffected: the only bound is
+/// `N::Subs: [const] Upstream`, a trait on the tree rather than on the node.
+const fn enter<N: Node>(plan: &mut Plan, parent: u32, pos: u32) -> (u32, bool) {
+    let id = TypeId::of::<N>();
+    let slot = plan.table.slot(&plan.ids, <N as Hashed>::HASH, id);
+    let (i, new) = if let Some(at) = plan.table.at(slot) {
         if plan.end[at] == 0 {
             panic!("dependency cycle");
         }
-        return None;
+        (at, false)
+    } else {
+        if N::KIND == KIND_ROOT && !(id == plan.root_id) {
+            panic_named(
+                type_name::<N>(),
+                " is a root, but the pipeline's root is a different type: a pipeline has exactly one root",
+            );
+        }
+        let i = plan.len;
+        if i == MAX_COMPONENTS {
+            panic!("too many components: raise dataflow_flat::MAX_COMPONENTS");
+        }
+        plan.table.put(slot, i);
+        plan.ids[i] = id;
+        plan.kind[i] = N::KIND;
+        plan.first_parent[i] = parent;
+        plan.first_pos[i] = pos;
+        plan.len = i + 1;
+        plan.depth[i] = if parent == NO_PARENT { 0 } else { plan.depth[parent as usize] + 1 };
+        (i, true)
+    };
+    if parent != NO_PARENT {
+        let e = plan.n_edges;
+        if e == MAX_EDGES {
+            panic!("too many subscriptions: raise dataflow_flat::MAX_EDGES");
+        }
+        plan.edge_from[e] = parent;
+        plan.edge_to[e] = i as u32;
+        plan.n_edges = e + 1;
+        // A node reached again is finished: if the root is upstream of it, it
+        // is upstream of `parent` too. (A new node reports when it is left.)
+        if !new && plan.reach[i] {
+            plan.has_up[parent as usize] = true;
+        }
     }
-    let i = plan.len;
-    if i == MAX_COMPONENTS {
-        panic!("too many components: raise dataflow_flat::MAX_COMPONENTS");
-    }
-    plan.table.put(slot, i);
-    plan.ids[i] = id;
-    plan.first_parent[i] = parent;
-    plan.first_pos[i] = pos;
-    plan.len = i + 1;
-    Some(i as u32)
+    (i as u32, new)
 }
 
-/// A component's walk is over: record its subtree end.
-const fn leave(plan: &mut Plan, i: u32) {
-    plan.end[i as usize] = plan.len as u32;
+/// A node's walk is over: record its subtree end and execution position, and
+/// check that it is reachable from the root (some node it subscribes to is).
+const fn leave<N: Node>(plan: &mut Plan, i: u32) {
+    let i = i as usize;
+    plan.end[i] = plan.len as u32;
+    plan.post_of[i] = plan.done as u32;
+    plan.by_post[plan.done] = i as u32;
+    plan.done += 1;
+    let reach = N::KIND == KIND_ROOT || N::KIND == KIND_ANCHOR || plan.has_up[i];
+    if !reach {
+        panic_named(type_name::<N>(), " is not reachable from the root");
+    }
+    plan.reach[i] = true;
+    if N::KIND == KIND_ROOT {
+        plan.root_idx = i as u32;
+    }
+    // The node that entered this one now has a reachable subscription.
+    let fp = plan.first_parent[i];
+    if fp != NO_PARENT {
+        plan.has_up[fp as usize] = true;
+    }
 }
 
-/// `enter`, the walk of the dependencies, `leave`: used for the root only (the
-/// `Upstream` impls spell this out inline for their entries).
-const fn visit<C: Component>(plan: &mut Plan, parent: u32, pos: u32)
+/// `enter`, the walk of the subscriptions, `leave`: used for the anchor only
+/// (the `Upstream` impls spell this out inline for their entries).
+const fn visit<N: Node>(plan: &mut Plan, parent: u32, pos: u32)
 where
-    C::Deps: [const] Upstream,
+    N::Subs: [const] Upstream,
 {
-    if let Some(i) = enter::<C>(plan, parent, pos) {
-        <C::Deps as Upstream>::visit_all(plan, i);
-        leave(plan, i);
+    let (i, new) = enter::<N>(plan, parent, pos);
+    if new {
+        <N::Subs as Upstream>::visit_all(plan, i);
+        leave::<N>(plan, i);
     }
 }
 
@@ -106,8 +182,8 @@ where
 /// [`DepList`](crate::DepList)): one impl per node shape.
 ///
 /// A leaf visits its (up to 7) entries; an inner node visits its 8 children.
-/// The trait solver's proof for a component is as deep as its tree (about log8
-/// of its number of subscriptions), and the proof for the root as deep as the
+/// The trait solver's proof for a node is as deep as its tree (about log8 of
+/// its number of subscriptions), and the proof for the anchor as deep as the
 /// graph times that.
 #[doc(hidden)]
 pub const trait Upstream {
@@ -119,13 +195,16 @@ pub const trait Upstream {
 macro_rules! upstream_leaf {
     ([$($h:ident $i:ident)*]) => {
         #[allow(unused_variables)]
-        const impl<$($h: Component, const $i: usize),*> Upstream for ($(Sub<$h, $i>,)*)
-        where $($h::Deps: [const] Upstream,)*
+        const impl<$($h: Node, const $i: usize),*> Upstream for ($(Sub<$h, $i>,)*)
+        where $($h::Subs: [const] Upstream,)*
         {
             fn visit_all(plan: &mut Plan, parent: u32) {
-                $(if let Some(i) = enter::<$h>(plan, parent, $i as u32) {
-                    <$h::Deps as Upstream>::visit_all(plan, i);
-                    leave(plan, i);
+                $({
+                    let (i, new) = enter::<$h>(plan, parent, $i as u32);
+                    if new {
+                        <$h::Subs as Upstream>::visit_all(plan, i);
+                        leave::<$h>(plan, i);
+                    }
                 })*
             }
         }
@@ -145,233 +224,194 @@ macro_rules! upstream_inner {
 dataflow_macros::inner_shape!(upstream_inner);
 
 // ---------------------------------------------------------------------------
-// The plan of a root
+// The plan of a pipeline
 // ---------------------------------------------------------------------------
 
-/// The plan of one root: each component's `TypeId` in first-reached order
-/// (the order is the component's index), its first-reached parent as an
-/// index with the position of the entry that reached it, and its subtree
-/// extent.
+/// The plan of one pipeline: each node's `TypeId` in first-reached order (the
+/// order is the node's *index*), its kind, first-reached parent, subtree
+/// extent, execution position, and the upstream edges.
 #[doc(hidden)]
 pub struct Plan {
-    /// Number of components recorded so far.
+    /// Number of nodes recorded so far.
     len: usize,
-    /// The components, by index.
+    /// The nodes, by index.
     ids: [TypeId; MAX_COMPONENTS],
-    /// Position by component: hash of the type name to start, `TypeId` to
-    /// decide (see [`table`](crate::table)).
+    /// Position by node: hash of the type name to start, `TypeId` to decide
+    /// (see [`table`](crate::table)).
     table: Table,
-    /// Index of the component each was first reached from (`NO_PARENT` for
-    /// the root).
+    /// `KIND_*` of each node.
+    kind: [u8; MAX_COMPONENTS],
+    /// Index of the node each was first reached from (`NO_PARENT` for the
+    /// anchor).
     first_parent: [u32; MAX_COMPONENTS],
     /// Position, in that parent's list of subscriptions, of the entry that
-    /// first reached each component (two entries of one parent may name the
-    /// same component, through an alias).
+    /// first reached each node (two entries of one parent may name the same
+    /// node, through an alias).
     first_pos: [u32; MAX_COMPONENTS],
-    /// Components are in first-reached (depth-first pre-)order, so the
-    /// storage subtree of entry `i` is the range `i..end[i]`. 0 while the
-    /// walk is still inside entry `i`.
+    /// Nodes are in first-reached (depth-first pre-)order, so the first-parent
+    /// subtree of node `i` is the range `i..end[i]`. 0 while the walk is still
+    /// inside node `i`.
     end: [u32; MAX_COMPONENTS],
+    /// Depth in the first-parent tree (anchor 0).
+    depth: [u32; MAX_COMPONENTS],
+    /// Execution position (post-order) of each node.
+    post_of: [u32; MAX_COMPONENTS],
+    /// Index of the node at each execution position.
+    by_post: [u32; MAX_COMPONENTS],
+    /// Number of nodes finished so far.
+    done: usize,
+    /// Is the root upstream of this node (or the node itself)? Set when the
+    /// node is left.
+    reach: [bool; MAX_COMPONENTS],
+    /// Has a subscription of this node been found to be reachable so far?
+    has_up: [bool; MAX_COMPONENTS],
+    /// The subscription entries: `edge_from[e]` subscribes to `edge_to[e]`
+    /// (both node indices), in the order the walk meets them.
+    edge_from: [u32; MAX_EDGES],
+    edge_to: [u32; MAX_EDGES],
+    n_edges: usize,
+    /// The pipeline's root type, and its index once the walk has met it.
+    root_id: TypeId,
+    root_idx: u32,
 }
 
 impl Plan {
-    /// The plan for root `A`: the depth-first walk from it.
-    const fn of<A: Component>() -> Plan
+    /// The plan for anchor `A` of a pipeline whose root type has `root_id`:
+    /// the depth-first walk from it.
+    pub(crate) const fn of<A: Node>(root_id: TypeId) -> Plan
     where
-        A::Deps: [const] Upstream,
+        A::Subs: [const] Upstream,
     {
         let mut plan = Plan {
             len: 0,
             ids: [BLANK; MAX_COMPONENTS],
             table: Table::new(),
+            kind: [0; MAX_COMPONENTS],
             first_parent: [NO_PARENT; MAX_COMPONENTS],
             first_pos: [0; MAX_COMPONENTS],
             end: [0; MAX_COMPONENTS],
+            depth: [0; MAX_COMPONENTS],
+            post_of: [0; MAX_COMPONENTS],
+            by_post: [0; MAX_COMPONENTS],
+            done: 0,
+            reach: [false; MAX_COMPONENTS],
+            has_up: [false; MAX_COMPONENTS],
+            edge_from: [0; MAX_EDGES],
+            edge_to: [0; MAX_EDGES],
+            n_edges: 0,
+            root_id,
+            root_idx: NO_PARENT,
         };
         visit::<A>(&mut plan, NO_PARENT, 0);
+        if plan.root_idx == NO_PARENT || plan.post_of[plan.root_idx as usize] != 0 {
+            panic!("the root is not reachable from the sinks");
+        }
         plan
     }
 
-    /// Is the component with this `TypeId` in the plan? (Run time, at build.)
+    /// Is the node with this `TypeId` in the plan? (Run time, at build.)
     pub(crate) fn contains(&self, id: TypeId) -> bool {
         self.ids[..self.len].contains(&id)
     }
 
-    /// Plan index of the component with this name hash and `TypeId`.
+    /// Plan index of the node with this name hash and `TypeId`.
     pub(crate) const fn index_of(&self, hash: u64, id: TypeId) -> usize {
         match self.table.at(self.table.slot(&self.ids, hash, id)) {
             Some(i) => i,
-            None => panic!("component not in plan"),
+            None => panic!("node not in plan"),
         }
     }
 
-    /// Index of the component that entry `i` was first reached from.
-    pub(crate) const fn first_parent_of(&self, i: usize) -> u32 {
-        self.first_parent[i]
+    /// Number of nodes: the root, the components and the anchor.
+    pub(crate) const fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Kind (`KIND_*`) of the node at plan index `i`.
+    #[allow(dead_code)]
+    pub(crate) const fn kind_of(&self, i: usize) -> u8 {
+        self.kind[i]
+    }
+
+    /// Execution position of the node at plan index `i`.
+    pub(crate) const fn post_of_idx(&self, i: usize) -> usize {
+        self.post_of[i] as usize
+    }
+
+    /// Plan index of the node at execution position `p`.
+    pub(crate) const fn idx_at_post(&self, p: usize) -> usize {
+        self.by_post[p] as usize
+    }
+
+    /// Number of subscription entries of the node at execution position `p`.
+    #[allow(dead_code)]
+    pub(crate) const fn upstream_count(&self, p: usize) -> usize {
+        let i = self.by_post[p] as usize;
+        let mut n = 0;
+        let mut e = 0;
+        while e < self.n_edges {
+            if self.edge_from[e] as usize == i {
+                n += 1;
+            }
+            e += 1;
+        }
+        n
+    }
+
+    /// The execution position of the `k`-th subscription entry (listing order,
+    /// aliases counted separately) of the node at execution position `p`.
+    #[allow(dead_code)]
+    pub(crate) const fn upstream(&self, p: usize, k: usize) -> usize {
+        let i = self.by_post[p] as usize;
+        let mut seen = 0;
+        let mut e = 0;
+        while e < self.n_edges {
+            if self.edge_from[e] as usize == i {
+                if seen == k {
+                    return self.post_of[self.edge_to[e] as usize] as usize;
+                }
+                seen += 1;
+            }
+            e += 1;
+        }
+        panic!("no such subscription")
+    }
+
+    /// How to get from the node at plan index `a` to its descendant `j` in the
+    /// first-parent tree: 0 same, 1 child, 2 further down.
+    pub(crate) const fn kind(&self, a: usize, j: usize) -> u8 {
+        if a == j {
+            0
+        } else if self.first_parent[j] as usize == a {
+            1
+        } else {
+            if !(a < j && j < self.end[a] as usize) {
+                panic!("not a descendant");
+            }
+            2
+        }
+    }
+
+    /// The ancestor of `j` (a descendant of `a`, at least 2 levels below)
+    /// halfway between `a` and `j` in the first-parent tree.
+    pub(crate) const fn mid(&self, a: usize, j: usize) -> usize {
+        let target = self.depth[a] + (self.depth[j] - self.depth[a]) / 2;
+        let mut x = j;
+        while self.depth[x] > target {
+            x = self.first_parent[x] as usize;
+        }
+        x
     }
 
     /// Position, in the first parent's list, of the entry that first reached
-    /// entry `i`.
+    /// node `i`.
     pub(crate) const fn first_pos_of(&self, i: usize) -> u32 {
         self.first_pos[i]
     }
-
-    /// The storage subtree of entry `i` as the range `lo..hi` of plan indices.
-    pub(crate) const fn range_of(&self, i: usize) -> (usize, usize) {
-        (i, self.end[i] as usize)
-    }
 }
 
-/// A component that can be the root of a plan, evaluated once per root type.
+/// An anchor whose plan has been computed, evaluated once per pipeline type.
 #[doc(hidden)]
-pub trait Planned: Component {
+pub trait Planned: Node {
     const PLAN: &'static Plan;
-}
-impl<A: Component> Planned for A
-where
-    A::Deps: const Upstream,
-{
-    const PLAN: &'static Plan = &Plan::of::<A>();
-}
-
-/// Per-edge constant, looked up in the plan of root `R`: the entry at position
-/// `I` of `P`'s list, naming `H`.
-#[doc(hidden)]
-pub struct Edge<R, P, H, const I: usize>(PhantomData<(R, P, H)>);
-impl<R: Planned, P: Component, H: Component, const I: usize> Edge<R, P, H, I> {
-    /// True if this entry is where the walk first reaches `H`: `P` is the
-    /// first parent and this is the position that reached it. (Two entries of
-    /// `P` naming `H` through an alias have the same `P` and `H`, and differ in
-    /// `I`.)
-    pub const FIRST: bool = {
-        let h = At::<R, H>::INDEX;
-        R::PLAN.first_parent_of(h) as usize == At::<R, P>::INDEX && R::PLAN.first_pos_of(h) as usize == I
-    };
-}
-
-#[cfg(test)]
-mod trace {
-    use super::*;
-    use std::any::type_name;
-    use crate::ComponentSubscription;
-    use std::collections::HashMap;
-
-    macro_rules! comp {
-        ($name:ident, [$($n:ident: $d:ty),*], $out:ty) => {
-            #[derive(ComponentSubscription)]
-            #[subscribe($($n: $d),*)]
-            pub struct $name;
-            impl Component for $name {
-                type Config = ();
-                type Output = $out;
-                fn new((): ()) -> Self { $name }
-                fn update(&mut self, _: Self::Input<'_>) -> $out { Default::default() }
-            }
-        };
-    }
-    comp!(Source, [], String);
-    comp!(Tokenize, [line: Source], Vec<String>);
-    comp!(WordCount, [tokens: Tokenize], u64);
-    comp!(TopWords, [counts: WordCount], Vec<u64>);
-    comp!(Longest, [tokens: Tokenize], Option<String>);
-    comp!(Report, [top: TopWords, longest: Longest, line: Source], String);
-
-    #[derive(ComponentSubscription)]
-    #[subscribe(items: U)]
-    pub struct Len<U: Component<Output = Vec<String>>>(PhantomData<U>);
-    impl<U: Component<Output = Vec<String>>> Component for Len<U> {
-        type Config = ();
-        type Output = usize;
-        fn new((): ()) -> Self {
-            Len(PhantomData)
-        }
-        fn update(&mut self, input: Self::Input<'_>) -> usize {
-            input.items.len()
-        }
-    }
-
-    comp!(App, [report: Report, count: Len<Tokenize>], ());
-
-    fn names() -> HashMap<TypeId, &'static str> {
-        let mut m = HashMap::new();
-        macro_rules! n { ($($t:ty),*) => { $( m.insert(TypeId::of::<$t>(), type_name::<$t>().rsplit("::").next().unwrap()); )* } }
-        n!(Source, Tokenize, WordCount, TopWords, Longest, Report, App);
-        m.insert(TypeId::of::<Len<Tokenize>>(), "Len<Tokenize>");
-        m
-    }
-
-    fn parent_name(plan: &Plan, n: &HashMap<TypeId, &'static str>, i: usize) -> &'static str {
-        match plan.first_parent_of(i) {
-            NO_PARENT => "ROOT",
-            p => n[&plan.ids[p as usize]],
-        }
-    }
-
-    #[test]
-    fn plan_trace() {
-        let n = names();
-        let plan = <App as Planned>::PLAN;
-        // Entries in first-reached order.
-        println!("plan (first-reached order, with the parent each was first reached from):");
-        for i in 0..plan.len {
-            println!(
-                "  slot {i}  {:<14} reached from {:<10} subtree {}..{}",
-                n[&plan.ids[i]],
-                parent_name(plan, &n, i),
-                i,
-                plan.end[i]
-            );
-        }
-
-        let expected = [
-            ("App", "ROOT"),
-            ("Report", "App"),
-            ("TopWords", "Report"),
-            ("WordCount", "TopWords"),
-            ("Tokenize", "WordCount"),
-            ("Source", "Tokenize"),
-            ("Longest", "Report"),
-            ("Len<Tokenize>", "App"),
-        ];
-        assert_eq!(plan.len, expected.len());
-        for (i, (who, from)) in expected.iter().enumerate() {
-            assert_eq!((n[&plan.ids[i]], parent_name(plan, &n, i)), (*who, *from), "slot {i}");
-        }
-
-        println!("\nedges:");
-        macro_rules! edge { ($p:ty, $h:ty, $i:expr, $pn:expr, $hn:expr, $want:expr) => {
-            let got = Edge::<App, $p, $h, $i>::FIRST;
-            println!("  {:<10} -> {:<14} FIRST = {}", $pn, $hn, got);
-            assert_eq!(got, $want, "{} -> {}", $pn, $hn);
-        } }
-        edge!(App, Report, 0, "App", "Report", true);
-        edge!(App, Len<Tokenize>, 1, "App", "Len<Tokenize>", true);
-        edge!(Report, TopWords, 0, "Report", "TopWords", true);
-        edge!(Report, Longest, 1, "Report", "Longest", true);
-        edge!(Report, Source, 2, "Report", "Source", false);
-        edge!(TopWords, WordCount, 0, "TopWords", "WordCount", true);
-        edge!(WordCount, Tokenize, 0, "WordCount", "Tokenize", true);
-        edge!(Longest, Tokenize, 0, "Longest", "Tokenize", false);
-        edge!(Tokenize, Source, 0, "Tokenize", "Source", true);
-        edge!(Len<Tokenize>, Tokenize, 0, "Len<Tok>", "Tokenize", false);
-        // The right parent at another position is not the first edge.
-        edge!(App, Report, 1, "App", "Report@1", false);
-
-        // The storage subtree of Report holds TopWords..Source and Longest, but
-        // not Len<Tokenize> or App.
-        let at = |id: TypeId| plan.ids[..plan.len].iter().position(|x| *x == id).unwrap();
-        let (report, source) = (at(TypeId::of::<Report>()), at(TypeId::of::<Source>()));
-        let holds = |top: usize, i: usize| {
-            let (lo, hi) = plan.range_of(top);
-            lo <= i && i < hi
-        };
-        assert!(holds(report, source));
-        assert!(holds(report, at(TypeId::of::<Longest>())));
-        assert!(!holds(report, at(TypeId::of::<Len<Tokenize>>())));
-        assert!(!holds(report, at(TypeId::of::<App>())));
-        assert!(holds(at(TypeId::of::<Tokenize>()), source));
-        // A type that is not in the plan is not found.
-        assert!(!plan.contains(TypeId::of::<u8>()));
-        assert!(plan.contains(TypeId::of::<Longest>()));
-    }
 }

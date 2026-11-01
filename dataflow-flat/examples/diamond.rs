@@ -3,10 +3,15 @@
 //!
 //! Run with `cargo run -p dataflow-flat --example diamond`.
 //!
-//! Diamond:  Src -> Double, Src -> Square, (Double, Square) -> Sum (the root)
-use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline};
+//! Diamond:  Tick -> Src -> Double, Src -> Square, (Double, Square) -> Sum (the sink)
+use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline, Root};
+
+/// The event: one tick per push.
+#[derive(Root)]
+pub struct Tick;
 
 #[derive(ComponentSubscription)]
+#[subscribe(tick: Tick)]
 pub struct Src {
     n: u64,
 }
@@ -14,7 +19,7 @@ pub struct Src {
 impl Component for Src {
     type Config = u64;
     type Output = u64;
-    fn new(start: u64) -> Self { Src { n: start } }
+    fn new(start: u64, _: Self::Init<'_>) -> (Self, u64) { (Src { n: start }, start) }
     fn update(&mut self, _: Self::Input<'_>) -> u64 { self.n += 1; self.n }
 }
 
@@ -25,7 +30,7 @@ pub struct Double;
 impl Component for Double {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { Double }
+    fn new((): (), init: Self::Init<'_>) -> (Self, u64) { (Double, *init.x * 2) }
     fn update(&mut self, input: Self::Input<'_>) -> u64 { input.x * 2 }
 }
 
@@ -36,7 +41,7 @@ pub struct Square;
 impl Component for Square {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { Square }
+    fn new((): (), init: Self::Init<'_>) -> (Self, u64) { (Square, *init.x * *init.x) }
     fn update(&mut self, input: Self::Input<'_>) -> u64 { input.x * input.x }
 }
 
@@ -52,19 +57,20 @@ pub struct Sum {
 impl Component for Sum {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { Sum { calls: 0 } }
+    fn new((): (), init: Self::Init<'_>) -> (Self, u64) { (Sum { calls: 0 }, *init.doubled + *init.squared) }
     fn update(&mut self, input: Self::Input<'_>) -> u64 {
         self.calls += 1;
         input.doubled + input.squared
     }
 }
 
-/// `Sum` is the root: nothing subscribes to it, and `run` returns its output.
+/// One step. `Sum` is the sink; its output is stored in the pipeline.
 #[inline(never)]
-pub fn run_once(p: &mut Pipeline<Sum>) -> u64 { p.run() }
+pub fn push_once(p: &mut Pipeline<Tick, (Sum,)>) { p.push(Tick) }
 
 fn main() {
-    let mut p = Pipeline::<Sum>::build(Configs::new().with::<Src>(10)).unwrap();
-    let sum = run_once(&mut p);
-    println!("order {:?}, sum = {sum}", p.order());   // n=11: 22 + 121 = 143
+    let mut p = Pipeline::<Tick, (Sum,)>::build(Configs::new().with::<Src>(10)).unwrap();
+    push_once(&mut p);
+    // n=11: 22 + 121 = 143 is now Sum's stored output.
+    println!("order {:?}", p.order());
 }

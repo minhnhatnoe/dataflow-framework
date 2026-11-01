@@ -1,12 +1,20 @@
-//! `#[derive(ComponentSubscription)]` with `#[subscribe(name: Type, ...)]`.
+//! `#[derive(ComponentSubscription)]` with `#[subscribe(name: Type, ...)]`, and
+//! `#[derive(Root)]`.
 //!
-//! Generates, for `struct MyComponent<A>`:
-//! * `struct MyComponentInput<'a, A>` with one `&'a <Type as Component>::Output`
+//! `ComponentSubscription` generates, for `struct MyComponent<A>`:
+//! * `struct MyComponentInput<'a, A>` with one `&'a <Type as Node>::Output`
 //!   field per subscription, same names, same order;
-//! * `impl ComponentSubscription for MyComponent<A>` with
-//!   `type Deps` (the type-level list the runtime walks),
-//!   `type Input<'a> = MyComponentInput<'a, A>`, and `fn input`, which turns the
-//!   runtime's nested tuple of references into the named struct.
+//! * `struct MyComponentInit<'a, A>` with one `InitOf<'a, Type>` field per
+//!   subscription (`&'a Output` for a component, `()` for the root);
+//! * `impl ComponentSubscription for MyComponent<A>` with `type Deps` (the
+//!   type-level list the plan walks), `type Input<'a>`, `type Init<'a>`, and the
+//!   functions that turn the runtime's nested tuples of references into the
+//!   named structs;
+//! * `impl Node for MyComponent<A>` (a component is a node), when it is a
+//!   `Component`.
+//!
+//! `Root` generates `impl Node` (output = the type itself, no subscriptions,
+//! nothing stored) and `impl Root`.
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
@@ -96,55 +104,41 @@ pub fn get_tuples(input: TokenStream) -> TokenStream {
     out.into()
 }
 
-/// `walk_leaves!(cb)`: `cb!(E0 e0 0 O0 T X0; E1 e1 1 O1 X0 X1; ..);` for n in
-/// 1..=ARITY: a tuple of walkers, each seeing what the previous ones finished.
-/// Leaves and inner nodes of the states tree are both such tuples.
+/// `leaf_idx!(cb)`: `cb!(n; 0 1 .. n-1);` for n in 0..=ARITY. The flat storage
+/// and the drivers over it use nodes of up to `ARITY` elements, with literal
+/// element indices.
 #[proc_macro]
-pub fn walk_leaves(input: TokenStream) -> TokenStream {
+pub fn leaf_idx(input: TokenStream) -> TokenStream {
     let cb = callback(input);
-    let mut out = TokenStream2::new();
-    for n in 1..=ARITY {
-        let rows = (0..n).map(|j| {
-            let (e, v, o, x) = (format_ident!("E{}", j), format_ident!("e{}", j), format_ident!("O{}", j), format_ident!("X{}", j));
-            let cin = if j == 0 { format_ident!("T") } else { format_ident!("X{}", j - 1) };
-            let idx = syn::Index::from(j);
-            quote!(#e #v #idx #o #cin #x;)
-        });
-        out.extend(quote!(#cb!(#(#rows)*);));
-    }
-    out.into()
+    let items = (0..=ARITY).map(|n| {
+        let ks = (0..n).map(syn::Index::from);
+        let n = syn::Index::from(n);
+        quote!(#cb!(#n; #(#ks)*);)
+    });
+    quote!(#(#items)*).into()
 }
 
-/// The storage of a leaf: `MaskN<..>` keeps the entries whose edge is the first
-/// one. For each leaf size N in 0..=LEAF: the `MaskN` struct, the `StoredN`
-/// trait (`stored_trait!`), one `stored_impl!` per mask (2^N of them, 255 in
-/// all) and the `dep_storage_leaf!` impl. The macros are defined in `storage.rs`.
+/// `inner_idx!(cb)`: `cb!(0 1 .. ARITY-1);`, the children of an inner node of
+/// the flat storage, by literal index.
 #[proc_macro]
-pub fn leaf_storage(_: TokenStream) -> TokenStream {
-    let mut out = TokenStream2::new();
-    for n in 0..=LEAF {
+pub fn inner_idx(input: TokenStream) -> TokenStream {
+    let cb = callback(input);
+    let ks = (0..ARITY).map(syn::Index::from);
+    quote!(#cb!(#(#ks)*);).into()
+}
+
+/// `sink_tuples!(cb)`: `cb!(A0 0 A1 1 ..);` for n in 1..=LEAF: the tuples
+/// accepted as the sinks of a pipeline (as many as fit one leaf of a
+/// subscription tree).
+#[proc_macro]
+pub fn sink_tuples(input: TokenStream) -> TokenStream {
+    let cb = callback(input);
+    let items = (1..=LEAF).map(|n| {
         let a = idents("A", n);
-        let ia = idents("IA", n);
-        let mask = format_ident!("Mask{}", n);
-        let stored = format_ident!("Stored{}", n);
-        if n == 0 {
-            out.extend(quote!(#[doc(hidden)] pub struct #mask;));
-        } else {
-            let b = idents("B", n);
-            out.extend(quote!(#[doc(hidden)] pub struct #mask<#(const #b: bool),*>;));
-        }
-        out.extend(quote!(stored_trait!(#stored [#(#a)*]);));
-        for bits in 0..(1usize << n) {
-            let flags: Vec<TokenStream2> =
-                (0..n).map(|i| if bits >> i & 1 == 1 { quote!(true) } else { quote!(false) }).collect();
-            let kept: Vec<&Ident> = (0..n).filter(|i| bits >> i & 1 == 1).map(|i| &a[i]).collect();
-            let ty = if n == 0 { quote!(#mask) } else { quote!(#mask<#(#flags),*>) };
-            out.extend(quote!(stored_impl!(#stored, #ty, [#(#a)*] => [#(#kept)*]);));
-        }
-        let rows = a.iter().zip(&ia).flat_map(|(x, y)| [x, y]);
-        out.extend(quote!(dep_storage_leaf!(#stored, #mask, [#(#rows)*]);));
-    }
-    out.into()
+        let i = (0..n).map(syn::Index::from);
+        quote!(#cb!(#(#a #i)*);)
+    });
+    quote!(#(#items)*).into()
 }
 
 /// The shape of a subscription tree: a leaf of 0 to `LEAF` entries (`()` is the
@@ -221,6 +215,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     let krate = quote!(::dataflow_flat);
     let name = &input.ident;
     let input_name = format_ident!("{}Input", name);
+    let init_name = format_ident!("{}Init", name);
 
     // Collect every #[subscribe(...)] (several are allowed; they concatenate).
     let mut subs: Vec<Subscription> = Vec::new();
@@ -249,7 +244,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         }
         for s in &subs {
             let ty = &s.ty;
-            wc.predicates.push(parse_quote!(#ty: #krate::Component));
+            wc.predicates.push(parse_quote!(#ty: #krate::Node));
         }
     }
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
@@ -325,11 +320,18 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         .collect();
 
     let doc = format!("Inputs of [`{name}`], one reference per subscription, valid during `update`.");
+    let init_doc = format!("What [`{name}`]'s `new` receives, one entry per subscription.");
 
-    // The struct lives in a private module: `pub` in name (required, since
-    // it appears in `Sum`'s public trait impl), but not reachable by path.
-    // Code gets values of it only as the argument of `update`.
+    // The structs live in a private module: `pub` in name (required, since
+    // they appear in a public trait impl), but not reachable by path.
+    // Code gets values of them only as the argument of `update` / `new`.
     let module = format_ident!("__{}_input", name);
+
+    // `Node` for a component. Its bounds are the component's own.
+    let (nimpl_generics, nty_generics, _) = generics.split_for_impl();
+    let mut node_generics = generics.clone();
+    node_generics.make_where_clause().predicates.push(parse_quote!(#name #ty_generics: #krate::Component));
+    let (_, _, node_where) = node_generics.split_for_impl();
 
     Ok(quote! {
         #[doc(hidden)]
@@ -340,7 +342,14 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
 
             #[doc = #doc]
             pub struct #input_name #input_decl_generics #input_where {
-                #( pub #field_names: &#lt <#field_types as #krate::Component>::Output, )*
+                #( pub #field_names: &#lt <#field_types as #krate::Node>::Output, )*
+                #[doc(hidden)]
+                pub __marker: #marker_ty,
+            }
+
+            #[doc = #init_doc]
+            pub struct #init_name #input_decl_generics #input_where {
+                #( pub #field_names: #krate::InitOf<#lt, #field_types>, )*
                 #[doc(hidden)]
                 pub __marker: #marker_ty,
             }
@@ -349,13 +358,64 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         impl #impl_generics #krate::ComponentSubscription for #name #ty_generics #where_clause {
             type Deps = #deps_ty;
             type Input<'a> = #module::#input_name<'a, #(#ty_args),*>;
+            type Init<'a> = #module::#init_name<'a, #(#ty_args),*>;
 
             #[inline]
             fn input<'a>(raw: <Self::Deps as #krate::DepList>::Inputs<'a>) -> Self::Input<'a> {
                 let #deps_pat = raw;
                 #module::#input_name { #( #field_names: #field_vars, )* __marker: ::core::marker::PhantomData }
             }
+
+            #[inline]
+            fn init<'a>(raw: <Self::Deps as #krate::DepList>::Inits<'a>) -> Self::Init<'a> {
+                let #deps_pat = raw;
+                #module::#init_name { #( #field_names: #field_vars, )* __marker: ::core::marker::PhantomData }
+            }
         }
+
+        impl #nimpl_generics #krate::__private::Sealed for #name #nty_generics #node_where {}
+
+        impl #nimpl_generics #krate::Node for #name #nty_generics #node_where {
+            type Output = <#name #nty_generics as #krate::Component>::Output;
+            type Subs = <#name #nty_generics as #krate::ComponentSubscription>::Deps;
+            type Kind = #krate::CompKind;
+            const KIND: u8 = #krate::KIND_COMPONENT;
+        }
+    })
+}
+
+/// `#[derive(Root)]`: the type fed to `Pipeline::push`. It is a node with no
+/// subscriptions whose output is the value itself; nothing of it is stored.
+#[proc_macro_derive(Root)]
+pub fn derive_root(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    expand_root(input).unwrap_or_else(|e| e.to_compile_error()).into()
+}
+
+fn expand_root(input: DeriveInput) -> syn::Result<TokenStream2> {
+    let krate = quote!(::dataflow_flat);
+    let name = &input.ident;
+    if let Some(lt) = input.generics.lifetimes().next() {
+        return Err(syn::Error::new_spanned(lt, "a root must be 'static; remove lifetime parameters"));
+    }
+    let mut generics = input.generics.clone();
+    let type_params: Vec<Ident> = generics.type_params().map(|t| t.ident.clone()).collect();
+    {
+        let wc = generics.make_where_clause();
+        for p in &type_params {
+            wc.predicates.push(parse_quote!(#p: 'static));
+        }
+    }
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+    Ok(quote! {
+        impl #impl_generics #krate::__private::Sealed for #name #ty_generics #where_clause {}
+        impl #impl_generics #krate::Node for #name #ty_generics #where_clause {
+            type Output = Self;
+            type Subs = ();
+            type Kind = #krate::RootKind;
+            const KIND: u8 = #krate::KIND_ROOT;
+        }
+        impl #impl_generics #krate::Root for #name #ty_generics #where_clause {}
     })
 }
 

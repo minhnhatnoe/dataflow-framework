@@ -1,6 +1,6 @@
 //! Component identity: the `TypeId` of the component type, compared exactly.
 //!
-//! A component *is* its type, so its identity is `TypeId::of::<C>()`. That is
+//! A node *is* its type, so its identity is `TypeId::of::<N>()`. That is
 //! available in constant evaluation without a feature gate and is unique by
 //! construction: two types that print the same `type_name` (two versions of
 //! one crate) have different `TypeId`s, and so do two instantiations of a
@@ -26,7 +26,7 @@
 use std::any::{type_name, TypeId};
 use std::marker::PhantomData;
 
-use crate::component::Component;
+use crate::node::Node;
 use crate::plan::Planned;
 
 /// Fills the unused part of the plan's `TypeId` arrays (a `[TypeId; N]` needs
@@ -53,13 +53,13 @@ const fn name_hash(s: &str) -> u64 {
 pub trait Hashed {
     const HASH: u64;
 }
-impl<C: Component> Hashed for C {
-    const HASH: u64 = name_hash(type_name::<C>());
+impl<N: Node> Hashed for N {
+    const HASH: u64 = name_hash(type_name::<N>());
 }
 
-/// The position of component `C` in the plan of root `R`, as a constant.
+/// The index of node `N` in the plan of anchor `A`, as a constant.
 #[doc(hidden)]
-pub struct At<R, C>(PhantomData<(R, C)>);
-impl<R: Planned, C: Component> At<R, C> {
-    pub const INDEX: usize = R::PLAN.index_of(<C as Hashed>::HASH, TypeId::of::<C>());
+pub struct At<A, N>(PhantomData<(A, N)>);
+impl<A: Planned, N: Node> At<A, N> {
+    pub const INDEX: usize = A::PLAN.index_of(<N as Hashed>::HASH, TypeId::of::<N>());
 }

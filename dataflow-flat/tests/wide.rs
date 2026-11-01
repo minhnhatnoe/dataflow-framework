@@ -6,7 +6,16 @@
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::Mutex;
 
-use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline};
+use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline, Root};
+
+#[derive(Root)]
+pub struct Poll;
+
+/// The output of the last component that ran (the sink, which runs last).
+static RESULT: AtomicUsize = AtomicUsize::new(0);
+fn result() -> u64 {
+    RESULT.load(SeqCst) as u64
+}
 
 static SERIAL: Mutex<()> = Mutex::new(());
 static NEW: AtomicUsize = AtomicUsize::new(0);
@@ -39,12 +48,13 @@ fn reset() {
 macro_rules! leaf {
     ($name:ident, $n:expr) => {
         #[derive(ComponentSubscription)]
+        #[subscribe(p: Poll)]
         pub struct $name(Life);
         impl Component for $name {
             type Config = ();
             type Output = u64;
-            fn new((): ()) -> Self {
-                $name(Life::new())
+            fn new((): (), _: Self::Init<'_>) -> (Self, u64) {
+                ($name(Life::new()), $n)
             }
             fn update(&mut self, _: Self::Input<'_>) -> u64 {
                 UPDATE.fetch_add(1, SeqCst);
@@ -64,8 +74,8 @@ macro_rules! summing {
         impl Component for $name {
             type Config = ();
             type Output = u64;
-            fn new((): ()) -> Self {
-                $name(Life::new())
+            fn new((): (), _: Self::Init<'_>) -> (Self, u64) {
+                ($name(Life::new()), 0)
             }
             fn update(&mut self, input: Self::Input<'_>) -> u64 {
                 UPDATE.fetch_add(1, SeqCst);
@@ -73,6 +83,7 @@ macro_rules! summing {
                 let mut w = 1;
                 $(acc += w * *input.$f; w += 1;)*
                 let _ = w;
+                RESULT.store(acc as usize, SeqCst);
                 acc
             }
         }
@@ -198,12 +209,13 @@ summing!(App, 0, [w: Wide22, x: Root100, m: Mid]);
 fn hundred_subscriptions_run_once_each_with_the_right_inputs() {
     let _g = SERIAL.lock().unwrap();
     reset();
-    let mut p = Pipeline::<Root100>::build(Configs::new()).unwrap();
+    let mut p = Pipeline::<Poll, (Root100,)>::build(Configs::new()).unwrap();
     assert_eq!(counts(), (101, 0, 0));
     for run in 1..=3 {
         // sum over i of (i + 1) * (i + 1)
         let want: u64 = (1..=100u64).map(|k| k * k).sum();
-        assert_eq!(p.run(), want);
+        p.push(Poll);
+        assert_eq!(result(), want);
         assert_eq!(counts(), (101, 101 * run, 0));
     }
     drop(p);
@@ -214,7 +226,7 @@ fn hundred_subscriptions_run_once_each_with_the_right_inputs() {
 fn entries_read_upstream_found_in_earlier_nodes() {
     let _g = SERIAL.lock().unwrap();
     reset();
-    let mut p = Pipeline::<App>::build(Configs::new()).unwrap();
+    let mut p = Pipeline::<Poll, (App,)>::build(Configs::new()).unwrap();
     // L0..L99 (100) + Mid + Mid2 + Wide22 + Root100 + App
     assert_eq!(p.len(), 105);
     assert_eq!(counts().0, 105);
@@ -227,7 +239,8 @@ fn entries_read_upstream_found_in_earlier_nodes() {
     let root100: u64 = (1..=100u64).map(|k| k * k).sum();
     let want = wide22 + 2 * root100 + 3 * mid;
     for run in 1..=2 {
-        assert_eq!(p.run(), want);
+        p.push(Poll);
+        assert_eq!(result(), want);
         assert_eq!(counts(), (105, 105 * run, 0));
     }
     drop(p);
@@ -240,20 +253,22 @@ fn entries_read_upstream_found_in_earlier_nodes() {
 fn nine_and_fifteen_subscriptions() {
     let _g = SERIAL.lock().unwrap();
     reset();
-    let mut p = Pipeline::<Nine>::build(Configs::new()).unwrap();
+    let mut p = Pipeline::<Poll, (Nine,)>::build(Configs::new()).unwrap();
     assert_eq!(counts(), (10, 0, 0));
     for run in 1..=2 {
-        assert_eq!(p.run(), (1..=9u64).map(|k| k * k).sum::<u64>());
+        p.push(Poll);
+        assert_eq!(result(), (1..=9u64).map(|k| k * k).sum::<u64>());
         assert_eq!(counts(), (10, 10 * run, 0));
     }
     drop(p);
     assert_eq!(counts(), (10, 20, 10));
 
     reset();
-    let mut p = Pipeline::<Fifteen>::build(Configs::new()).unwrap();
+    let mut p = Pipeline::<Poll, (Fifteen,)>::build(Configs::new()).unwrap();
     assert_eq!(counts(), (16, 0, 0));
     for run in 1..=2 {
-        assert_eq!(p.run(), (1..=15u64).map(|k| k * k).sum::<u64>());
+        p.push(Poll);
+        assert_eq!(result(), (1..=15u64).map(|k| k * k).sum::<u64>());
         assert_eq!(counts(), (16, 16 * run, 0));
     }
     drop(p);

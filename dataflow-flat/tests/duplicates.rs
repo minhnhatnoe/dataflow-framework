@@ -10,7 +10,16 @@
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::Mutex;
 
-use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline};
+use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline, Root, Sinks};
+
+#[derive(Root)]
+pub struct Poll;
+
+/// What the sinks computed in the last push.
+static RESULT: AtomicUsize = AtomicUsize::new(0);
+fn result() -> u64 {
+    RESULT.load(SeqCst) as u64
+}
 
 static SERIAL: Mutex<()> = Mutex::new(());
 static NEW: AtomicUsize = AtomicUsize::new(0);
@@ -28,13 +37,14 @@ fn reset() {
 
 /// The shared dependency: counts its own lifecycle. Output 7.
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct X;
 impl Component for X {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self {
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) {
         NEW.fetch_add(1, SeqCst);
-        X
+        (X, 7)
     }
     fn update(&mut self, _: Self::Input<'_>) -> u64 {
         UPDATE.fetch_add(1, SeqCst);
@@ -52,12 +62,13 @@ type Y = X;
 macro_rules! leaf {
     ($name:ident, $n:expr) => {
         #[derive(ComponentSubscription)]
+        #[subscribe(p: Poll)]
         pub struct $name;
         impl Component for $name {
             type Config = ();
             type Output = u64;
-            fn new((): ()) -> Self {
-                $name
+            fn new((): (), _: Self::Init<'_>) -> (Self, u64) {
+                ($name, $n)
             }
             fn update(&mut self, _: Self::Input<'_>) -> u64 {
                 $n
@@ -67,12 +78,13 @@ macro_rules! leaf {
 }
 /// Many distinct leaves, for the wide lists: output `N + 100`.
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct G<const N: usize>;
 impl<const N: usize> Component for G<N> {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self {
-        G
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) {
+        (G, N as u64 + 100)
     }
     fn update(&mut self, _: Self::Input<'_>) -> u64 {
         N as u64 + 100
@@ -96,8 +108,8 @@ macro_rules! dup {
         impl Component for $name {
             type Config = ();
             type Output = u64;
-            fn new((): ()) -> Self {
-                $name
+            fn new((): (), _: Self::Init<'_>) -> (Self, u64) {
+                ($name, 0)
             }
             fn update(&mut self, input: Self::Input<'_>) -> u64 {
                 $(
@@ -150,8 +162,8 @@ pub struct P;
 impl Component for P {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self {
-        P
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) {
+        (P, 0)
     }
     fn update(&mut self, input: Self::Input<'_>) -> u64 {
         *input.x + 1000
@@ -166,13 +178,15 @@ macro_rules! root {
         impl Component for $name {
             type Config = ();
             type Output = u64;
-            fn new((): ()) -> Self {
-                $name
+            fn new((): (), _: Self::Init<'_>) -> (Self, u64) {
+                ($name, 0)
             }
             #[allow(unused_variables)]
             fn update(&mut self, input: Self::Input<'_>) -> u64 {
                 let f: fn(&Self::Input<'_>) -> u64 = $body;
-                f(&input)
+                let v = f(&input);
+                RESULT.store(v as usize, SeqCst);
+                v
             }
         }
     };
@@ -192,14 +206,18 @@ root!(RootWideC, [d: DupWide, p: P], |i| *i.p * 1_000_000 + *i.d);
 
 /// X was built once, is updated `runs` times, and was dropped once with the
 /// pipeline; every identity check passed.
-fn check<A: dataflow_flat::Root<Output = u64>>(expected: u64, checks_per_run: usize) {
+fn check<A: 'static>(expected: u64, checks_per_run: usize)
+where
+    (A,): Sinks<Poll>,
+{
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     reset();
     {
-        let mut p = Pipeline::<A>::build(Configs::new()).unwrap();
+        let mut p = Pipeline::<Poll, (A,)>::build(Configs::new()).unwrap();
         assert_eq!(NEW.load(SeqCst), 1, "X constructed once");
         for run in 1..=3 {
-            assert_eq!(p.run(), expected);
+            p.push(Poll);
+            assert_eq!(result(), expected);
             assert_eq!(UPDATE.load(SeqCst), run, "X updated once per run");
             assert_eq!(COMPARED.load(SeqCst), run * checks_per_run);
         }
@@ -258,17 +276,22 @@ fn same_component_under_two_roots() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     reset();
     {
-        let mut a = Pipeline::<RootLeafA>::build(Configs::new()).unwrap();
-        let mut b = Pipeline::<RootLeafB>::build(Configs::new()).unwrap();
-        let mut c = Pipeline::<RootWideA>::build(Configs::new()).unwrap();
-        let mut d = Pipeline::<RootWideB>::build(Configs::new()).unwrap();
+        let mut a = Pipeline::<Poll, (RootLeafA,)>::build(Configs::new()).unwrap();
+        let mut b = Pipeline::<Poll, (RootLeafB,)>::build(Configs::new()).unwrap();
+        let mut c = Pipeline::<Poll, (RootWideA,)>::build(Configs::new()).unwrap();
+        let mut d = Pipeline::<Poll, (RootWideB,)>::build(Configs::new()).unwrap();
         assert_eq!(NEW.load(SeqCst), 4, "one X per pipeline");
-        assert_eq!(a.run(), LEAF);
-        assert_eq!(b.run(), 1007 * 1_000_000 + LEAF);
-        assert_eq!(c.run(), WIDE);
-        assert_eq!(d.run(), 1007 * 1_000_000 + WIDE);
+        a.push(Poll);
+        assert_eq!(result(), LEAF);
+        b.push(Poll);
+        assert_eq!(result(), 1007 * 1_000_000 + LEAF);
+        c.push(Poll);
+        assert_eq!(result(), WIDE);
+        d.push(Poll);
+        assert_eq!(result(), 1007 * 1_000_000 + WIDE);
         assert_eq!(UPDATE.load(SeqCst), 4, "one update of X per pipeline per run");
-        assert_eq!(b.run(), 1007 * 1_000_000 + LEAF);
+        b.push(Poll);
+        assert_eq!(result(), 1007 * 1_000_000 + LEAF);
         assert_eq!(UPDATE.load(SeqCst), 5);
     }
     assert_eq!(DROP.load(SeqCst), 4);

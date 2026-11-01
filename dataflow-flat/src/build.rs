@@ -1,5 +1,5 @@
 //! Configs and the construction pass. These are the only places with runtime
-//! lookups (a `TypeId` map); the run itself has none.
+//! lookups (a `TypeId` map); a push has none.
 
 use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;

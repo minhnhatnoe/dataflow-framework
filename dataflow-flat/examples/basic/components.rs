@@ -1,43 +1,15 @@
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
-use dataflow_flat::{Component, ComponentSubscription};
+use dataflow_flat::{Component, ComponentSubscription, Node, Root};
 
-// --- Source: subscribes to nothing, emits one line per run -----------------
+// --- Line: the root. One value per push; nothing of it is stored ------------
 
-pub struct SourceConfig {
-    pub lines: Vec<String>,
-}
+/// The event fed to the pipeline: a line of text.
+#[derive(Root)]
+pub struct Line(pub String);
 
-// Invented default: a single empty line, so `update` never divides by zero.
-impl Default for SourceConfig {
-    fn default() -> Self {
-        SourceConfig { lines: vec![String::new()] }
-    }
-}
-
-#[derive(ComponentSubscription)]
-pub struct Source {
-    config: SourceConfig,
-    next: usize,
-}
-
-impl Component for Source {
-    type Config = SourceConfig;
-    type Output = String;
-
-    fn new(config: SourceConfig) -> Self {
-        Source { config, next: 0 }
-    }
-
-    fn update(&mut self, _: Self::Input<'_>) -> String {
-        let line = self.config.lines[self.next % self.config.lines.len()].clone();
-        self.next += 1;
-        line
-    }
-}
-
-// --- Tokenize: three components subscribe to it; it still runs once -------
+// --- Tokenize: three components subscribe to it; it still runs once per push --
 
 #[derive(Default)]
 pub struct TokenizeConfig {
@@ -45,7 +17,7 @@ pub struct TokenizeConfig {
 }
 
 #[derive(ComponentSubscription)]
-#[subscribe(line: Source)]
+#[subscribe(line: Line)]
 pub struct Tokenize {
     config: TokenizeConfig,
 }
@@ -54,14 +26,15 @@ impl Component for Tokenize {
     type Config = TokenizeConfig;
     type Output = Vec<String>;
 
-    fn new(config: TokenizeConfig) -> Self {
-        Tokenize { config }
+    fn new(config: TokenizeConfig, _: Self::Init<'_>) -> (Self, Vec<String>) {
+        (Tokenize { config }, Vec::new())
     }
 
     fn update(&mut self, input: Self::Input<'_>) -> Vec<String> {
         println!("    (Tokenize::update)");
         input
             .line
+            .0
             .split_whitespace()
             .map(|w| if self.config.lowercase { w.to_lowercase() } else { w.to_string() })
             .collect()
@@ -78,8 +51,8 @@ impl Component for WordCount {
     type Config = ();
     type Output = BTreeMap<String, usize>;
 
-    fn new((): ()) -> Self {
-        WordCount
+    fn new((): (), _: Self::Init<'_>) -> (Self, Self::Output) {
+        (WordCount, BTreeMap::new())
     }
 
     fn update(&mut self, input: Self::Input<'_>) -> Self::Output {
@@ -108,8 +81,8 @@ impl Component for TopWords {
     type Config = TopWordsConfig;
     type Output = Vec<(String, usize)>;
 
-    fn new(config: TopWordsConfig) -> Self {
-        TopWords { config }
+    fn new(config: TopWordsConfig, _: Self::Init<'_>) -> (Self, Self::Output) {
+        (TopWords { config }, Vec::new())
     }
 
     fn update(&mut self, input: Self::Input<'_>) -> Self::Output {
@@ -130,8 +103,8 @@ impl Component for Longest {
     type Config = ();
     type Output = Option<String>;
 
-    fn new((): ()) -> Self {
-        Longest
+    fn new((): (), _: Self::Init<'_>) -> (Self, Option<String>) {
+        (Longest, None)
     }
 
     fn update(&mut self, input: Self::Input<'_>) -> Option<String> {
@@ -143,14 +116,16 @@ impl Component for Longest {
 
 #[derive(ComponentSubscription)]
 #[subscribe(items: U)]
-pub struct Len<U: Component<Output = Vec<String>>>(PhantomData<U>);
+pub struct Len<U: Node<Output = Vec<String>>>(PhantomData<U>);
 
-impl<U: Component<Output = Vec<String>>> Component for Len<U> {
+impl<U: Node<Output = Vec<String>>> Component for Len<U> {
     type Config = ();
     type Output = usize;
 
-    fn new((): ()) -> Self {
-        Len(PhantomData)
+    fn new((): (), _: Self::Init<'_>) -> (Self, usize) {
+        // Generic over the node `U`, `new` can't look at `init.items` (the
+        // type depends on `U`'s kind); it starts at 0.
+        (Len(PhantomData), 0)
     }
 
     fn update(&mut self, input: Self::Input<'_>) -> usize {
@@ -164,7 +139,7 @@ impl<U: Component<Output = Vec<String>>> Component for Len<U> {
 #[subscribe(
     top: TopWords,
     longest: Longest,
-    line: Source,
+    line: Line,
 )]
 pub struct Report;
 
@@ -172,47 +147,43 @@ impl Component for Report {
     type Config = ();
     type Output = String;
 
-    fn new((): ()) -> Self {
-        Report
+    fn new((): (), _: Self::Init<'_>) -> (Self, String) {
+        (Report, String::new())
     }
 
     fn update(&mut self, input: Self::Input<'_>) -> String {
         format!(
             "{:?} -> top {:?}, longest {:?}",
-            input.line,
+            input.line.0,
             input.top,
             input.longest.as_deref().unwrap_or("-")
         )
     }
 }
 
-// --- App: the root. Nothing subscribes to it; `Pipeline::run` returns its output
-
-/// What the program wants from one run.
-#[derive(Debug)]
-pub struct Summary {
-    pub report: String,
-    pub token_count: usize,
-}
+// --- Printer: the sink. A component whose output is `()` ------------------
 
 #[derive(ComponentSubscription)]
 #[subscribe(
     report: Report,
     token_count: Len<Tokenize>,
 )]
-pub struct App;
+pub struct Printer {
+    pushes: usize,
+}
 
-impl Component for App {
+impl Component for Printer {
     type Config = ();
-    type Output = Summary;
+    type Output = ();
 
-    fn new((): ()) -> Self {
-        App
+    fn new((): (), _: Self::Init<'_>) -> (Self, ()) {
+        (Printer { pushes: 0 }, ())
     }
 
-    fn update(&mut self, input: Self::Input<'_>) -> Summary {
-        // Inputs are only borrowed for this call; the root's output is owned
-        // and is handed to the caller of `run`.
-        Summary { report: input.report.clone(), token_count: *input.token_count }
+    fn update(&mut self, input: Self::Input<'_>) {
+        self.pushes += 1;
+        println!("\npush {}:", self.pushes);
+        println!("  {}", input.report);
+        println!("  token count: {}", input.token_count);
     }
 }

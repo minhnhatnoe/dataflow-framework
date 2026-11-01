@@ -5,7 +5,10 @@
 use std::marker::PhantomData;
 use std::sync::Mutex;
 
-use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline};
+use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline, Root};
+
+#[derive(Root)]
+pub struct Poll;
 
 static LOG: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 // Tests in one binary run in parallel; each graph's test holds this lock.
@@ -23,7 +26,7 @@ macro_rules! comp {
         impl Component for $name {
             type Config = ();
             type Output = u64;
-            fn new((): ()) -> Self { $name }
+            fn new((): (), _: Self::Init<'_>) -> (Self, u64) { ($name, 0) }
             fn update(&mut self, _: Self::Input<'_>) -> u64 {
                 LOG.lock().unwrap().push(stringify!($name));
                 0
@@ -34,7 +37,7 @@ macro_rules! comp {
 
 mod words {
     use super::*;
-    comp!(Source, []);
+    comp!(Source, [p: Poll]);
     comp!(Tokenize, [line: Source]);
     comp!(WordCount, [tokens: Tokenize]);
     comp!(TopWords, [counts: WordCount]);
@@ -42,11 +45,11 @@ mod words {
     comp!(Report, [top: TopWords, longest: Longest, line: Source]);
     #[derive(ComponentSubscription)]
     #[subscribe(items: U)]
-    pub struct Len<U: Component>(PhantomData<U>);
-    impl<U: Component> Component for Len<U> {
+    pub struct Len<U: Component + dataflow_flat::Node>(PhantomData<U>);
+    impl<U: Component + dataflow_flat::Node> Component for Len<U> {
         type Config = ();
         type Output = u64;
-        fn new((): ()) -> Self { Len(PhantomData) }
+        fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (Len(PhantomData), 0) }
         fn update(&mut self, _: Self::Input<'_>) -> u64 {
             LOG.lock().unwrap().push("Len<Tokenize>");
             0
@@ -59,13 +62,14 @@ mod words {
 fn example_graph_exact_order() {
     let _g = SERIAL.lock().unwrap();
     take();
-    let mut p = Pipeline::<words::App>::build(Configs::new()).unwrap();
+    let mut p = Pipeline::<Poll, (words::App,)>::build(Configs::new()).unwrap();
     for _ in 0..3 {
-        p.run();
+        p.push(Poll);
         assert_eq!(take(), ["Source", "Tokenize", "WordCount", "TopWords", "Longest", "Report", "Len<Tokenize>", "App"]);
     }
     // Construction order is the same order.
     assert_eq!(p.order().len(), 8);
+    assert_eq!(p.len(), 8);
 }
 
 // Later-listed deps upstream of earlier ones.
@@ -78,12 +82,12 @@ fn example_graph_exact_order() {
 //   App3: [Q, Z, B]   Q first: then Z's block skips Q
 mod later_upstream {
     use super::*;
-    comp!(B, []);
+    comp!(B, [p: Poll]);
     comp!(A, [b: B]);
     comp!(C, [a: A, b: B]);
-    comp!(R, []);
+    comp!(R, [p: Poll]);
     comp!(P, [r: R]);
-    comp!(Q, []);
+    comp!(Q, [p: Poll]);
     comp!(Top, [p: P, q: Q, r: R]);
     comp!(Z, [top: Top, c: C]);
     comp!(App1, [z: Z]);
@@ -96,16 +100,16 @@ fn later_listed_dep_upstream_of_earlier_one() {
     use later_upstream::*;
     let _g = SERIAL.lock().unwrap();
     take();
-    let mut p = Pipeline::<App1>::build(Configs::new()).unwrap();
+    let mut p = Pipeline::<Poll, (App1,)>::build(Configs::new()).unwrap();
     for _ in 0..2 {
-        p.run();
+        p.push(Poll);
         assert_eq!(take(), ["R", "P", "Q", "Top", "B", "A", "C", "Z", "App1"]);
     }
-    let mut p = Pipeline::<App2>::build(Configs::new()).unwrap();
-    p.run();
+    let mut p = Pipeline::<Poll, (App2,)>::build(Configs::new()).unwrap();
+    p.push(Poll);
     assert_eq!(take(), ["R", "P", "Q", "Top", "B", "A", "C", "Z", "App2"]);
-    let mut p = Pipeline::<App3>::build(Configs::new()).unwrap();
-    p.run();
+    let mut p = Pipeline::<Poll, (App3,)>::build(Configs::new()).unwrap();
+    p.push(Poll);
     assert_eq!(take(), ["Q", "R", "P", "Top", "B", "A", "C", "Z", "App3"]);
 }
 
@@ -114,8 +118,8 @@ fn later_listed_dep_upstream_of_earlier_one() {
 fn construction_order_is_the_run_order() {
     let _g = SERIAL.lock().unwrap();
     take();
-    let mut p = Pipeline::<later_upstream::App3>::build(Configs::new()).unwrap();
-    p.run();
+    let mut p = Pipeline::<Poll, (later_upstream::App3,)>::build(Configs::new()).unwrap();
+    p.push(Poll);
     let ran = take();
     let built: Vec<&str> = p.order().iter().map(|n| n.rsplit("::").next().unwrap()).collect();
     assert_eq!(built, ran);
@@ -129,27 +133,27 @@ fn construction_order_is_the_run_order() {
 // ---------------------------------------------------------------------------
 mod wide {
     use super::*;
-    comp!(X0, []);
-    comp!(X1, []);
-    comp!(X2, []);
-    comp!(X3, []);
-    comp!(X4, []);
-    comp!(X5, []);
-    comp!(X6, []);
-    comp!(X7, []);
-    comp!(X8, []);
-    comp!(X9, []);
-    comp!(X10, []);
-    comp!(X11, []);
-    comp!(X12, []);
-    comp!(X13, []);
-    comp!(X14, []);
-    comp!(X15, []);
-    comp!(X16, []);
-    comp!(X17, []);
-    comp!(X18, []);
-    comp!(X19, []);
-    comp!(X20, []);
+    comp!(X0, [p: Poll]);
+    comp!(X1, [p: Poll]);
+    comp!(X2, [p: Poll]);
+    comp!(X3, [p: Poll]);
+    comp!(X4, [p: Poll]);
+    comp!(X5, [p: Poll]);
+    comp!(X6, [p: Poll]);
+    comp!(X7, [p: Poll]);
+    comp!(X8, [p: Poll]);
+    comp!(X9, [p: Poll]);
+    comp!(X10, [p: Poll]);
+    comp!(X11, [p: Poll]);
+    comp!(X12, [p: Poll]);
+    comp!(X13, [p: Poll]);
+    comp!(X14, [p: Poll]);
+    comp!(X15, [p: Poll]);
+    comp!(X16, [p: Poll]);
+    comp!(X17, [p: Poll]);
+    comp!(X18, [p: Poll]);
+    comp!(X19, [p: Poll]);
+    comp!(X20, [p: Poll]);
     // Mid is listed early but subscribes to X20, which a wide root lists last.
     comp!(Mid, [x: X20]);
     comp!(W5, [f0: X0, f1: X1, f2: X2, f3: X3, f4: X4]);
@@ -169,9 +173,9 @@ fn wide_components_keep_listing_order_across_nodes() {
     }
     macro_rules! check {
         ($root:ty, $name:literal, $expected:expr) => {{
-            let mut p = Pipeline::<$root>::build(Configs::new()).unwrap();
+            let mut p = Pipeline::<Poll, ($root,)>::build(Configs::new()).unwrap();
             for _ in 0..2 {
-                p.run();
+                p.push(Poll);
                 let ran: Vec<String> = take().into_iter().map(String::from).collect();
                 let mut want: Vec<String> = $expected;
                 want.push($name.to_string());
