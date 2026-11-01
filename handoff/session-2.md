@@ -120,3 +120,7 @@ The length-changing edit is the one failed merge condition. It is real, not nois
 Query-level reuse has never been measured: the only self-profile attempt could not be read (reader `decodeme` 10.1.3 expects file format 8, this toolchain writes 9).
 
 `patches/plan-linear-uncommitted.patch` and `patches/runtime-gap3-uncommitted.patch` hold uncommitted changes saved from worktrees before removing them.
+
+## Blk result (2026-11-01): not merged, branch `blk-4k`
+
+4,079 release: master 3:52, 14.63 GB; Blk 3:33, 6.17 GB. Typical run time equal (107.5). Typical release app 13.3 vs 14.0 s. Dev initial 17.8 vs 11.3 s. Same-length edit about 1.9 vs 0.85 s. Longer edit (6 alternating rounds) about 2.3 vs 5.05 s. Cold check at 2,704: 26.7 vs 43.6 s. Fails the "no worse on dev rebuilds" condition because of the longer edit. Perps (12,412) on Blk stops at "push program is too large: raise the list pool" (plan.rs), so a pool cap has to be raised to try that size.
