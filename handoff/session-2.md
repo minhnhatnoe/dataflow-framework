@@ -74,3 +74,49 @@ With the fair harness (median of per-process minimum, 7 procs × 101 rounds, `ta
    - The typical dev build on master peaked at 6.2 GB.
    - The mono-items agent's typical dev build failed at its 5 GB cap on both sides.
 6. Docs rewrite (step 7), including the build-a-local guidance.
+
+## Closed by the user (2026-11-01)
+
+No LLVM issue. No rewrite of the Claude-authored commits. No headless restart job.
+
+## Handler API direction (user, 2026-11-01, not built)
+
+"Oms should be a component btw. I think the annotation should still be subscription": one derive and `#[subscribe]`, no `#[derive(Handler)]` / `#[handles]`. Catalog lists use a plain tuple plus `_`. Queued after the optimization work.
+
+## `update`-only output via reflection (2026-11-01, not built; needs the user's decision)
+
+`handoff/experiments/update-only/`: the author writes only `update -> &Output`. The library finds the field of type `Output` at compile time with `#![feature(type_info)]`, and reads it with one `unsafe` block (so it breaks `forbid(unsafe_code)` unless the user relaxes it).
+Miri clean under Stacked and Tree Borrows on a plain component. Two attacks from safe user code gave UB on the first version (lifetime laundering, because type IDs erase lifetimes; a packed struct at an unaligned address). Fixed by `C: 'static`, a check of the struct's alignment, and removing the nested-field search. Not integrated with the framework's storage or dispatch.
+
+## Scale limit (2026-11-01)
+
+The stack-frame error at about 2,000 components is fixed on master (`excl_group` loops instead of recursing). The next wall is the `long_running_const_eval` lint at about 2,000 components: it can only be allowed from the crate that evaluates the plan. With the allow, 4,079 components builds in release in 6:10 at a 14.6 GB peak. Open decision: rustflag or attribute in user apps, or split `Planned::PLAN` into chained consts.
+
+**Decided by the user:** option (a). Apps above about 2,000 components use the allow or the rustflag; the plan stays one constant. Document it in the docs rewrite.
+
+**Decided by the user (2026-11-01):** the `update`-only reflection design is stashed. `Blk`: re-test at 4,079 components, merge if the result looks good.
+
+## `Blk` re-test (2026-11-01, not merged)
+
+Clean numbers; they replace the 6:10 above, which was measured with other builds running.
+
+| Case | Master | `Blk` |
+|---|---|---|
+| 4,079 components, release build | 3:52, 14.6 GB | 3:34, 6.2 GB |
+| 2,044 components, `cargo check` | 18.5 s, 1.06 GB | 22.5 s, 1.26 GB |
+| 2,704 components, cold `cargo check` | 26.5 s, 1.32 GB | 43.6 s, 1.66 GB |
+| 2,704 components, check after an edit | 0.41 s | 0.49 s |
+| 823 components, framework run time | 108.6 ns | 108.3 ns |
+| 823 components, release app / runner | 13.3 / 18.4 s | 14.0 / 19.6 s |
+| 823 components, dev edit, same length (big, 4 rounds) | 1.7-2.1 s | 0.8-0.9 s |
+| 823 components, dev edit, same length (big + 3 small, 4 rounds) | 1.8-1.9 s | 0.8-0.9 s |
+| 823 components, dev edit, length changes (big + 3 small, 4 rounds) | 2.3 s | 4.9-5.0 s |
+
+On `blk-4k`: `cargo test` 18/18 suites, `check_errors.sh` 30/30, exchanges example ok.
+The length-changing edit is the one failed merge condition. It is real, not noise, and its cause is unknown.
+
+12,412 components on `Blk`: fails in the plan with "the push program is too large" (`MAX_LST = 32768` in `plan.rs`), not on memory. Exit 143 about 4 minutes in. The limit is not specific to `Blk`; master not run at this size. The cost of a larger table to small apps is unmeasured.
+
+Query-level reuse has never been measured: the only self-profile attempt could not be read (reader `decodeme` 10.1.3 expects file format 8, this toolchain writes 9).
+
+`patches/plan-linear-uncommitted.patch` and `patches/runtime-gap3-uncommitted.patch` hold uncommitted changes saved from worktrees before removing them.
