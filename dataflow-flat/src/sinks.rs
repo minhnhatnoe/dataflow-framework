@@ -136,8 +136,8 @@ where
         type A<R, S> = Anchor<R, S>;
         // Report an invalid graph (a second root, an unreachable component).
         const { <A<R, S> as Planned>::CHECK };
-        let mut states = <<A<R, S> as Layout>::StatesOpt as Empty>::empty();
-        let mut outs = <<A<R, S> as Layout>::OutsOpt as Empty>::empty();
+        let mut states = <<A<R, S> as Layout>::StatesOpt as Empty>::EMPTY;
+        let mut outs = <<A<R, S> as Layout>::OutsOpt as Empty>::EMPTY;
         {
             let mut ctx = ConstructCtx::<A<R, S>> { states: &mut states, outs: &mut outs, pass };
             <Whole<A<R, S>> as Drive<A<R, S>, ConstructPh<A<R, S>>, <Whole<A<R, S>> as RgCl>::Cl>>::drive(&mut ctx);

@@ -88,11 +88,13 @@ impl<In: 'static, Em: 'static, C: SelectChain<In>> SelectChain<In> for Hd<Em, C>
     type Out = ();
     type Init<'a, N: Node<Output = In>> = C::Init<'a, N>;
     const PLAIN: bool = C::PLAIN;
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn matches(x: &In) -> bool {
         C::matches(x)
     }
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn get(_: &In) -> &() {
         &()
     }
@@ -111,18 +113,21 @@ pub trait HdChain<In: 'static>: SelectChain<In> {
 }
 impl<In: 'static, Em: HandledEdge, C: SelectChain<In, Out = Em::Value>> HdChain<In> for Hd<Em, C> {
     type Em = Em;
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn matches_inner(x: &In) -> bool {
         C::matches(x)
     }
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn value(x: &In) -> &Em::Value {
         C::get(x)
     }
 }
 
 impl<In: 'static, Em: 'static, C: ChainKey<In, J>, const J: usize> ChainKey<In, J> for Hd<Em, C> {
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn key(x: &In) -> u32 {
         C::key(x)
     }

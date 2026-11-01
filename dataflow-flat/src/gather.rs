@@ -68,7 +68,8 @@ where
     }
     #[inline]
     fn seed<'a>(_: &'a A::OutsOpt) {}
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn fires(_: &FiredOf<A>) -> bool {
         true
     }
@@ -89,7 +90,8 @@ where
             .as_ref()
             .expect("a subscription is constructed before its subscriber")
     }
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn fires(fired: &FiredOf<A>) -> bool {
         // A component nobody's condition reads has no flag, and nobody asks
         // (the plan gives a flag to every component a conditional component
@@ -121,7 +123,8 @@ where
     fn seed<'a>(outs: &'a A::OutsOpt) -> crate::node::InitOf<'a, N> {
         <N::Kind as SourceKind<N, A>>::seed(outs)
     }
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn fires(fired: &FiredOf<A>) -> bool {
         <N::Kind as SourceKind<N, A>>::fires(fired)
     }
@@ -229,7 +232,8 @@ pub trait Ready<A: Layout>: DepList {
 macro_rules! ready_leaf {
     ([$($E:ident $C:ident $I:ident)*]) => {
         impl<A: Layout, $($E: Source<A>, $C: SelectChain<<$E as Node>::Output>, const $I: usize,)*> Ready<A> for ($(Sub<$E, $C, $I>,)*) {
-            #[inline(always)]
+            #[cfg_attr(not(debug_assertions), inline(always))]
+            #[cfg_attr(debug_assertions, inline)]
             #[allow(unused_variables)]
             fn ready(root: &A::Root, outs: &A::Outs, fired: &FiredOf<A>) -> bool {
                 false $(|| (<$E as Source<A>>::fires(fired)
@@ -243,7 +247,8 @@ dataflow_macros::leaf_shapes!(ready_leaf);
 macro_rules! ready_inner {
     ([$($K:ident)*]) => {
         impl<A: Layout, $($K: Ready<A>,)*> Ready<A> for ($($K,)*) {
-            #[inline(always)]
+            #[cfg_attr(not(debug_assertions), inline(always))]
+            #[cfg_attr(debug_assertions, inline)]
             fn ready(root: &A::Root, outs: &A::Outs, fired: &FiredOf<A>) -> bool {
                 false $(|| <$K as Ready<A>>::ready(root, outs, fired))*
             }
