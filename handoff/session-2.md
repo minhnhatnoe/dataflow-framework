@@ -148,6 +148,32 @@ With the flag on the typical app (one run each unless noted): release app/runner
 
 Build folder on this app: 3.6-3.7 GB on master, about 0.8 GB on `Blk`. Peak memory on a library edit: about 2.0 GB on master, 0.8 GB on `Blk`. `Blk` remains unmerged pending the user's decision.
 
+**Merged (2026-11-01, 754044a):** the user approved `Blk` plus the flag. `.cargo/config.toml` sets `-Zshare-generics=n`, and `bench/gen_app.py` writes the same file into generated apps. Verified through the config file: `cargo test` all suites, `check_errors.sh` 30/30, exchanges ok, typical 108.1 ns, release 13.8/19.5 s, first dev build 11.2 s, all three dev edits 0.8 s.
+
+## `cargo check` growth at scale (2026-11-01, master before `Blk`)
+
+12,412 components passes after raising `MAX_LST` to `1 << 16` (no measurable cost on typical or 2,044), but takes 15:24 at 6.1 GB. Profile, self time at 4,079 and 12,412, with call counts growing about linearly, so cost per call is what grows:
+
+| Step | 4,079 | 12,412 | Cost per call |
+|---|---|---|---|
+| `check_well_formed` (946 of 948 s inclusive) | 9.8 s | 330 s | 16 ms to 209 ms |
+| `resolve_instance_raw` | 2.4 s | 286 s | 3.9 us to 142 us |
+| `eval_to_allocation_raw` | 35 s | 272 s | 40 us to 95 us |
+| `evaluate_root_goal_for_proof_tree_raw` | 2.1 s | 49 s | about 15 us to 104 us |
+
+Which constant or type is responsible is unknown. `query-keys` at 2,044 made a 26 GB profile; use a few hundred components or a streaming filter.
+
+## Enum variants vs `Frame` keys (2026-11-01, branch `enum-keys`)
+
+827 symbols, per packet, identical `Book<S>` bodies:
+
+| | `Frame` + `On` | Enum + markers | Hand-written `match` |
+|---|---|---|---|
+| Random keys | 3.97 ns, 21.5 cycles, 0.01 mispredicts | 11.89 ns, 65.0 cycles, 0.95 | 10.62 ns, 58.4 cycles, 1.00 |
+| Sorted keys | 3.94 ns, 21.3 cycles | 5.91 ns, 32.3 cycles | 4.50 ns, 24.9 cycles |
+
+Compile time is tied. The wire-number `match` folds into storing the tag. The gap is one indirect-jump mispredict: `Frame`'s 827 arms merge into a table and a shared tail, the enum's stay as a jump table, cause unknown. Not tested with bodies that differ per symbol, which could erase `Frame`'s lead. The enum design is on hold; `Frame` and `On` stay meanwhile.
+
 ## Run-time gap: state and next step (2026-11-01)
 
 This replaces "mostly closed" above: +1.7 ns came from the cloud VM. It is about 8% on the local machine (107.6 vs 99.6 ns, `measure.py` medians).
