@@ -396,6 +396,8 @@ pub struct RunIfK;
 #[doc(hidden)]
 pub struct SwitchK;
 #[doc(hidden)]
+pub struct HRunK;
+#[doc(hidden)]
 pub trait PgKindOf<const K: u8> {
     type Ty;
 }
@@ -410,6 +412,9 @@ impl PgKindOf<2> for () {
 }
 impl PgKindOf<3> for () {
     type Ty = SwitchK;
+}
+impl PgKindOf<4> for () {
+    type Ty = HRunK;
 }
 #[doc(hidden)]
 pub trait ExecK<A: Layout, Ph, K> {

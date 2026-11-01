@@ -42,6 +42,10 @@ pub trait Node: __private::Sealed + Sized + 'static {
     type Kind: NodeKind;
     #[doc(hidden)]
     const KIND: u8;
+    /// Is this a handler component (`#[derive(Handler)]`)? The plan treats its
+    /// handled edges differently (see `handler`).
+    #[doc(hidden)]
+    const HANDLER: bool = false;
     /// Is this a [`Listener`](crate::Listener) (`#[listener]` on the derive)?
     #[doc(hidden)]
     const LISTENER: bool = false;

@@ -440,6 +440,79 @@ impl Component for A {
 fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }
 EOF2
 
+# --- handler components ------------------------------------------------------------------------------
+read -r -d '' HANDLERS <<'EOF'
+use dataflow_flat::{Collect, Handler, UpdateHandler};
+macro_rules! handler {
+    ($name:ident, [$($attr:tt)*]) => {
+        #[derive(Handler)]
+        $($attr)*
+        pub struct $name;
+        impl Collect for $name {
+            type Config = ();
+            type Output = u64;
+            type Buf = u64;
+            fn new((): ()) -> Self { $name }
+            fn begin(&mut self) -> u64 { 0 }
+            fn finish(&mut self, buf: u64, _: Self::Input<'_>) -> u64 { buf }
+        }
+    };
+}
+EOF
+
+# A handled edge without an `UpdateHandler` impl: the on_unimplemented message.
+CMD[handler_missing_update]=check
+PATTERN[handler_missing_update]='E0277.*does not handle the edge|does not handle the edge.*E0277'
+BODY[handler_missing_update]="$SELECTORS
+$HANDLERS
+comp!(A, [p: Poll => K0]);
+comp!(B, [p: Poll => K1]);
+handler!(H, [#[handles(A, B)]]);
+impl UpdateHandler<A> for H { fn on_update(&mut self, buf: &mut u64, v: &u64) { *buf += *v; } }
+fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }"
+
+# Rule 4 still applies to handled edges: two guards can fire in the same step.
+CMD[handler_non_exclusive_join]=build
+PATTERN[handler_non_exclusive_join]='E0080.*H joins branches that can fire in the same step'
+BODY[handler_non_exclusive_join]="$SELECTORS
+$HANDLERS
+comp!(A, [p: Poll => G1]);
+comp!(B, [p: Poll => G2]);
+handler!(H, [#[handles(A, B)]]);
+impl UpdateHandler<A> for H { fn on_update(&mut self, buf: &mut u64, v: &u64) { *buf += *v; } }
+impl UpdateHandler<B> for H { fn on_update(&mut self, buf: &mut u64, v: &u64) { *buf += *v; } }
+fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }"
+
+# Exclusive handled edges compile (and a handled edge is not subject to rule 5).
+CMD[handler_exclusive_ok]=build
+PATTERN[handler_exclusive_ok]='NOERROR'
+BODY[handler_exclusive_ok]="$SELECTORS
+$HANDLERS
+comp!(A, [p: Poll => K0]);
+comp!(B, [p: Poll => K1]);
+handler!(H, [#[handles(A, B)] #[handles(sel: Poll => K0)]]);
+impl UpdateHandler<A> for H { fn on_update(&mut self, buf: &mut u64, v: &u64) { *buf += *v; } }
+impl UpdateHandler<B> for H { fn on_update(&mut self, buf: &mut u64, v: &u64) { *buf += *v; } }
+impl UpdateHandler<h_edges::Sel> for H { fn on_update(&mut self, buf: &mut u64, v: &Poll) { *buf += 1; } }
+fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }"
+
+# A plain `#[subscribe]` input of a handler can't carry selectors.
+CMD[handler_selected_input]=check
+PATTERN[handler_selected_input]="can't use selectors"
+BODY[handler_selected_input]="$SELECTORS
+$HANDLERS
+handler!(H, [#[subscribe(p: Poll => K0)]]);
+fn main() {}"
+
+# A plain input that is the root has no value at build, when `finish` runs for the initial output.
+CMD[handler_root_input]=check
+PATTERN[handler_root_input]='plain `#\[subscribe\]` input of a handler must be a component'
+BODY[handler_root_input]="$HANDLERS
+handler!(H, [#[handles(Src)] #[subscribe(p: Poll)]]);
+impl UpdateHandler<Src> for H { fn on_update(&mut self, buf: &mut u64, v: &u64) { *buf += *v; } }
+fn main() {}"
+
+
 ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        self_cycle
        too_many_components root_not_a_root sink_is_the_root
@@ -447,7 +520,8 @@ ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        unreachable_component second_root wrong_root_type
        keep_input_reference name_input_struct_outside unused_config
        non_exclusive_join exclusive_join_ok demux_reader_not_implied selector_unreachable_component
-       selector_wrong_input orphan_first on_not_keyed symbols_share_key)
+       selector_wrong_input orphan_first on_not_keyed symbols_share_key
+       handler_missing_update handler_non_exclusive_join handler_exclusive_ok handler_selected_input handler_root_input)
 
 run_case() {
     local name=$1 dir="$CASES_DIR/$1"
