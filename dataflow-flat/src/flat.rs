@@ -41,13 +41,13 @@ const fn max_all(xs: &[usize]) -> usize {
     m
 }
 
-/// The positions `LO..HI` of the entries `Sub<_, I>` below a node.
+/// The positions `LO..HI` of the entries `Sub<_, _, I>` below a node.
 #[doc(hidden)]
 pub trait PosSpan {
     const LO: usize;
     const HI: usize;
 }
-impl<E: Node, const I: usize> PosSpan for Sub<E, I> {
+impl<E: Node, C, const I: usize> PosSpan for Sub<E, C, I> {
     const LO: usize = I;
     const HI: usize = I + 1;
 }
@@ -65,7 +65,7 @@ dataflow_macros::tuple_sizes!(pos_span_impl);
 pub trait PosSelect<W: Target> {
     const POS: usize;
 }
-impl<E: Node, const I: usize, W: Target> PosSelect<W> for Sub<E, I> {
+impl<E: Node, C, const I: usize, W: Target> PosSelect<W> for Sub<E, C, I> {
     const POS: usize = 0;
 }
 macro_rules! pos_select_impl {
@@ -87,7 +87,7 @@ dataflow_macros::select_tuples!(pos_select_impl);
 pub trait Pick<W: Target, const S: usize> {
     type T: Node;
 }
-impl<E: Node, const I: usize, W: Target> Pick<W, 0> for Sub<E, I> {
+impl<E: Node, C, const I: usize, W: Target> Pick<W, 0> for Sub<E, C, I> {
     type T = E;
 }
 macro_rules! pick_impl {

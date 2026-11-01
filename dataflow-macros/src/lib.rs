@@ -45,13 +45,13 @@ fn callback(input: TokenStream) -> Ident {
     syn::parse(input).expect("expected the name of a macro_rules! macro")
 }
 
-/// `leaf_shapes!(cb)`: `cb!([A0 I0 A1 I1 ..]);` for each leaf size 0..=LEAF
-/// (an entry is a component and its position constant).
+/// `leaf_shapes!(cb)`: `cb!([A0 C0 I0 A1 C1 I1 ..]);` for each leaf size 0..=LEAF
+/// (an entry is a node, its selector chain and its position constant).
 #[proc_macro]
 pub fn leaf_shapes(input: TokenStream) -> TokenStream {
     let cb = callback(input);
     let items = (0..=LEAF).map(|n| {
-        let rows = (0..n).flat_map(|i| [format_ident!("A{}", i), format_ident!("I{}", i)]);
+        let rows = (0..n).flat_map(|i| [format_ident!("A{}", i), format_ident!("C{}", i), format_ident!("I{}", i)]);
         quote!(#cb!([#(#rows)*]);)
     });
     quote!(#(#items)*).into()
@@ -194,6 +194,8 @@ impl Shape {
 struct Subscription {
     name: Ident,
     ty: Type,
+    /// Selectors applied to the node's output, left to right (`=> A, B`).
+    chain: Vec<Type>,
 }
 
 impl Parse for Subscription {
@@ -201,8 +203,52 @@ impl Parse for Subscription {
         let name = input.parse()?;
         input.parse::<Token![:]>()?;
         let ty = input.parse()?;
-        Ok(Subscription { name, ty })
+        let mut chain = Vec::new();
+        if input.peek(Token![=>]) {
+            input.parse::<Token![=>]>()?;
+            loop {
+                chain.push(selector(input.parse::<Type>()?));
+                // `, name: Type` starts the next subscription; any other
+                // `, Type` continues the chain.
+                if !input.peek(Token![,]) {
+                    break;
+                }
+                let fork = input.fork();
+                fork.parse::<Token![,]>()?;
+                let next_is_subscription =
+                    fork.is_empty() || (fork.peek(Ident) && fork.peek2(Token![:]) && !fork.peek2(Token![::]));
+                if next_is_subscription {
+                    break;
+                }
+                input.parse::<Token![,]>()?;
+            }
+        }
+        Ok(Subscription { name, ty, chain })
     }
+}
+
+/// A bare `Some` / `None` in a chain means the library's selectors for `Option`
+/// (the prelude's names are variants, not types).
+fn selector(ty: Type) -> Type {
+    if let Type::Path(p) = &ty {
+        if p.qself.is_none() && p.path.leading_colon.is_none() && p.path.segments.len() == 1 {
+            let seg = &p.path.segments[0];
+            if seg.arguments.is_empty() && (seg.ident == "Some" || seg.ident == "None") {
+                let id = &seg.ident;
+                return parse_quote!(::dataflow_flat::option::#id);
+            }
+        }
+    }
+    ty
+}
+
+/// The chain as the nested tuple `(S1, (S2, ()))`.
+fn chain_ty(chain: &[Type]) -> TokenStream2 {
+    let mut t = quote!(());
+    for s in chain.iter().rev() {
+        t = quote!((#s, #t));
+    }
+    t
 }
 
 #[proc_macro_derive(ComponentSubscription, attributes(subscribe))]
@@ -244,7 +290,10 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         }
         for s in &subs {
             let ty = &s.ty;
+            let chain = chain_ty(&s.chain);
             wc.predicates.push(parse_quote!(#ty: #krate::Node));
+            wc.predicates
+                .push(parse_quote!(#chain: #krate::SelectChain<<#ty as #krate::Node>::Output>));
         }
     }
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
@@ -260,19 +309,37 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
 
     let field_names: Vec<&Ident> = subs.iter().map(|s| &s.name).collect();
     let field_types: Vec<&Type> = subs.iter().map(|s| &s.ty).collect();
+    let field_chains: Vec<TokenStream2> = subs.iter().map(|s| chain_ty(&s.chain)).collect();
+    // What `update` reads and `new` gets, per subscription.
+    let input_types: Vec<TokenStream2> = subs
+        .iter()
+        .zip(&field_chains)
+        .map(|(s, c)| {
+            let t = &s.ty;
+            quote!(<#c as #krate::SelectChain<<#t as #krate::Node>::Output>>::Out)
+        })
+        .collect();
+    let init_types: Vec<TokenStream2> = subs
+        .iter()
+        .zip(&field_chains)
+        .map(|(s, c)| {
+            let t = &s.ty;
+            quote!(<#c as #krate::SelectChain<<#t as #krate::Node>::Output>>::Init<#lt, #t>)
+        })
+        .collect();
 
     // Subscriptions with the same type (compared as written) share one
     // dependency: `Deps` lists each type once and both fields get the same
     // reference. (Two spellings of one type, e.g. via an alias, stay two
     // entries, told apart by their position; the plan stores the type once.)
-    let mut unique: Vec<(String, &Type)> = Vec::new();
+    let mut unique: Vec<(String, &Type, &TokenStream2)> = Vec::new();
     let mut slot_of: Vec<usize> = Vec::new();
-    for t in &field_types {
-        let key = quote!(#t).to_string();
-        let i = match unique.iter().position(|(k, _)| *k == key) {
+    for (t, c) in field_types.iter().zip(&field_chains) {
+        let key = format!("{} => {}", quote!(#t), c);
+        let i = match unique.iter().position(|(k, _, _)| *k == key) {
             Some(i) => i,
             None => {
-                unique.push((key, t));
+                unique.push((key, t, c));
                 unique.len() - 1
             }
         };
@@ -283,12 +350,14 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     // entries in a leaf, exactly `ARITY` children in an inner node.
     let all: Vec<usize> = (0..unique.len()).collect();
     let tree = Shape::build(&all);
-    let types: Vec<&Type> = unique.iter().map(|(_, t)| *t).collect();
+    let types: Vec<&Type> = unique.iter().map(|(_, t, _)| *t).collect();
+    let chains: Vec<&TokenStream2> = unique.iter().map(|(_, _, c)| *c).collect();
     // Each entry is tagged with its position in the unique list: two entries
     // naming one type through different spellings stay two entries of the plan.
     let deps_ty = tree.render(&|i| {
         let t = types[i];
-        quote!(#krate::Sub<#t, #i>)
+        let c = chains[i];
+        quote!(#krate::Sub<#t, #c, #i>)
     });
     let deps_pat = tree.render(&|i| {
         let v = &vars[i];
@@ -342,14 +411,14 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
 
             #[doc = #doc]
             pub struct #input_name #input_decl_generics #input_where {
-                #( pub #field_names: &#lt <#field_types as #krate::Node>::Output, )*
+                #( pub #field_names: &#lt #input_types, )*
                 #[doc(hidden)]
                 pub __marker: #marker_ty,
             }
 
             #[doc = #init_doc]
             pub struct #init_name #input_decl_generics #input_where {
-                #( pub #field_names: #krate::InitOf<#lt, #field_types>, )*
+                #( pub #field_names: #init_types, )*
                 #[doc(hidden)]
                 pub __marker: #marker_ty,
             }
@@ -485,4 +554,88 @@ mod tests {
         let sizes: Vec<usize> = cs.iter().map(|c| { let mut v = vec![]; flatten(c, &mut v); v.len() }).collect();
         assert_eq!(sizes, [56, 44, 0, 0, 0, 0, 0, 0]);
     }
+}
+
+/// `#[derive(Demux)]` on an enum: a module named after the enum in snake_case
+/// with one selector (a zero-sized type implementing `Select<Enum>`) per
+/// variant, usable in subscriptions: `#[subscribe(p: Packets => packet::Depth)]`.
+/// Variants must be unit variants (the selected part is `()`) or tuple variants
+/// with exactly one field (the selected part is that field). The key of a
+/// selector is the index of its variant.
+#[proc_macro_derive(Demux)]
+pub fn derive_demux(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    expand_demux(input).unwrap_or_else(|e| e.to_compile_error()).into()
+}
+
+fn snake_case(name: &str) -> String {
+    let mut out = String::new();
+    let chars: Vec<char> = name.chars().collect();
+    for (i, &c) in chars.iter().enumerate() {
+        if c.is_uppercase() {
+            let prev_lower = i > 0 && (chars[i - 1].is_lowercase() || chars[i - 1].is_ascii_digit());
+            let acronym_end = i > 0 && chars[i - 1].is_uppercase() && chars.get(i + 1).is_some_and(|n| n.is_lowercase());
+            if prev_lower || acronym_end {
+                out.push('_');
+            }
+            out.extend(c.to_lowercase());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn expand_demux(input: DeriveInput) -> syn::Result<TokenStream2> {
+    let krate = quote!(::dataflow_flat);
+    let name = &input.ident;
+    let syn::Data::Enum(data) = &input.data else {
+        return Err(syn::Error::new_spanned(&input.ident, "Demux can only be derived for enums"));
+    };
+    if !input.generics.params.is_empty() {
+        return Err(syn::Error::new_spanned(&input.generics, "Demux does not support generic enums"));
+    }
+    let vis = &input.vis;
+    let module = Ident::new(&snake_case(&name.to_string()), name.span());
+    let mut items = Vec::new();
+    let mut structs = Vec::new();
+    for (key, v) in data.variants.iter().enumerate() {
+        let key = key as u32;
+        let vname = &v.ident;
+        let (out_ty, pat, val) = match &v.fields {
+            syn::Fields::Unit => (quote!(()), quote!(#name::#vname), quote!(&())),
+            syn::Fields::Unnamed(f) if f.unnamed.len() == 1 => {
+                let t = &f.unnamed[0].ty;
+                (quote!(#t), quote!(#name::#vname(__m)), quote!(__m))
+            }
+            other => {
+                return Err(syn::Error::new_spanned(
+                    other,
+                    "Demux supports unit variants and tuple variants with exactly one field",
+                ))
+            }
+        };
+        structs.push(quote!(pub struct #vname;));
+        items.push(quote! {
+            impl #krate::Select<#name> for #module::#vname {
+                type Out = #out_ty;
+                const KEY: u32 = #key;
+                #[inline(always)]
+                fn select(__x: &#name) -> ::core::option::Option<&#out_ty> {
+                    match __x {
+                        #pat => ::core::option::Option::Some(#val),
+                        _ => ::core::option::Option::None,
+                    }
+                }
+            }
+        });
+    }
+    // The impls are outside the module so that the variants' field types
+    // resolve where the enum is written (a selector may share a name with a type).
+    Ok(quote! {
+        #vis mod #module {
+            #(#structs)*
+        }
+        #(#items)*
+    })
 }

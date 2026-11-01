@@ -91,6 +91,7 @@ mod identity;
 mod node;
 mod pipeline;
 mod plan;
+mod select;
 mod sinks;
 mod store;
 mod table;
@@ -99,7 +100,10 @@ pub use build::{BuildError, Configs};
 pub use component::{Component, ComponentSubscription, DepList, Sub};
 pub use node::{InitOf, Node, Root};
 pub use pipeline::Pipeline;
-pub use plan::MAX_COMPONENTS;
+pub use plan::{MAX_COMPONENTS, MAX_DECISIONS, MAX_EDGES, MAX_TERMS};
+pub use select::{option, Select, GUARD};
+#[doc(hidden)]
+pub use select::SelectChain;
 pub use sinks::{SinkList, Sinks};
 
 // Used by the derives' output.
@@ -107,4 +111,4 @@ pub use sinks::{SinkList, Sinks};
 pub use node::{CompKind, RootKind, __private, KIND_COMPONENT, KIND_ROOT};
 
 // The derive macros share their names with the traits, in the macro namespace.
-pub use dataflow_macros::{ComponentSubscription, Root};
+pub use dataflow_macros::{ComponentSubscription, Demux, Root};

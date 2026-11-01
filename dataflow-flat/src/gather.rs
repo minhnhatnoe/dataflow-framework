@@ -12,9 +12,11 @@
 use std::marker::PhantomData;
 
 use crate::component::{DepList, Sub};
+use crate::drive::{FiredOf, FiredOps};
 use crate::identity::At;
 use crate::node::{CompKind, Is, Node, NodeKind, RootKind};
-use crate::plan::Planned;
+use crate::plan::{Planned, NO_FLAG};
+use crate::select::{Select, SelectChain};
 use crate::store::AtPos;
 
 /// The storage types of one pipeline (implemented for its `Anchor`).
@@ -30,6 +32,8 @@ pub trait Layout: Planned {
     type StatesOpt: crate::store::Empty + crate::store::Finish<Done = Self::States>;
     /// `Outs` with every output still to be produced.
     type OutsOpt: crate::store::Empty + crate::store::Finish<Done = Self::Outs>;
+    /// The `fired` flags of a push.
+    type Fired: crate::drive::FiredOps;
 }
 
 /// Component position of node `N` in the plan of `A`.
@@ -47,6 +51,8 @@ pub trait SourceKind<N: Node, A: Layout>: NodeKind {
     fn fetch<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a N::Output;
     /// What `new` is given while the pipeline is built.
     fn seed<'a>(outs: &'a A::OutsOpt) -> <Self as NodeKind>::Init<'a, N>;
+    /// Did the node fire in this step?
+    fn fires(fired: &FiredOf<A>) -> bool;
 }
 
 impl<N: Node<Kind = RootKind>, A: Layout> SourceKind<N, A> for RootKind
@@ -59,6 +65,10 @@ where
     }
     #[inline]
     fn seed<'a>(_: &'a A::OutsOpt) {}
+    #[inline(always)]
+    fn fires(_: &FiredOf<A>) -> bool {
+        true
+    }
 }
 
 impl<N: Node<Kind = CompKind>, A: Layout> SourceKind<N, A> for CompKind
@@ -76,6 +86,17 @@ where
             .as_ref()
             .expect("a subscription is constructed before its subscriber")
     }
+    #[inline(always)]
+    fn fires(fired: &FiredOf<A>) -> bool {
+        // A component nobody's condition reads has no flag, and nobody asks
+        // (the plan gives a flag to every component a conditional component
+        // reads).
+        if FlagOf::<A, N>::ALWAYS || FlagOf::<A, N>::FLAG == NO_FLAG {
+            true
+        } else {
+            fired.get(FlagOf::<A, N>::FLAG)
+        }
+    }
 }
 
 /// A node that can be read in the pipeline `A`.
@@ -83,6 +104,7 @@ where
 pub trait Source<A: Layout>: Node {
     fn fetch<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a Self::Output;
     fn seed<'a>(outs: &'a A::OutsOpt) -> crate::node::InitOf<'a, Self>;
+    fn fires(fired: &FiredOf<A>) -> bool;
 }
 impl<A: Layout, N: Node> Source<A> for N
 where
@@ -96,6 +118,10 @@ where
     fn seed<'a>(outs: &'a A::OutsOpt) -> crate::node::InitOf<'a, N> {
         <N::Kind as SourceKind<N, A>>::seed(outs)
     }
+    #[inline(always)]
+    fn fires(fired: &FiredOf<A>) -> bool {
+        <N::Kind as SourceKind<N, A>>::fires(fired)
+    }
 }
 
 /// The inputs of one component's `update`, read from the pushed root and the
@@ -105,12 +131,12 @@ pub trait GatherIn<A: Layout>: DepList {
     fn gather<'a>(root: &'a A::Root, outs: &'a A::Outs) -> Self::Inputs<'a>;
 }
 macro_rules! gather_in_leaf {
-    ([$($E:ident $I:ident)*]) => {
-        impl<A: Layout, $($E: Source<A>, const $I: usize,)*> GatherIn<A> for ($(Sub<$E, $I>,)*) {
+    ([$($E:ident $C:ident $I:ident)*]) => {
+        impl<A: Layout, $($E: Source<A>, $C: SelectChain<<$E as Node>::Output>, const $I: usize,)*> GatherIn<A> for ($(Sub<$E, $C, $I>,)*) {
             #[inline]
             #[allow(unused_variables)]
             fn gather<'a>(root: &'a A::Root, outs: &'a A::Outs) -> Self::Inputs<'a> {
-                ($(<$E as Source<A>>::fetch(root, outs),)*)
+                ($(<$C as SelectChain<<$E as Node>::Output>>::get(<$E as Source<A>>::fetch(root, outs)),)*)
             }
         }
     };
@@ -134,12 +160,12 @@ pub trait GatherInit<A: Layout>: DepList {
     fn gather<'a>(outs: &'a A::OutsOpt) -> Self::Inits<'a>;
 }
 macro_rules! gather_init_leaf {
-    ([$($E:ident $I:ident)*]) => {
-        impl<A: Layout, $($E: Source<A>, const $I: usize,)*> GatherInit<A> for ($(Sub<$E, $I>,)*) {
+    ([$($E:ident $C:ident $I:ident)*]) => {
+        impl<A: Layout, $($E: Source<A>, $C: ChainSeed<$E, A>, const $I: usize,)*> GatherInit<A> for ($(Sub<$E, $C, $I>,)*) {
             #[inline]
             #[allow(unused_variables)]
             fn gather<'a>(outs: &'a A::OutsOpt) -> Self::Inits<'a> {
-                ($(<$E as Source<A>>::seed(outs),)*)
+                ($(<$C as ChainSeed<$E, A>>::seed(outs),)*)
             }
         }
     };
@@ -156,3 +182,67 @@ macro_rules! gather_init_inner {
     };
 }
 dataflow_macros::inner_shape!(gather_init_inner);
+
+/// What `new` is given for an edge with this selector chain from node `N`: the
+/// stored output for a plain edge, `()` for a selected one.
+#[doc(hidden)]
+pub trait ChainSeed<N: Node, A: Layout>: SelectChain<N::Output> {
+    fn seed<'a>(outs: &'a A::OutsOpt) -> <Self as SelectChain<N::Output>>::Init<'a, N>;
+}
+impl<N: Source<A>, A: Layout> ChainSeed<N, A> for () {
+    #[inline]
+    fn seed<'a>(outs: &'a A::OutsOpt) -> crate::node::InitOf<'a, N> {
+        <N as Source<A>>::seed(outs)
+    }
+}
+impl<N: Node, A: Layout, S: Select<N::Output>, T: SelectChain<S::Out>> ChainSeed<N, A> for (S, T) {
+    #[inline]
+    fn seed<'a>(_: &'a A::OutsOpt) {}
+}
+
+// ---------------------------------------------------------------------------
+// Firing
+// ---------------------------------------------------------------------------
+
+/// The plan's facts about node `N` in pipeline `A`, as constants.
+#[doc(hidden)]
+pub struct FlagOf<A, N>(PhantomData<(A, N)>);
+impl<A: Planned, N: Node> FlagOf<A, N> {
+    /// Does `N` run in every step?
+    pub const ALWAYS: bool = A::PLAN.always_idx(At::<A, N>::INDEX);
+    /// Its `fired` flag.
+    pub const FLAG: usize = A::PLAN.flag_idx(At::<A, N>::INDEX);
+}
+
+/// Has any edge of a subscription tree fired? An edge fires if its node fired
+/// and its selectors match the node's current value (the pushed root, or the
+/// stored output).
+#[doc(hidden)]
+pub trait Ready<A: Layout>: DepList {
+    fn ready(root: &A::Root, outs: &A::Outs, fired: &FiredOf<A>) -> bool;
+}
+macro_rules! ready_leaf {
+    ([$($E:ident $C:ident $I:ident)*]) => {
+        impl<A: Layout, $($E: Source<A>, $C: SelectChain<<$E as Node>::Output>, const $I: usize,)*> Ready<A> for ($(Sub<$E, $C, $I>,)*) {
+            #[inline(always)]
+            #[allow(unused_variables)]
+            fn ready(root: &A::Root, outs: &A::Outs, fired: &FiredOf<A>) -> bool {
+                false $(|| (<$E as Source<A>>::fires(fired)
+                    && (<$C as SelectChain<<$E as Node>::Output>>::PLAIN
+                        || <$C as SelectChain<<$E as Node>::Output>>::matches(<$E as Source<A>>::fetch(root, outs)))))*
+            }
+        }
+    };
+}
+dataflow_macros::leaf_shapes!(ready_leaf);
+macro_rules! ready_inner {
+    ([$($K:ident)*]) => {
+        impl<A: Layout, $($K: Ready<A>,)*> Ready<A> for ($($K,)*) {
+            #[inline(always)]
+            fn ready(root: &A::Root, outs: &A::Outs, fired: &FiredOf<A>) -> bool {
+                false $(|| <$K as Ready<A>>::ready(root, outs, fired))*
+            }
+        }
+    };
+}
+dataflow_macros::inner_shape!(ready_inner);
