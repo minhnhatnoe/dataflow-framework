@@ -574,7 +574,7 @@ def big_math(M, acc):
     return lines
 
 
-def gen_app(out, M, MODE):
+def gen_app(out, M, MODE, big_inline=False):
     app = f"{out}/app"
     write(f"{app}/Cargo.toml", f"""[package]
 name = "app"
@@ -684,6 +684,7 @@ impl Component for Risk {{
     bsubs = ",\n    ".join(f"f{j}: marketlib::Fair<marketlib::{EX[e][2]}, marketlib::catalog::{EX[e][0]}::M{k}>"
                            for j, (e, k) in enumerate(M.big_deps))
     body = "\n        ".join(big_math(M, lambda j: f"i.f{j}"))
+    big_attr = "#[inline(always)]" if big_inline else ""
     write(f"{app}/src/big.rs", f"""//! The big component: wide, with a long body. Lives alone in its file.
 use dataflow_flat::{{Component, ComponentSubscription}};
 use marketlib::DigestCore;
@@ -699,6 +700,7 @@ impl Component for Big {{
     type Config = ();
     type Output = ();
     fn new((): (), _: Self::Init<'_>) -> (Self, ()) {{ (Big {{ core: DigestCore::default() }}, ()) }}
+    {big_attr}
     fn update(&mut self, i: Self::Input<'_>) {{
         {body}
         self.core.step(acc, &BIG);
@@ -1056,6 +1058,7 @@ def main():
     ap.add_argument("--markets", help="L,B,H overrides the size")
     ap.add_argument("--sink-scan", default="8", help="how many of its inputs each order sender / risk samples (or 'all')")
     ap.add_argument("--big-width", type=int, default=42)
+    ap.add_argument("--big-inline", action="store_true", help="mark the framework Big::update #[inline(always)] (user-side hint)")
     ap.add_argument("--core-inline", default="hint", choices=["none", "hint"])
     a = ap.parse_args()
     if a.markets:
@@ -1081,7 +1084,7 @@ members = ["marketlib", "app", "baseline", "runner"]
     if os.path.exists(f"{LIB}/Cargo.lock") and not os.path.exists(f"{out}/Cargo.lock"):
         shutil.copy(f"{LIB}/Cargo.lock", f"{out}/Cargo.lock")
     gen_lib(out, M, a.mode, a.core_inline)
-    gen_app(out, M, a.mode)
+    gen_app(out, M, a.mode, a.big_inline)
     gen_baseline(out, M, a.mode, a.core_inline)
     gen_runner(out, M, a.mode)
     print(f"{out}: mode={a.mode} markets L/B/H={M.n} components={M.components()} crosses={len(M.cross)} edges~{M.edges()}")
