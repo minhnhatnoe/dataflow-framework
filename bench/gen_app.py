@@ -583,6 +583,7 @@ marketlib = {{ path = "../marketlib" }}
     mods = "\n".join(f"pub mod {m};" for m, _, _ in EX)
     write(f"{app}/src/lib.rs", f"""//! The app: wiring only. Components come from `marketlib`; this crate says which markets exist, joins
 //! them across venues and defines the sinks.
+#![allow(long_running_const_eval)]
 {mods}
 pub mod big;
 pub mod cross;
@@ -942,6 +943,7 @@ baseline = { path = "../baseline", optional = true }
 dataflow-flat = { path = "%s/dataflow-flat", optional = true }
 """ % LIB)
     write(f"{r}/src/main.rs", f"""//! usage: runner [--packets N] [--reps R] [--rounds K] [--all]
+#![allow(long_running_const_eval)]
 //! Verifies framework == baseline (checksums), then times them in alternating rounds and prints
 //! `RESULT <side> min=<ns/packet> median=<ns/packet>` lines.
 use marketlib::{{feed_gen, stats}};
