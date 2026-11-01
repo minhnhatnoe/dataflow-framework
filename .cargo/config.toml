@@ -1,0 +1,3 @@
+[build]
+# Without this, exported_generic_symbols re-runs on any edit that changes a line's length (dev rebuild on 823 components 4.9 s vs 0.8 s).
+rustflags = ["-Zshare-generics=n"]

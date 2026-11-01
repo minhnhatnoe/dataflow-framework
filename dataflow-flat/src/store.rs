@@ -234,3 +234,61 @@ macro_rules! finish_impl {
     };
 }
 dataflow_macros::select_tuples!(finish_impl);
+
+// ---------------------------------------------------------------------------
+// Blocks: the nominal nodes of the tree (see `flat::Blk`)
+// ---------------------------------------------------------------------------
+
+use crate::flat::{Blk, Fields};
+
+impl<R: Fields<M, LO, HI>, M: Mapper, const LO: usize, const HI: usize> Span for Blk<R, M, LO, HI> {
+    const LO: usize = LO;
+    const HI: usize = HI;
+}
+impl<R: Fields<M, LO, HI>, M: Mapper, const LO: usize, const HI: usize, const P: usize> SelP<P>
+    for Blk<R, M, LO, HI>
+{
+    const POS: usize = 0;
+}
+impl<R: Fields<M, LO, HI>, M: Mapper, V, const LO: usize, const HI: usize, const P: usize> Access<V, P, 0>
+    for Blk<R, M, LO, HI>
+where
+    <R as Fields<M, LO, HI>>::F: SelP<P> + Access<V, P, { <<R as Fields<M, LO, HI>>::F as SelP<P>>::POS }>,
+{
+    #[inline]
+    fn get(&self) -> &V {
+        Access::<V, P, { <<R as Fields<M, LO, HI>>::F as SelP<P>>::POS }>::get(&self.0)
+    }
+    #[inline]
+    fn get_mut(&mut self) -> &mut V {
+        Access::<V, P, { <<R as Fields<M, LO, HI>>::F as SelP<P>>::POS }>::get_mut(&mut self.0)
+    }
+}
+impl<R: Fields<M, LO, HI>, M: Mapper, const LO: usize, const HI: usize> Empty for Blk<R, M, LO, HI>
+where
+    <R as Fields<M, LO, HI>>::F: Empty,
+{
+    const EMPTY: Self = Blk(<<R as Fields<M, LO, HI>>::F as Empty>::EMPTY);
+}
+
+/// A mapper for a value still being constructed, and the mapper it becomes.
+#[doc(hidden)]
+pub trait OptMapper: Mapper {
+    type Done: Mapper;
+}
+impl OptMapper for StateOptM {
+    type Done = StateM;
+}
+impl OptMapper for OutOptM {
+    type Done = OutM;
+}
+impl<R, M: OptMapper, const LO: usize, const HI: usize> Finish for Blk<R, M, LO, HI>
+where
+    R: Fields<M, LO, HI> + Fields<M::Done, LO, HI>,
+    <R as Fields<M, LO, HI>>::F: Finish<Done = <R as Fields<M::Done, LO, HI>>::F>,
+{
+    type Done = Blk<R, M::Done, LO, HI>;
+    fn finish(self) -> Self::Done {
+        Blk(self.0.finish())
+    }
+}

@@ -69,6 +69,12 @@ def mname(e, b):
     return [f"{t}-PERP", f"{t}USDT", t][e]
 
 
+CARGO_CONFIG = """[build]
+# Without this, exported_generic_symbols re-runs on any edit that changes a line's length (dev rebuild 4.9 s vs 0.8 s).
+rustflags = ["-Zshare-generics=n"]
+"""
+
+
 def write(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
@@ -1098,6 +1104,7 @@ resolver = "2"
 members = ["marketlib", "app", "baseline", "runner"]
 """)
     shutil.copy(f"{LIB}/rust-toolchain.toml", f"{out}/rust-toolchain.toml")
+    write(f"{out}/.cargo/config.toml", CARGO_CONFIG)
     if os.path.exists(f"{LIB}/Cargo.lock") and not os.path.exists(f"{out}/Cargo.lock"):
         shutil.copy(f"{LIB}/Cargo.lock", f"{out}/Cargo.lock")
     gen_lib(out, M, a.mode, a.core_inline)
