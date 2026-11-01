@@ -187,6 +187,9 @@ pub trait Symbol: 'static {{
                       "pub fn make_ev(key: u32, body: Body) -> Ev {", "    match key {"]
             lines += [f"        {k} => Ev::M{k}(body)," for k in range(M.n[e])]
             lines += ["        _ => panic!(\"no such market\"),", "    }", "}"]
+            lines += ["pub fn key_of(e: &Ev) -> u32 {", "    match e {"]
+            lines += [f"        Ev::M{k}(_) => {k}," for k in range(M.n[e])]
+            lines += ["    }", "}"]
         for k in range(M.n[e]):
             extra = f" type Ev = Ev; type Sel = ev::M{k};" if ENUM else ""
             if ON:
@@ -963,7 +966,8 @@ dataflow-flat = { path = "%s/dataflow-flat", optional = true }
     let npk = pk.len();
     eprintln!("packets {npk}");
 """
-    write(f"{r}/src/main.rs", f"""//! usage: runner [--packets N] [--reps R] [--rounds K] [--all]
+    KEYOF = "marketlib::catalog::{}::key_of(f)" if mode == "enum" else "f.key"
+    write(f"{r}/src/main.rs", f"""//! usage: runner [--packets N] [--reps R] [--rounds K] [--all] [--keys N] [--sort]
 //! Verifies framework == baseline (checksums), then times them in alternating rounds and prints
 //! `RESULT <side> min=<ns/packet> median=<ns/packet>` lines.
 use marketlib::{{feed_gen, stats}};
@@ -984,6 +988,14 @@ fn main() {{
     let with_all = std::env::args().any(|x| x == "--all");
     let pk = feed_gen::packets(npk, COUNTS, 0x5EED);
 {KINDF}
+    // --keys N: keep only packets whose key is below N; --sort: order the packets by (exchange, key), stable,
+    // so that dispatch is predictable (the sorted/unsorted experiment)
+    let wkey = |w: &Wire| match w {{ Wire::Lighter(f) => (0, {KEYOF.format('lighter')}), Wire::Binance(f) => (1, {KEYOF.format('binance')}), Wire::Hyper(f) => (2, {KEYOF.format('hyper')}) }};
+    let mut pk = pk;
+    let keys = arg("--keys", usize::MAX);
+    if keys != usize::MAX {{ pk.retain(|w| (wkey(w).1 as usize) < keys); eprintln!("packets with key < {{keys}}: {{}}", pk.len()); }}
+    if std::env::args().any(|x| x == "--sort") {{ pk.sort_by_key(|w| wkey(w)); }}
+    let npk = pk.len();
     #[cfg(feature = "fw")]
     let mut fw = app::build();
     #[cfg(feature = "fw")]
