@@ -577,6 +577,11 @@ def big_math(M, acc):
     return lines
 
 
+def ALLOW(M):
+    """Apps above ~1,500 components need the long-running-const-eval allow (user decision)."""
+    return "#![allow(long_running_const_eval)]\n" if M.components() > 1500 else ""
+
+
 def gen_app(out, M, MODE, big_inline=False):
     app = f"{out}/app"
     write(f"{app}/Cargo.toml", f"""[package]
@@ -591,7 +596,7 @@ marketlib = {{ path = "../marketlib" }}
     mods = "\n".join(f"pub mod {m};" for m, _, _ in EX)
     write(f"{app}/src/lib.rs", f"""//! The app: wiring only. Components come from `marketlib`; this crate says which markets exist, joins
 //! them across venues and defines the sinks.
-{mods}
+{ALLOW(M)}{mods}
 pub mod big;
 pub mod cross;
 pub mod risk;
@@ -972,7 +977,7 @@ dataflow-flat = { path = "%s/dataflow-flat", optional = true }
     write(f"{r}/src/main.rs", f"""//! usage: runner [--packets N] [--reps R] [--rounds K] [--all] [--keys N] [--sort]
 //! Verifies framework == baseline (checksums), then times them in alternating rounds and prints
 //! `RESULT <side> min=<ns/packet> median=<ns/packet>` lines.
-use marketlib::{{feed_gen, stats}};
+{ALLOW(M)}use marketlib::{{feed_gen, stats}};
 #[allow(unused_imports)] use marketlib::wire::*;
 use std::time::Instant;
 
