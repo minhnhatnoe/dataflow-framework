@@ -1,5 +1,5 @@
 //! Event-driven dataflow, wired at compile time, safe at run time. Requires
-//! nightly. **Status: redesign in progress (phase 1a); see the README and the
+//! nightly. **Status: redesign in progress (phase 1b); see the README and the
 //! event spec.**
 //!
 //! A program is a [`Pipeline<R, Sinks>`](Pipeline): one *root* type `R`
@@ -10,6 +10,26 @@
 //! it and its first output, `update(input)` produces its next output. A push
 //! updates every component downstream of the root once, in a fixed order, and
 //! the outputs are stored in the pipeline between pushes.
+//!
+//! # Selectors and conditions
+//!
+//! A subscription may carry a chain of *selectors* applied to the parent's
+//! output, left to right: `#[subscribe(upd: Venue => Some, payload::Depth)]`
+//! (see [`Select`]; `#[derive(Demux)]` on an enum makes one selector per
+//! variant, `Some`/`None` are in [`option`], a guard is a hand-written `Select`
+//! with `KEY = GUARD`). The field of the input is the chain's final part. An
+//! edge *fires* iff its parent fired and every selector matched; a component
+//! runs iff any of its edges fired (the root fires on every push, a component
+//! fires iff it ran) and otherwise its stored output is what its subscribers
+//! read. The plan computes each component's *condition* (a set of terms, each a
+//! set of selector decisions) and checks, at compile time, that after absorption
+//! the terms are pairwise exclusive (otherwise "<C> joins branches that can fire
+//! in the same step"), that a component reads a selected edge only when its own
+//! condition implies the edge fires ("<C> reads <N> through selectors in steps
+//! where they do not match; subscribe to a component that stores it"), and that
+//! every component is reachable from the root. A component whose condition is
+//! "always" has no check in the push; the others test their edges' flags, which
+//! LLVM keeps in registers. See `plan` for the data model.
 //!
 //! # How it works
 //!
