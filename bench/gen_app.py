@@ -880,11 +880,13 @@ pub fn step_big(h: &mut Hand) {{ let d = big_digest(h); h.big.step(d, &BIG) }}
                 run.append(f"                marketlib::catalog::{mod}::Ev::M{k}(b) => m_{e}_{k}(h, b),")
             run.append("            },")
         else:
-            run.append(f"            Wire::{var}(f) => match f.key {{")
+            # BASE_COPY=1 (experiment): dispatch on a copy of the frame that went through memory, as the framework does
+            cp = bool(os.environ.get("BASE_COPY"))
+            run.append(f"            Wire::{var}(f0) => {{ let f = {'std::hint::black_box(*f0)' if cp else '*f0'}; match f.key {{")
             for k in range(ns[e]):
                 run.append(f"                {k} => m_{e}_{k}(h, &f.body),")
             run.append("                _ => {}")
-            run.append("            },")
+            run.append("            } }")
     run += ["        }", "    }", "}"]
     write(f"{b}/src/arms.rs", "\n".join(arms) + "\n" + "\n".join(run) + "\n")
     # run_all (phase 1a semantics: every component, every packet)
