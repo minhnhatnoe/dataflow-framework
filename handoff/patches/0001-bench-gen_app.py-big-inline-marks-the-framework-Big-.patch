@@ -1,0 +1,59 @@
+From 05a05da02bd5aec342c0cb176783d0d0abb8087a Mon Sep 17 00:00:00 2001
+From: Minh Nhat Noe <86871862+minhnhatnoe@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 12:10:17 -0500
+Subject: [PATCH] bench/gen_app.py: --big-inline marks the framework
+ Big::update inline(always) (user-side hint)
+
+---
+ bench/gen_app.py | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/bench/gen_app.py b/bench/gen_app.py
+index d83c558..a6f1eb2 100755
+--- a/bench/gen_app.py
++++ b/bench/gen_app.py
+@@ -569,7 +569,7 @@ def big_math(M, acc):
+     return lines
+ 
+ 
+-def gen_app(out, M, MODE):
++def gen_app(out, M, MODE, big_inline=False):
+     app = f"{out}/app"
+     write(f"{app}/Cargo.toml", f"""[package]
+ name = "app"
+@@ -679,6 +679,7 @@ impl Component for Risk {{
+     bsubs = ",\n    ".join(f"f{j}: marketlib::Fair<marketlib::{EX[e][2]}, marketlib::catalog::{EX[e][0]}::M{k}>"
+                            for j, (e, k) in enumerate(M.big_deps))
+     body = "\n        ".join(big_math(M, lambda j: f"i.f{j}"))
++    big_attr = "#[inline(always)]" if big_inline else ""
+     write(f"{app}/src/big.rs", f"""//! The big component: wide, with a long body. Lives alone in its file.
+ use dataflow_flat::{{Component, ComponentSubscription}};
+ use marketlib::DigestCore;
+@@ -694,6 +695,7 @@ impl Component for Big {{
+     type Config = ();
+     type Output = ();
+     fn new((): (), _: Self::Init<'_>) -> (Self, ()) {{ (Big {{ core: DigestCore::default() }}, ()) }}
++    {big_attr}
+     fn update(&mut self, i: Self::Input<'_>) {{
+         {body}
+         self.core.step(acc, &BIG);
+@@ -1035,6 +1037,7 @@ def main():
+     ap.add_argument("--markets", help="L,B,H overrides the size")
+     ap.add_argument("--sink-scan", default="8", help="how many of its inputs each order sender / risk samples (or 'all')")
+     ap.add_argument("--big-width", type=int, default=42)
++    ap.add_argument("--big-inline", action="store_true", help="mark the framework Big::update #[inline(always)] (user-side hint)")
+     ap.add_argument("--core-inline", default="hint", choices=["none", "hint"])
+     a = ap.parse_args()
+     if a.markets:
+@@ -1060,7 +1063,7 @@ members = ["marketlib", "app", "baseline", "runner"]
+     if os.path.exists(f"{LIB}/Cargo.lock") and not os.path.exists(f"{out}/Cargo.lock"):
+         shutil.copy(f"{LIB}/Cargo.lock", f"{out}/Cargo.lock")
+     gen_lib(out, M, a.mode, a.core_inline)
+-    gen_app(out, M, a.mode)
++    gen_app(out, M, a.mode, a.big_inline)
+     gen_baseline(out, M, a.mode, a.core_inline)
+     gen_runner(out, M)
+     print(f"{out}: mode={a.mode} markets L/B/H={M.n} components={M.components()} crosses={len(M.cross)} edges~{M.edges()}")
+-- 
+2.43.0
+
