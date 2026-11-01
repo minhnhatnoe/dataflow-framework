@@ -292,8 +292,12 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
             let ty = &s.ty;
             let chain = chain_ty(&s.chain);
             wc.predicates.push(parse_quote!(#ty: #krate::Node));
-            wc.predicates
-                .push(parse_quote!(#chain: #krate::SelectChain<<#ty as #krate::Node>::Output>));
+            // A plain subscription needs no predicate (and an extra obligation per
+            // subscription measurably slows type checking).
+            if !s.chain.is_empty() {
+                wc.predicates
+                    .push(parse_quote!(#chain: #krate::SelectChain<<#ty as #krate::Node>::Output>));
+            }
         }
     }
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
@@ -316,7 +320,11 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         .zip(&field_chains)
         .map(|(s, c)| {
             let t = &s.ty;
-            quote!(<#c as #krate::SelectChain<<#t as #krate::Node>::Output>>::Out)
+            if s.chain.is_empty() {
+                quote!(<#t as #krate::Node>::Output)
+            } else {
+                quote!(<#c as #krate::SelectChain<<#t as #krate::Node>::Output>>::Out)
+            }
         })
         .collect();
     let init_types: Vec<TokenStream2> = subs
@@ -324,7 +332,11 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         .zip(&field_chains)
         .map(|(s, c)| {
             let t = &s.ty;
-            quote!(<#c as #krate::SelectChain<<#t as #krate::Node>::Output>>::Init<#lt, #t>)
+            if s.chain.is_empty() {
+                quote!(#krate::InitOf<#lt, #t>)
+            } else {
+                quote!(<#c as #krate::SelectChain<<#t as #krate::Node>::Output>>::Init<#lt, #t>)
+            }
         })
         .collect();
 
