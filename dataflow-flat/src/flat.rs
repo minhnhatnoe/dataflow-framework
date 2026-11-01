@@ -329,20 +329,55 @@ where
     type Cl = <() as ClassOf<{ Rng::<LO, HI, K>::C }>>::Ty;
 }
 
-/// The balanced tuple over component positions `LO..HI`, of class `Cl`, whose
-/// element at position `P` is `Slot<P, M::Of<the node at P>>`.
+/// The piece of the flat storage over component positions `LO..HI`, of class
+/// `Cl`: `()` for an empty range, otherwise the *nominal* block
+/// [`Blk<R, M, LO, HI>`](Blk), whose element at position `P` is
+/// `Slot<P, M::Of<the node at P>>`.
+///
+/// The block is a named struct so that its type (and so every symbol and
+/// query key that mentions it) stays small however many components lie below
+/// it. A plain nested tuple would spell out all its descendants: the symbol
+/// names of the lookup functions would then be as long as the range, which
+/// made compile time and memory quadratic in the number of components.
 #[doc(hidden)]
 pub trait FlatSpec<M: Mapper, const LO: usize, const HI: usize, Cl>: Planned {
     type T;
 }
+impl<R: Planned, M: Mapper, const LO: usize, const HI: usize> FlatSpec<M, LO, HI, Leaf<0>> for R {
+    type T = ();
+}
+macro_rules! flat_piece {
+    ($($n:literal)*) => {$(
+        impl<R: Planned, M: Mapper, const LO: usize, const HI: usize> FlatSpec<M, LO, HI, Leaf<$n>> for R
+        where
+            R: Fields<M, LO, HI>,
+        {
+            type T = Blk<R, M, LO, HI>;
+        }
+    )*};
+}
+flat_piece!(1 2 3 4 5 6 7 8);
+impl<R: Planned, M: Mapper, const LO: usize, const HI: usize> FlatSpec<M, LO, HI, Inner> for R
+where
+    R: Fields<M, LO, HI>,
+{
+    type T = Blk<R, M, LO, HI>;
+}
+
+/// The fields of a block of class `Cl`: a tuple of slots (leaf) or of the
+/// child pieces (inner).
+#[doc(hidden)]
+pub trait BlkF<M: Mapper, const LO: usize, const HI: usize, Cl>: Planned {
+    type F;
+}
 
 macro_rules! flat_leaf {
     ($n:literal; $($k:literal)*) => {
-        impl<R: Planned, M: Mapper, const LO: usize, const HI: usize> FlatSpec<M, LO, HI, Leaf<$n>> for R
+        impl<R: Planned, M: Mapper, const LO: usize, const HI: usize> BlkF<M, LO, HI, Leaf<$n>> for R
         where
             $(R: NthT<{ LO + $k }>,)*
         {
-            type T = ($(Slot<{ LO + $k }, M::Of<<R as NthT<{ LO + $k }>>::T>>,)*);
+            type F = ($(Slot<{ LO + $k }, M::Of<<R as NthT<{ LO + $k }>>::T>>,)*);
         }
     };
 }
@@ -350,16 +385,54 @@ dataflow_macros::leaf_idx!(flat_leaf);
 
 macro_rules! flat_inner {
     ($($k:literal)*) => {
-        impl<R: Planned, M: Mapper, const LO: usize, const HI: usize> FlatSpec<M, LO, HI, Inner> for R
+        impl<R: Planned, M: Mapper, const LO: usize, const HI: usize> BlkF<M, LO, HI, Inner> for R
         where
             $(Rng<LO, HI, $k>: RngTy,
               R: FlatSpec<M, { Rng::<LO, HI, $k>::L }, { Rng::<LO, HI, $k>::H }, <Rng<LO, HI, $k> as RngTy>::Cl>,)*
         {
-            type T = ($(<R as FlatSpec<M, { Rng::<LO, HI, $k>::L }, { Rng::<LO, HI, $k>::H }, <Rng<LO, HI, $k> as RngTy>::Cl>>::T,)*);
+            type F = ($(<R as FlatSpec<M, { Rng::<LO, HI, $k>::L }, { Rng::<LO, HI, $k>::H }, <Rng<LO, HI, $k> as RngTy>::Cl>>::T,)*);
         }
     };
 }
 dataflow_macros::inner_idx!(flat_inner);
+
+#[doc(hidden)]
+pub struct Span2<const LO: usize, const HI: usize>;
+impl<const LO: usize, const HI: usize> Span2<LO, HI> {
+    pub const C: usize = class(LO, HI);
+}
+
+#[doc(hidden)]
+pub trait Cls2 {
+    type Cl;
+}
+impl<const LO: usize, const HI: usize> Cls2 for Span2<LO, HI>
+where
+    (): ClassOf<{ Span2::<LO, HI>::C }>,
+{
+    type Cl = <() as ClassOf<{ Span2::<LO, HI>::C }>>::Ty;
+}
+
+/// [`BlkF`] with the class of the range resolved.
+#[doc(hidden)]
+pub trait Fields<M: Mapper, const LO: usize, const HI: usize>: Planned {
+    type F;
+}
+impl<R: Planned, M: Mapper, const LO: usize, const HI: usize> Fields<M, LO, HI> for R
+where
+    Span2<LO, HI>: Cls2,
+    R: BlkF<M, LO, HI, <Span2<LO, HI> as Cls2>::Cl>,
+{
+    type F = <R as BlkF<M, LO, HI, <Span2<LO, HI> as Cls2>::Cl>>::F;
+}
+
+/// A block of the flat storage: the slots of the component positions
+/// `LO..HI` of pipeline `R`, as a leaf tuple of slots or a tuple of 8 child
+/// pieces.
+#[doc(hidden)]
+pub struct Blk<R: Fields<M, LO, HI>, M: Mapper, const LO: usize, const HI: usize>(
+    pub <R as Fields<M, LO, HI>>::F,
+);
 
 /// The range of all component positions of `R`.
 #[doc(hidden)]
