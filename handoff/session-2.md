@@ -125,6 +125,27 @@ Query-level reuse has never been measured: the only self-profile attempt could n
 
 4,079 release: master 3:52, 14.63 GB; Blk 3:33, 6.17 GB. Typical run time equal (107.5). Typical release app 13.3 vs 14.0 s. Dev initial 17.8 vs 11.3 s. Same-length edit about 1.9 vs 0.85 s. Longer edit (6 alternating rounds) about 2.3 vs 5.05 s. Cold check at 2,704: 26.7 vs 43.6 s. Fails the "no worse on dev rebuilds" condition because of the longer edit. Perps (12,412) on Blk stops at "push program is too large: raise the list pool" (plan.rs), so a pool cap has to be raised to try that size.
 
+## Caching and the `Blk` slowdown (2026-11-01)
+
+Self-profile on the typical app (823 components, dev profile). Flags must be identical on every build, including the profile dir: changing any `-Z` flag forces a near-full rebuild of about 10 s. The reader needs `analyzeme`/`decodeme` 12.0.3 for file format 9. Each case was profiled once.
+
+- **Body edit in the app crate: reused, per component.** The plan is not re-evaluated (`eval_to_allocation_raw`: 0 executed) and trait resolution does not re-run. About 9-10k queries execute against 168k loaded on master (231k on `Blk`), `mir_borrowck` runs once per edited file, and 1-4 of 82 codegen units recompile.
+- **Body edit in the library crate: not reused.** About 130-178k `eval_to_allocation_raw` re-execute (about 3.7 s self) with only 1 codegen unit recompiled; 8.2 s on master, 7.5 s on `Blk`. Cause not investigated. `typeck_root` shows only 2 executions in these profiles, so nothing is claimed about per-component type-check in this case.
+- **Not tested:** reuse across different roots or apps.
+
+**Why `Blk` is slower on a length change:** every length change re-runs `exported_generic_symbols`, part of sharing generics between crates. On master it costs about 0.46 s. On `Blk` it takes 2-5.5 s inclusive, because of the normalization and const evaluation it triggers (`try_normalize_generic_arg_after_erasing_regions`, `eval_to_allocation_raw`). Why a length change triggers it, and why `Blk`'s types are so costly there, are not established. Profiled `Blk` walls also differ by edit (6.5 s big only, 3.0 s big + 3 small), unexplained.
+
+Confirmed by turning it off with `RUSTFLAGS=-Zshare-generics=n` (dev rebuilds, 3 rounds, seconds):
+
+| Edit | Master | `Blk` | Master, flag | `Blk`, flag |
+|---|---|---|---|---|
+| Big, same length | 1.8-1.9 | 0.8 | 1.6 | 0.7-0.8 |
+| Big + 3 small, same length | 1.8 | 0.8-0.9 | 1.6-1.7 | 0.8 |
+| Big + 3 small, length changes | 2.2-2.5 | 4.8-4.9 | 1.6-1.7 | 0.8 |
+| First dev build (1 run) | 18.2 | 11.2 | 17.1 | 11.3 |
+
+Not measured with the flag: library edits, release builds, binary size, tests. `Blk` remains unmerged pending the user's decision.
+
 ## Run-time gap: state and next step (2026-11-01)
 
 This replaces "mostly closed" above: +1.7 ns came from the cloud VM. It is about 8% on the local machine (107.6 vs 99.6 ns, `measure.py` medians).
