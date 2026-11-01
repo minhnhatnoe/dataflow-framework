@@ -90,6 +90,8 @@ fn lifecycle_value<T: Value>(t: &T) -> u64 {
 mod diamond {
     use super::*;
     pub static LOG: Log = Mutex::new(Vec::new());
+    /// Two tests share `LOG`: each holds this while it uses it.
+    pub static LOCK: Mutex<()> = Mutex::new(());
     comp!(LOG, Src, 10, [t: Tick]);
     comp!(LOG, Double, 0, [x: Src]);
     comp!(LOG, Square, 1, [x: Src]);
@@ -99,6 +101,7 @@ mod diamond {
 #[test]
 fn diamond_lifecycle() {
     use diamond::*;
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     take(&LOG);
     {
         let mut p = Pipeline::<Tick, (Sum, Double)>::build(Configs::new()).unwrap();
@@ -258,6 +261,7 @@ fn assert_send<T: Send>() {}
 #[test]
 fn pipeline_is_send_and_movable() {
     use diamond::*;
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     assert_send::<Pipeline<Tick, (Sum, Double)>>();
     take(&LOG);
     let p = Pipeline::<Tick, (Sum,)>::build(Configs::new()).unwrap();

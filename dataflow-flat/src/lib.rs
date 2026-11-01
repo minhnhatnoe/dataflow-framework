@@ -108,6 +108,7 @@ mod drive;
 mod flat;
 mod gather;
 mod identity;
+mod listen;
 mod node;
 mod pipeline;
 mod plan;
@@ -121,7 +122,7 @@ pub use component::{Component, ComponentSubscription, DepList, Sub};
 pub use node::{InitOf, Node, Root};
 pub use pipeline::Pipeline;
 pub use plan::{MAX_COMPONENTS, MAX_DECISIONS, MAX_EDGES, MAX_TERMS};
-pub use select::{option, Select, GUARD};
+pub use select::{option, Keyed, Listener, On, Select, Symbol, GUARD};
 #[doc(hidden)]
 pub use select::SelectChain;
 pub use sinks::{SinkList, Sinks};
