@@ -107,6 +107,7 @@ mod component;
 mod drive;
 mod flat;
 mod gather;
+mod handler;
 mod identity;
 mod listen;
 mod node;
@@ -128,10 +129,13 @@ pub use select::ChainKey;
 #[doc(hidden)]
 pub use select::SelectChain;
 pub use sinks::{SinkList, Sinks};
+pub use handler::{Collect, HandledEdge, UpdateHandler};
+#[doc(hidden)]
+pub use handler::{FeedInit, Hd, HdChain, InitRef};
 
 // Used by the derives' output.
 #[doc(hidden)]
 pub use node::{CompKind, RootKind, __private, KIND_COMPONENT, KIND_ROOT};
 
 // The derive macros share their names with the traits, in the macro namespace.
-pub use dataflow_macros::{ComponentSubscription, Demux, Root};
+pub use dataflow_macros::{ComponentSubscription, Demux, Handler, Root};

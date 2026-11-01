@@ -74,6 +74,11 @@ pub(crate) const PG_SEQ: u8 = 0;
 pub(crate) const PG_RUN: u8 = 1;
 pub(crate) const PG_RUN_IF: u8 = 2;
 pub(crate) const PG_SWITCH: u8 = 3;
+/// A handler component's run: `begin`, the `on_update` of the handled edges listed for
+/// the node, `finish` (see `Plan::mk_hrun`).
+pub(crate) const PG_HRUN: u8 = 4;
+/// Items (handled edges that may fire) of all handler runs in the program.
+const HPOOL: usize = 32768;
 
 /// Sizes of the pools that hold terms (lists of decisions), the lists of
 /// terms of each node, and the names kept for messages.
@@ -157,6 +162,7 @@ const fn enter<N: Node, C: [const] ChainWalk<N::Output>>(plan: &mut Plan, parent
         plan.ids[i] = id;
         plan.kind[i] = N::KIND;
         plan.listener[i] = N::LISTENER;
+        plan.handler[i] = N::HANDLER;
         plan.first_parent[i] = parent;
         plan.first_pos[i] = pos;
         plan.len = i + 1;
@@ -170,7 +176,10 @@ const fn enter<N: Node, C: [const] ChainWalk<N::Output>>(plan: &mut Plan, parent
         } else {
             plan.cur_sub = parent;
             plan.cur_pos = pos;
+            plan.cur_h = false;
             let dn = C::walk(plan, i as u32, NONE);
+            plan.edge_h[e] = plan.cur_h;
+            plan.edge_pos[e] = pos;
             plan.edge_to[e] = i as u32;
             plan.edge_dn[e] = dn;
             plan.edge_next[e] = NONE;
@@ -363,6 +372,18 @@ pub struct Plan {
     /// Is the decision a keyed selector (`On`), and where its name is kept.
     dn_keyed: [bool; MAX_DECISIONS],
     dn_nm: [u32; MAX_DECISIONS],
+    /// Is the node a handler component? Is edge `e` a handled edge, and the entry
+    /// position that named it?
+    handler: [bool; MAX_COMPONENTS],
+    edge_h: [bool; MAX_EDGES],
+    edge_pos: [u32; MAX_EDGES],
+    cur_h: bool,
+    /// Items of handler runs: entry position and mode (bit 0: the parent's flag
+    /// must be read, bit 1: the selectors must be matched).
+    hi_len: usize,
+    hi_pos: [u32; HPOOL],
+    hi_mode: [u8; HPOOL],
+    hi_key: [u32; HPOOL],
     /// Is the node a `Listener`? Its requests: `lk_n[i]` sorted, distinct keys
     /// at `lk_pool[lk_off[i]..]`.
     listener: [bool; MAX_COMPONENTS],
@@ -471,6 +492,14 @@ impl Plan {
             dn_key: [0; MAX_DECISIONS],
             dn_keyed: [false; MAX_DECISIONS],
             dn_nm: [NONE; MAX_DECISIONS],
+            handler: [false; MAX_COMPONENTS],
+            edge_h: [false; MAX_EDGES],
+            edge_pos: [0; MAX_EDGES],
+            cur_h: false,
+            hi_len: 0,
+            hi_pos: [0; HPOOL],
+            hi_mode: [0; HPOOL],
+            hi_key: [0; HPOOL],
             listener: [false; MAX_COMPONENTS],
             lk_off: [0; MAX_COMPONENTS],
             lk_n: [0; MAX_COMPONENTS],
@@ -539,6 +568,11 @@ impl Plan {
             plan.root_prog = plan.new_node(PG_SEQ, 0, 0);
         }
         plan
+    }
+
+    /// The edge being walked is a handled edge (called by the `Hd` chain wrapper).
+    pub(crate) const fn mark_handled(&mut self) {
+        self.cur_h = true;
     }
 
     /// Record the first error.
@@ -831,7 +865,7 @@ impl Plan {
         while e != NONE {
             let u = self.edge_to[e as usize] as usize;
             let d = self.edge_dn[e as usize];
-            if d != NONE {
+            if d != NONE && !self.edge_h[e as usize] {
                 let mut a = 0;
                 while a < n {
                     let t = offs[a];
@@ -876,7 +910,7 @@ impl Plan {
         let always = n == 1 && self.term_len(offs[0]) == 0;
         self.always[i] = always;
         // The firing of the components this one reads is read by its check.
-        if !always {
+        if !always || self.handler[i] {
             let mut e = self.up_head[i];
             while e != NONE {
                 let u = self.edge_to[e as usize] as usize;
@@ -1112,6 +1146,156 @@ impl Plan {
         (false, 0, 0)
     }
 
+    // -- handler components ----------------------------------------------------
+    //
+    // A handler's run is `begin`, one `on_update` per handled edge that fired,
+    // `finish`. Under the context of decisions known to hold, each handled edge
+    // is classified: it fired (its parent ran and its selectors match), it did
+    // not (the parent cannot have run, or a selector decision excludes the
+    // context), or it may have (then the parent's flag and/or the selector match
+    // is tested at run time). Edges that did not fire are not in the list; the
+    // others are listed in execution order of their parents.
+
+    /// Does decision `x` exclude a decision of the context?
+    const fn dec_conflicts(&self, x: usize) -> bool {
+        let mut j = 0;
+        while j < self.ctx_len {
+            let y = self.ctx[j] as usize;
+            if x != y
+                && self.dn_node[x] == self.dn_node[y]
+                && self.dn_prev[x] == self.dn_prev[y]
+                && self.dn_key[x] != self.dn_key[y]
+                && self.dn_key[x] != crate::select::GUARD
+                && self.dn_key[y] != crate::select::GUARD
+            {
+                return true;
+            }
+            j += 1;
+        }
+        false
+    }
+    /// The chain ending at decision `d` under the context: 0 excluded, 1 held, 2 unknown.
+    const fn path_state(&self, d: u32) -> u8 {
+        let mut all = true;
+        let mut x = d;
+        while x != NONE {
+            if self.dec_conflicts(x as usize) {
+                return 0;
+            }
+            if !self.held(x) {
+                all = false;
+            }
+            x = self.dn_prev[x as usize];
+        }
+        if all {
+            1
+        } else {
+            2
+        }
+    }
+    /// Did node `u` run, under the context: 0 no, 1 yes, 2 unknown.
+    const fn ran_state(&self, u: usize) -> u8 {
+        if self.kind[u] == KIND_ROOT {
+            return 1;
+        }
+        let mut any = false;
+        let cn = self.cn[u] as usize;
+        let mut k = 0;
+        while k < cn {
+            let t = self.olist[self.co[u] as usize + k];
+            if !self.conflicts(t) {
+                if self.term_held(t) {
+                    return 1;
+                }
+                any = true;
+            }
+            k += 1;
+        }
+        if any {
+            2
+        } else {
+            0
+        }
+    }
+
+    const fn mk_hrun(&mut self, i: usize, guarded: bool) -> u32 {
+        let start = self.hi_len;
+        let mut e = self.up_head[i];
+        while e != NONE {
+            let eu = e as usize;
+            let u = self.edge_to[eu] as usize;
+            if guarded && self.kind[u] == KIND_COMPONENT && !self.always[u] {
+                self.flag_need[u] = true;
+            }
+            if self.edge_h[eu] {
+                let ps = self.ran_state(u);
+                let cs = if self.edge_dn[eu] == NONE { 1 } else { self.path_state(self.edge_dn[eu]) };
+                if ps != 0 && cs != 0 {
+                    if self.hi_len == HPOOL {
+                        self.fail("too many handled edges in the push program: ", "raise dataflow_flat's HPOOL", "");
+                        return 0;
+                    }
+                    let mode = (if ps == 2 { 1u8 } else { 0 }) | (if cs == 2 { 2u8 } else { 0 });
+                    if ps == 2 && self.kind[u] == KIND_COMPONENT && !self.always[u] {
+                        self.flag_need[u] = true;
+                    }
+                    let key = if self.kind[u] == KIND_ROOT { 0 } else { self.cpos[u] + 1 };
+                    // insertion sort by (parent execution position, entry position)
+                    let mut at = self.hi_len;
+                    while at > start
+                        && (self.hi_key[at - 1] > key || (self.hi_key[at - 1] == key && self.hi_pos[at - 1] > self.edge_pos[eu]))
+                    {
+                        self.hi_key[at] = self.hi_key[at - 1];
+                        self.hi_pos[at] = self.hi_pos[at - 1];
+                        self.hi_mode[at] = self.hi_mode[at - 1];
+                        at -= 1;
+                    }
+                    self.hi_key[at] = key;
+                    self.hi_pos[at] = self.edge_pos[eu];
+                    self.hi_mode[at] = mode;
+                    self.hi_len += 1;
+                }
+            }
+            e = self.edge_next[eu];
+        }
+        let n = self.new_node(PG_HRUN, self.cpos[i], guarded as u32);
+        self.pg_c[n as usize] = start as u32;
+        self.pg_d[n as usize] = (self.hi_len - start) as u32;
+        n
+    }
+
+    /// Handler run: is it guarded by the firing of its edges.
+    pub(crate) const fn hr_guarded(&self, n: usize) -> bool {
+        self.pg_b[n] != 0
+    }
+    /// Handler run: first item and number of items.
+    pub(crate) const fn hr_start(&self, n: usize) -> usize {
+        self.pg_c[n] as usize
+    }
+    pub(crate) const fn hr_count(&self, n: usize) -> usize {
+        self.pg_d[n] as usize
+    }
+    /// Item `k`: the entry position of the handled edge, and its mode.
+    pub(crate) const fn hi_pos_of(&self, k: usize) -> usize {
+        self.hi_pos[k] as usize
+    }
+    pub(crate) const fn hi_mode_of(&self, k: usize) -> u8 {
+        self.hi_mode[k]
+    }
+    /// Number of handled edges of the node at plan index `i` (for tests).
+    #[allow(dead_code)]
+    pub(crate) const fn n_handled(&self, i: usize) -> usize {
+        let mut e = self.up_head[i];
+        let mut n = 0;
+        while e != NONE {
+            if self.edge_h[e as usize] {
+                n += 1;
+            }
+            e = self.edge_next[e as usize];
+        }
+        n
+    }
+
     const fn new_node(&mut self, kind: u8, a: u32, b: u32) -> u32 {
         let n = self.pg_len;
         if n == MAX_PROG {
@@ -1133,6 +1317,9 @@ impl Plan {
         self.ib_len += 1;
     }
     const fn mk_run(&mut self, i: usize, guarded: bool) -> u32 {
+        if self.handler[i] {
+            return self.mk_hrun(i, guarded);
+        }
         if guarded {
             let mut e = self.up_head[i];
             while e != NONE {
@@ -1734,5 +1921,102 @@ mod trace {
         assert!(plan.failed);
         let msg = core::str::from_utf8(&plan.msg[..plan.msg_len]).unwrap();
         assert!(msg.contains("through selectors in steps where they do not match"), "{msg}");
+    }
+}
+
+#[cfg(test)]
+mod handler_trace {
+    use super::*;
+    use crate::sinks::Anchor;
+    use crate::{Collect, Component, ComponentSubscription, Handler, Root, UpdateHandler};
+
+    #[derive(Root)]
+    pub struct Poll;
+    pub struct K0;
+    pub struct K1;
+    macro_rules! key {
+        ($k:ident, $n:expr) => {
+            impl crate::Select<Poll> for $k {
+                type Out = Poll;
+                const KEY: u32 = $n;
+                fn select(x: &Poll) -> Option<&Poll> { Some(x) }
+                fn key_of(_: &Poll) -> u32 { $n }
+            }
+        };
+    }
+    key!(K0, 0);
+    key!(K1, 1);
+    macro_rules! scomp {
+        ($name:ident, [$($sub:tt)*]) => {
+            #[derive(ComponentSubscription)]
+            #[subscribe($($sub)*)]
+            pub struct $name;
+            impl Component for $name {
+                type Config = ();
+                type Output = u8;
+                fn new((): (), _: Self::Init<'_>) -> (Self, u8) { ($name, 0) }
+                fn update(&mut self, _: Self::Input<'_>) -> u8 { 0 }
+            }
+        };
+    }
+    scomp!(X, [p: Poll => K0]);
+    scomp!(Y, [p: Poll => K1]);
+    scomp!(Z, [p: Poll]);
+
+    #[derive(Handler)]
+    #[handles(X, Y)]
+    pub struct H;
+    impl Collect for H {
+        type Config = ();
+        type Output = u8;
+        type Buf = ();
+        fn new((): ()) -> Self { H }
+        fn begin(&mut self) {}
+        fn finish(&mut self, (): (), _: Self::Input<'_>) -> u8 { 0 }
+    }
+    impl UpdateHandler<X> for H { fn on_update(&mut self, _: &mut (), _: &u8) {} }
+    impl UpdateHandler<Y> for H { fn on_update(&mut self, _: &mut (), _: &u8) {} }
+
+    #[derive(Handler)]
+    #[handles(X, Y)]
+    #[subscribe(z: Z)]
+    pub struct G;
+    impl Collect for G {
+        type Config = ();
+        type Output = u8;
+        type Buf = ();
+        fn new((): ()) -> Self { G }
+        fn begin(&mut self) {}
+        fn finish(&mut self, (): (), _: Self::Input<'_>) -> u8 { 0 }
+    }
+    impl UpdateHandler<X> for G { fn on_update(&mut self, _: &mut (), _: &u8) {} }
+    impl UpdateHandler<Y> for G { fn on_update(&mut self, _: &mut (), _: &u8) {} }
+
+    /// Inside a switch leaf the fired edges are static: one item per leaf and no tests.
+    #[test]
+    fn leaf_items_are_static() {
+        let plan = <Anchor<Poll, (H,)> as Planned>::PLAN;
+        plan.check();
+        let root = plan.root_prog();
+        assert_eq!(plan.pg_kind_of(root), PG_SWITCH);
+        for b in 0..2 {
+            let leaf = plan.ch_node_of(plan.pg_a_of(root) + b);
+            // Leaf: X (or Y), then the handler's run.
+            assert_eq!(plan.pg_kind_of(leaf), PG_SEQ);
+            let h = plan.ch_node_of(plan.pg_a_of(leaf) + 1);
+            assert_eq!(plan.pg_kind_of(h), PG_HRUN);
+            assert!(!plan.hr_guarded(h));
+            assert_eq!(plan.hr_count(h), 1);
+            assert_eq!(plan.hi_mode_of(plan.hr_start(h)), 0);
+        }
+    }
+
+    /// A handler that always runs (it reads `Z`) tests both edges at run time,
+    /// each by its parent's flag.
+    #[test]
+    fn an_always_running_handler_tests_its_edges() {
+        let plan = <Anchor<Poll, (G,)> as Planned>::PLAN;
+        plan.check();
+        assert!(plan.n_flags() >= 2);
     }
 }
