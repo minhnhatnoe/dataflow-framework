@@ -4,7 +4,7 @@
 # Option<Frame>, a Keyed value). For every (exchange e, symbol s) a chain of K components, the first subscribing through
 # the selector chain `Ws<e> => Some, On<Sym<s>>`; per symbol a join `Best<s>` over the E exchanges' chains
 # (E must be 1: two listeners are never known to be exclusive, so the plan rejects a join of their branches);
-# the joins feed ceil(S/60) sinks `Sink<g>` (a condition has at most MAX_TERMS = 64 terms). A deterministic packet sequence is pre-generated; the framework is
+# the joins feed ceil(S/60) sinks `Sink<g>` (a condition has at most MAX_TERMS = 256 terms). A deterministic packet sequence is pre-generated; the framework is
 # compared with a hand-written nested `match` that stores each output in a field. Both sides must agree.
 import os, sys
 args = [int(a) for a in sys.argv[1:]]

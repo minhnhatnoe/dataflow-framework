@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
-use dataflow_flat::{Component, ComponentSubscription, Symbol};
+use dataflow_flat::{Collect, Component, ComponentSubscription, Handler, Symbol, UpdateHandler};
 
 use crate::book::Book;
 use crate::feed::{Binance, Coinbase};
@@ -64,22 +64,46 @@ impl<S: Symbol> Component for Quoter<S> {
     }
 }
 
-/// The sink. It joins the three quoters (exclusive: one symbol per packet) and
-/// sends the order of whichever quoter just ran, the one with the newest `seq`.
-#[derive(ComponentSubscription)]
-#[subscribe(btc: Quoter<Btc>, eth: Quoter<Eth>, sol: Quoter<Sol>)]
+thread_local! {
+    /// How many `on_update` calls the sink got per symbol (initial ones excluded).
+    pub static SENDER_UPDATES: RefCell<BTreeMap<&'static str, u64>> = RefCell::new(BTreeMap::new());
+}
+
+/// The sink, a *handler component*: it handles the three quoters. In a step it
+/// is called only for the quoter that updated (one symbol per packet), with no
+/// look at the others: `begin`, one `on_update`, `finish`. Which quoter that is
+/// is known statically inside each branch of the push, so this compiles to
+/// straight-line code.
+///
+/// At build the framework also calls `on_update` with each quoter's initial
+/// output (the default `Order`, `seq == 0`), which the handler ignores.
+#[derive(Handler)]
+#[handles(Quoter<Btc>, Quoter<Eth>, Quoter<Sol>)]
 pub struct OrderSender {
     pub sent: Vec<Order>,
 }
-impl Component for OrderSender {
+impl Collect for OrderSender {
     type Config = ();
     type Output = ();
-    fn new((): (), _: Self::Init<'_>) -> (Self, ()) {
-        (OrderSender { sent: Vec::new() }, ())
+    type Buf = Vec<Order>;
+    fn new((): ()) -> Self {
+        OrderSender { sent: Vec::new() }
     }
-    fn update(&mut self, i: Self::Input<'_>) {
-        let o = [i.btc, i.eth, i.sol].into_iter().max_by_key(|o| o.seq).unwrap();
-        println!("  order: {} {} @ {} (packet #{})", if o.buy { "BUY " } else { "SELL" }, o.symbol, o.px, o.seq);
-        self.sent.push(*o);
+    fn begin(&mut self) -> Vec<Order> {
+        Vec::new()
+    }
+    fn finish(&mut self, buf: Vec<Order>, _: Self::Input<'_>) {
+        for o in buf {
+            println!("  order: {} {} @ {} (packet #{})", if o.buy { "BUY " } else { "SELL" }, o.symbol, o.px, o.seq);
+            self.sent.push(o);
+        }
+    }
+}
+impl<S: Symbol> UpdateHandler<Quoter<S>> for OrderSender {
+    fn on_update(&mut self, buf: &mut Vec<Order>, o: &Order) {
+        if o.seq != 0 {
+            SENDER_UPDATES.with(|m| *m.borrow_mut().entry(S::NAME).or_default() += 1);
+            buf.push(*o);
+        }
     }
 }

@@ -14,6 +14,8 @@
 //! * The plan knows which keys are read from each `#[listener]`; at build it
 //!   calls `subscribe` once with exactly those. Doge is on the wire but nobody
 //!   reads it, so it is never subscribed.
+//! * `OrderSender` is a handler component (`#[derive(Handler)]`): it handles the
+//!   three quoters and its `on_update` is called only for the one that changed.
 //! * `BestBid<S>` and `OrderSender` join branches that are mutually exclusive
 //!   (different variants / keys at the same place), which the plan accepts. Join
 //!   two branches that can fire together and it is a compile error.
@@ -30,7 +32,7 @@ use dataflow_flat::{Configs, Pipeline};
 use book::BOOK_RUNS;
 use feed::{Nic, Poll, Wire};
 use market::Packet;
-use strategy::{OrderSender, QUOTER_RUNS};
+use strategy::{OrderSender, QUOTER_RUNS, SENDER_UPDATES};
 
 const SEED: u64 = 0x5EED;
 const POLLS: u64 = 40;
@@ -72,7 +74,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let got_books: BTreeMap<_, _> = BOOK_RUNS.with(|m| m.borrow().iter().map(|((x, s), n)| ((x.to_string(), s.to_string()), *n)).collect());
     let got_quoters: BTreeMap<_, _> = QUOTER_RUNS.with(|m| m.borrow().iter().map(|(s, n)| (s.to_string(), *n)).collect());
-    println!("\nbook updates {got_books:?}\nquoter updates {got_quoters:?}");
+    let got_sender: BTreeMap<_, _> = SENDER_UPDATES.with(|m| m.borrow().iter().map(|(s, n)| (s.to_string(), *n)).collect());
+    println!("\nbook updates {got_books:?}\nquoter updates {got_quoters:?}\nsender on_update calls {got_sender:?}");
+    assert_eq!(got_sender, want_quoters, "the sender's handler saw exactly the quoter that updated, once per update");
     assert_eq!(got_books, want_books, "only the matching book ran for each packet");
     assert_eq!(got_quoters, want_quoters, "a quoter ran once per update of either exchange's book");
     assert!(got_books.values().sum::<u64>() < 3 * 2 * POLLS);
