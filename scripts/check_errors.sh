@@ -267,12 +267,104 @@ print("\n".join(out))
 PY
 )
 
+# --- selectors (demuxing on the subscription edge) ---------------------------------------------------
+# Selectors on `Poll`: two guards (never exclusive with each other), and two keyed alternatives (exclusive).
+read -r -d '' SELECTORS <<'EOF'
+use dataflow_flat::Select;
+pub struct G1; pub struct G2; pub struct K0; pub struct K1;
+impl Select<Poll> for G1 { type Out = Poll; const KEY: u32 = dataflow_flat::GUARD; fn select(x: &Poll) -> Option<&Poll> { Some(x) } }
+impl Select<Poll> for G2 { type Out = Poll; const KEY: u32 = dataflow_flat::GUARD; fn select(x: &Poll) -> Option<&Poll> { Some(x) } }
+impl Select<Poll> for K0 { type Out = Poll; const KEY: u32 = 0; fn select(x: &Poll) -> Option<&Poll> { Some(x) } }
+impl Select<Poll> for K1 { type Out = Poll; const KEY: u32 = 1; fn select(x: &Poll) -> Option<&Poll> { Some(x) } }
+macro_rules! comp {
+    ($name:ident, [$($sub:tt)*]) => {
+        #[derive(ComponentSubscription)]
+        #[subscribe($($sub)*)]
+        pub struct $name;
+        impl Component for $name {
+            type Config = ();
+            type Output = u64;
+            fn new((): (), _: Self::Init<'_>) -> (Self, u64) { ($name, 0) }
+            fn update(&mut self, _: Self::Input<'_>) -> u64 { 0 }
+        }
+    };
+}
+EOF
+
+# Rule 4: two branches that can fire in the same step (two guards) joined in one component.
+CMD[non_exclusive_join]=build
+PATTERN[non_exclusive_join]='E0080.*J joins branches that can fire in the same step'
+BODY[non_exclusive_join]="$SELECTORS
+comp!(A, [p: Poll => G1]);
+comp!(B, [p: Poll => G2]);
+comp!(J, [a: A, b: B]);
+fn main() { let _ = Pipeline::<Poll, (J,)>::build(Configs::new()); }"
+
+# Different keys at the same place are exclusive: this compiles.
+CMD[exclusive_join_ok]=build
+PATTERN[exclusive_join_ok]='NOERROR'
+BODY[exclusive_join_ok]="$SELECTORS
+comp!(A, [p: Poll => K0]);
+comp!(B, [p: Poll => K1]);
+comp!(J, [a: A, b: B]);
+fn main() { let _ = Pipeline::<Poll, (J,)>::build(Configs::new()); }"
+
+# Rule 5: a selected edge read in steps where its selectors do not match (J also runs when K1 matches).
+CMD[demux_reader_not_implied]=build
+PATTERN[demux_reader_not_implied]='E0080.*J reads .*Poll through selectors in steps where they do not match; subscribe to a component that stores it'
+BODY[demux_reader_not_implied]="$SELECTORS
+comp!(A, [p: Poll => K0]);
+comp!(J, [a: A, p: Poll => K1]);
+fn main() { let _ = Pipeline::<Poll, (J,)>::build(Configs::new()); }"
+
+# Rule 6 through selectors: B is reached from the root only via a selector on a component nothing connects.
+CMD[selector_unreachable_component]=build
+PATTERN[selector_unreachable_component]='E0080.*Orphan is not reachable from the root'
+read -r -d '' BODY[selector_unreachable_component] <<'EOF'
+#[derive(ComponentSubscription)]
+pub struct Orphan;
+impl Component for Orphan {
+    type Config = ();
+    type Output = Option<u64>;
+    fn new((): (), _: Self::Init<'_>) -> (Self, Option<u64>) { (Orphan, None) }
+    fn update(&mut self, _: Self::Input<'_>) -> Option<u64> { None }
+}
+#[derive(ComponentSubscription)]
+#[subscribe(s: Src, o: Orphan => Some)]
+pub struct B;
+impl Component for B {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (B, 0) }
+    fn update(&mut self, _: Self::Input<'_>) -> u64 { 0 }
+}
+fn main() { let _ = Pipeline::<Poll, (B,)>::build(Configs::new()); }
+EOF
+
+# A selector applied to a value it does not select from.
+CMD[selector_wrong_input]=check
+PATTERN[selector_wrong_input]='E0277.*(selector chain.*cannot be applied|SelectChain<u64>)'
+read -r -d '' BODY[selector_wrong_input] <<'EOF'
+#[derive(ComponentSubscription)]
+#[subscribe(x: Src => Some)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (A, 0) }
+    fn update(&mut self, _: Self::Input<'_>) -> u64 { 0 }
+}
+fn main() {}
+EOF
+
 ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        self_cycle
        too_many_components root_not_a_root sink_is_the_root
        generic_missing_sinks_bound generic_sinks_bound_ok
        unreachable_component second_root wrong_root_type
-       keep_input_reference name_input_struct_outside unused_config)
+       keep_input_reference name_input_struct_outside unused_config
+       non_exclusive_join exclusive_join_ok demux_reader_not_implied selector_unreachable_component
+       selector_wrong_input)
 
 run_case() {
     local name=$1 dir="$CASES_DIR/$1"

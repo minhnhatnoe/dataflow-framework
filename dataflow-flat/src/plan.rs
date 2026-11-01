@@ -984,4 +984,60 @@ mod trace {
         assert_eq!(plan.upstream_count(0), 0);
         assert!(plan.contains(TypeId::of::<A>()) && !plan.contains(TypeId::of::<u8>()));
     }
+
+    // Conditions and flags.
+    pub struct K0;
+    pub struct K1;
+    impl crate::Select<Poll> for K0 {
+        type Out = Poll;
+        const KEY: u32 = 0;
+        fn select(x: &Poll) -> Option<&Poll> { Some(x) }
+    }
+    impl crate::Select<Poll> for K1 {
+        type Out = Poll;
+        const KEY: u32 = 1;
+        fn select(x: &Poll) -> Option<&Poll> { Some(x) }
+    }
+    macro_rules! scomp {
+        ($name:ident, [$($sub:tt)*]) => {
+            #[derive(ComponentSubscription)]
+            #[subscribe($($sub)*)]
+            pub struct $name;
+            impl Component for $name {
+                type Config = ();
+                type Output = u8;
+                fn new((): (), _: Self::Init<'_>) -> (Self, u8) { ($name, 0) }
+                fn update(&mut self, _: Self::Input<'_>) -> u8 { 0 }
+            }
+        };
+    }
+    scomp!(X, [p: Poll => K0]);
+    scomp!(Y, [p: Poll => K1]);
+    scomp!(Z, [x: X, y: Y]);
+    scomp!(W, [z: Z, p: Poll => K0]);
+
+    #[test]
+    fn conditions_terms_and_flags() {
+        let plan = <Anchor<Poll, (Z,)> as Planned>::PLAN;
+        plan.check();
+        // Poll, X, Y, Z, anchor.
+        let at = |p: usize| plan.idx_at_post(p);
+        assert!(plan.always_idx(at(0)));
+        assert!(!plan.always_idx(at(1)) && !plan.always_idx(at(2)) && !plan.always_idx(at(3)));
+        assert_eq!((plan.n_terms(at(1)), plan.n_terms(at(2)), plan.n_terms(at(3))), (1, 1, 2));
+        // X and Y are read by the conditional Z; Z is read by nobody.
+        assert_eq!(plan.n_flags(), 2);
+        assert_ne!(plan.flag_idx(at(1)), plan.flag_idx(at(2)));
+        assert_eq!(plan.flag_idx(at(3)), NO_FLAG);
+        assert_eq!(plan.n_components(), 3);
+    }
+
+    #[test]
+    fn rule_5_is_reported_by_check() {
+        // W = [z: Z (terms K0, K1), p: Poll => K0]: its condition has the K1 term, which does not imply K0.
+        let plan = <Anchor<Poll, (W,)> as Planned>::PLAN;
+        assert!(plan.failed);
+        let msg = core::str::from_utf8(&plan.msg[..plan.msg_len]).unwrap();
+        assert!(msg.contains("through selectors in steps where they do not match"), "{msg}");
+    }
 }

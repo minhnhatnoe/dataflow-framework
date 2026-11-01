@@ -88,13 +88,15 @@ use_hand = mode in ("full", "hand")
 if use_flat: out.append("mod flat {\n" + components_flat() + "\n}")
 if use_hand:
     out.append("mod hand_components {\n" + components_hand() + "\n}\nuse hand_components::*;\npub struct Hand {")
-    for n in order: out.append(f"    c_{name(n)}: {name(n)},")
+    # Fair baseline: like the framework, every component's latest output is stored in the struct
+    # (persisting across runs), not kept in a local.
+    for n in order: out.append(f"    c_{name(n)}: {name(n)},\n    o_{name(n)}: u64,")
     out.append("}\nimpl Hand {\n    fn new() -> Self { Hand {")
-    for n in order: out.append(f"        c_{name(n)}: {name(n)}::new(),")
+    for n in order: out.append(f"        c_{name(n)}: {name(n)}::new(),\n        o_{name(n)}: 0,")
     out.append("    } }\n    #[inline(never)]\n    fn run(&mut self) -> u64 {")
     for n in order:
-        out.append(f"        let o_{name(n)} = self.c_{name(n)}.update({', '.join(f'&o_{name(d)}' for d in deps[n])});")
-    out.append("        0" + "".join(f" ^ o_{name(r)}" for r in roots) + "\n    }\n}")
+        out.append(f"        self.o_{name(n)} = self.c_{name(n)}.update({', '.join(f'&self.o_{name(d)}' for d in deps[n])});")
+    out.append("        0" + "".join(f" ^ self.o_{name(r)}" for r in roots) + "\n    }\n}")
 out.append("""const WARMUP: u32 = 5_000; // untimed runs per side
 const RUNS: u32 = 50_000; // timed runs per side per round
 const ROUNDS: usize = 11; // timed rounds; the side that runs first alternates

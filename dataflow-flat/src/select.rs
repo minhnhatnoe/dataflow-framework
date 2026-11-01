@@ -44,6 +44,10 @@ pub trait Select<In>: 'static {
 /// A chain of selectors as a nested tuple `(S1, (S2, ... ()))`, applied to a
 /// value of type `In`. `()` is the empty chain. The derive builds it.
 #[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "the selector chain `{Self}` cannot be applied to a value of type `{In}`",
+    label = "each selector must implement `Select<_>` for the output of the one before it (a `Some`/`None` needs an `Option`)"
+)]
 pub trait SelectChain<In: 'static>: 'static {
     /// The value at the end of the chain.
     type Out: 'static;
