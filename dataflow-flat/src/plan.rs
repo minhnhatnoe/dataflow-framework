@@ -69,7 +69,7 @@ pub const MAX_TERMS: usize = 1 << 13;
 /// small per-switch arrays, and the nesting depth of switches.
 const MAX_PROG: usize = 32768;
 const MAX_PCH: usize = 32768;
-const MAX_LST: usize = 32768;
+const MAX_LST: usize = 1 << 16;
 const KPOOL: usize = 32768;
 /// `lst_t` value: the entry's candidates are all terms of its component.
 const ALLT: u32 = u32::MAX - 1;
