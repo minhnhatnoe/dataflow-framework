@@ -155,7 +155,16 @@ pub use wire::*;
     type Ev: 'static;
     type Sel: dataflow_flat::Select<Self::Ev, Out = crate::wire::Body>;
 """ if ENUM else ""
-    write(f"{lib}/src/symbol.rs", f"""/// A market: a type with a dense per-exchange key and a name.
+    if ON:
+        # `On<S>` needs dataflow_flat::Symbol (KEY, NAME); ours adds the exchange index.
+        write(f"{lib}/src/symbol.rs", """/// A market: `dataflow_flat::Symbol` (dense per-exchange key and name) plus its exchange.
+pub trait Symbol: dataflow_flat::Symbol {
+    /// 0 = Lighter, 1 = Binance, 2 = Hyperliquid.
+    const EXCH: usize;
+}
+""")
+    else:
+      write(f"{lib}/src/symbol.rs", f"""/// A market: a type with a dense per-exchange key and a name.
 pub trait Symbol: 'static {{
     const KEY: u32;
     const NAME: &'static str;
@@ -180,6 +189,10 @@ pub trait Symbol: 'static {{
             lines += ["        _ => panic!(\"no such market\"),", "    }", "}"]
         for k in range(M.n[e]):
             extra = f" type Ev = Ev; type Sel = ev::M{k};" if ENUM else ""
+            if ON:
+                lines.append(
+                    f'pub struct M{k};\nimpl dataflow_flat::Symbol for M{k} {{ const KEY: u32 = {k}; const NAME: &\'static str = "{mname(e, k)}"; }}\nimpl Symbol for M{k} {{ const EXCH: usize = {e}; }}')
+                continue
             lines.append(
                 f'pub struct M{k};\nimpl Symbol for M{k} {{ const KEY: u32 = {k}; const NAME: &\'static str = "{mname(e, k)}"; const EXCH: usize = {e};{extra} }}')
         write(f"{lib}/src/catalog/{mod}.rs", "\n".join(lines) + "\n")
@@ -221,6 +234,9 @@ pub enum Wire {{ {wire_variants} }}
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 pub static QCHK: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
 pub static SENT: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+/// `on` mode: how many keys each exchange's listener was asked to subscribe to, and a digest of them.
+pub static SUBS: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+pub static SUBKEYS: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
 pub static RISK: AtomicU64 = AtomicU64::new(0);
 pub static BIG: AtomicU64 = AtomicU64::new(0);
 
@@ -457,13 +473,25 @@ impl Component for {ws} {{
             upd = "*i.w"
         else:
             upd = f"if let Wire::{var}(f) = i.w {{ self.last = *f }}\n        self.last"
+        listen = ""
+        if ON:
+            listen = f"""
+impl dataflow_flat::Listener for {ws} {{
+    /// Records the keys the graph reads from this exchange (a real listener opens one combined subscription).
+    fn subscribe(&mut self, keys: &[u32]) {{
+        self.keys = keys.to_vec();
+        crate::stats::SUBS[{e}].store(keys.len() as u64, std::sync::atomic::Ordering::Relaxed);
+        crate::stats::SUBKEYS[{e}].store(keys.iter().fold(0u64, |a, k| a.wrapping_mul(31).wrapping_add(*k as u64 + 1)), std::sync::atomic::Ordering::Relaxed);
+    }}
+}}
+"""
         comp.append(f"""#[derive(ComponentSubscription)]
-#[subscribe({lsub(var)})]
-pub struct {ws} {{ last: Frame }}
+#[subscribe({lsub(var)})]{"" if not ON else chr(10) + "#[listener]"}
+pub struct {ws} {{ last: Frame{", keys: Vec<u32>" if ON else ""} }}{listen}
 impl Component for {ws} {{
     type Config = ();
     type Output = Frame;
-    fn new((): (), _: Self::Init<'_>) -> (Self, Frame) {{ ({ws} {{ last: Frame::default() }}, Frame::default()) }}
+    fn new((): (), _: Self::Init<'_>) -> (Self, Frame) {{ ({ws} {{ last: Frame::default(){', keys: Vec::new()' if ON else ''} }}, Frame::default()) }}
     fn update(&mut self, i: Self::Input<'_>) -> Frame {{ {upd} }}
 }}
 impl<S> Feed<S> for {ws} {{}}
@@ -935,6 +963,8 @@ fn main() {{
 
     #[cfg(feature = "fw")]
     let mut fw = app::build();
+    #[cfg(feature = "fw")]
+    println!("listener subscriptions (keys per exchange) {{:?}}", [0, 1, 2].map(|e| stats::SUBS[e].load(std::sync::atomic::Ordering::Relaxed)));
     #[cfg(feature = "base")]
     let mut hand = baseline::Hand::new();
     #[cfg(feature = "base")]
