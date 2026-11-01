@@ -42,6 +42,12 @@ pub trait Node: __private::Sealed + Sized + 'static {
     type Kind: NodeKind;
     #[doc(hidden)]
     const KIND: u8;
+    /// Is this a [`Listener`](crate::Listener) (`#[listener]` on the derive)?
+    #[doc(hidden)]
+    const LISTENER: bool = false;
+    /// `Listener::subscribe`, for a listener; nothing otherwise.
+    #[doc(hidden)]
+    fn __subscribe(_this: &mut Self, _keys: &[u32]) {}
 }
 
 /// What the kind of a node decides at the type level: what its subscribers

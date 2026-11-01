@@ -40,8 +40,11 @@ pub trait Layout: Planned {
 #[doc(hidden)]
 pub struct PosOf<A, N>(PhantomData<(A, N)>);
 impl<A: Planned, N: Node> PosOf<A, N> {
-    /// Execution position 0 is the root, so component position = post - 1.
-    pub const P: usize = A::PLAN.post_of_idx(At::<A, N>::INDEX) - 1;
+    /// Execution position 0 is the root, so component position = post - 1 (saturating: an invalid plan, e.g. an orphan first, is reported by the plan's check, not by an underflow here).
+    pub const P: usize = {
+        A::PLAN.check();
+        A::PLAN.post_of_idx(At::<A, N>::INDEX).saturating_sub(1)
+    };
 }
 
 /// How a node of kind `Self` is read.
