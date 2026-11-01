@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 
 use crate::build::ConstructPass;
 use crate::component::{DepList, Sub};
-use crate::drive::{ConstructCtx, ConstructPh, Drive, Fired, FiredOps, PushCtx, PushPh, RgCl};
+use crate::drive::{ConstructCtx, ConstructPh, Drive, Exec, Fired, FiredOps, Pn, PushCtx, PushPh, RgCl, RootProg};
 use crate::flat::{FlatTop, Whole};
 use crate::gather::Layout;
 use crate::node::{AnchorKind, Comp, Node, Root, KIND_ANCHOR};
@@ -118,7 +118,7 @@ where
     Whole<Anchor<R, S>>: RgCl,
     Whole<Anchor<R, S>>:
         Drive<Anchor<R, S>, ConstructPh<Anchor<R, S>>, <Whole<Anchor<R, S>> as RgCl>::Cl>,
-    Whole<Anchor<R, S>>: Drive<Anchor<R, S>, PushPh<Anchor<R, S>>, <Whole<Anchor<R, S>> as RgCl>::Cl>,
+    Pn<Anchor<R, S>, { RootProg::<Anchor<R, S>>::N }>: Exec<Anchor<R, S>, PushPh<Anchor<R, S>>>,
 {
     type Store = Store<<Anchor<R, S> as Layout>::States, <Anchor<R, S> as Layout>::Outs>;
 
@@ -146,6 +146,6 @@ where
         type A<R, S> = Anchor<R, S>;
         let mut ctx =
             PushCtx::<A<R, S>> { root: &root, states: &mut store.states, outs: &mut store.outs, fired: <<A<R, S> as Layout>::Fired as FiredOps>::new() };
-        <Whole<A<R, S>> as Drive<A<R, S>, PushPh<A<R, S>>, <Whole<A<R, S>> as RgCl>::Cl>>::drive(&mut ctx);
+        <Pn<A<R, S>, { RootProg::<A<R, S>>::N }> as Exec<A<R, S>, PushPh<A<R, S>>>>::exec(&mut ctx);
     }
 }

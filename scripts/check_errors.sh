@@ -272,10 +272,10 @@ PY
 read -r -d '' SELECTORS <<'EOF'
 use dataflow_flat::Select;
 pub struct G1; pub struct G2; pub struct K0; pub struct K1;
-impl Select<Poll> for G1 { type Out = Poll; const KEY: u32 = dataflow_flat::GUARD; fn select(x: &Poll) -> Option<&Poll> { Some(x) } }
-impl Select<Poll> for G2 { type Out = Poll; const KEY: u32 = dataflow_flat::GUARD; fn select(x: &Poll) -> Option<&Poll> { Some(x) } }
-impl Select<Poll> for K0 { type Out = Poll; const KEY: u32 = 0; fn select(x: &Poll) -> Option<&Poll> { Some(x) } }
-impl Select<Poll> for K1 { type Out = Poll; const KEY: u32 = 1; fn select(x: &Poll) -> Option<&Poll> { Some(x) } }
+impl Select<Poll> for G1 { type Out = Poll; const KEY: u32 = dataflow_flat::GUARD; fn select(x: &Poll) -> Option<&Poll> { Some(x) } fn key_of(_: &Poll) -> u32 { dataflow_flat::GUARD } }
+impl Select<Poll> for G2 { type Out = Poll; const KEY: u32 = dataflow_flat::GUARD; fn select(x: &Poll) -> Option<&Poll> { Some(x) } fn key_of(_: &Poll) -> u32 { dataflow_flat::GUARD } }
+impl Select<Poll> for K0 { type Out = Poll; const KEY: u32 = 0; fn select(x: &Poll) -> Option<&Poll> { Some(x) } fn key_of(_: &Poll) -> u32 { 0 } }
+impl Select<Poll> for K1 { type Out = Poll; const KEY: u32 = 1; fn select(x: &Poll) -> Option<&Poll> { Some(x) } fn key_of(_: &Poll) -> u32 { 1 } }
 macro_rules! comp {
     ($name:ident, [$($sub:tt)*]) => {
         #[derive(ComponentSubscription)]

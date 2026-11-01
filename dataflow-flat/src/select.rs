@@ -39,6 +39,15 @@ pub trait Select<In>: 'static {
     const KEY: u32;
     /// `Some(part)` if the pattern matches.
     fn select(x: &In) -> Option<&Self::Out>;
+    /// The key of the alternative `x` is: for a selector with a `KEY` other
+    /// than [`GUARD`], the `KEY` of the selector of the same family that
+    /// matches `x` (the variant index of an enum), or [`GUARD`] if none does.
+    /// The push evaluates this once for all the keyed selectors applied at
+    /// the same place and branches on the result, instead of testing each
+    /// selector in turn. A guard returns [`GUARD`]. Every keyed selector
+    /// applied at one place must belong to one family, i.e. give the same
+    /// `key_of`.
+    fn key_of(x: &In) -> u32;
 }
 
 /// A chain of selectors as a nested tuple `(S1, (S2, ... ()))`, applied to a
@@ -101,6 +110,41 @@ fn selector_mismatch() -> ! {
     panic!("a selected subscription was read in a step where its selectors do not match (this is a bug in dataflow-flat)")
 }
 
+/// The key of the alternative a value is at depth `J` of a chain (the chain
+/// applied up to depth `J`, then [`Select::key_of`] of the selector at `J`);
+/// [`GUARD`] if the chain does not match up to there. The push uses it to
+/// dispatch on the keyed selectors applied at one place.
+#[doc(hidden)]
+pub trait ChainKey<In: 'static, const J: usize>: SelectChain<In> {
+    fn key(x: &In) -> u32;
+}
+impl<In: 'static, const J: usize> ChainKey<In, J> for () {
+    #[inline(always)]
+    fn key(_: &In) -> u32 {
+        GUARD
+    }
+}
+pub(crate) const fn dec(j: usize) -> usize {
+    if j == 0 {
+        0
+    } else {
+        j - 1
+    }
+}
+impl<In: 'static, S: Select<In>, T: ChainKey<S::Out, { dec(J) }>, const J: usize> ChainKey<In, J> for (S, T) {
+    #[inline(always)]
+    fn key(x: &In) -> u32 {
+        if J == 0 {
+            S::key_of(x)
+        } else {
+            match S::select(x) {
+                Some(y) => T::key(y),
+                None => GUARD,
+            }
+        }
+    }
+}
+
 /// The plan's walk of a chain: record each selector as a decision under the
 /// previous one, starting at `dn` under node `parent`; returns the last.
 #[doc(hidden)]
@@ -135,6 +179,14 @@ pub mod option {
         fn select(x: &Option<T>) -> Option<&T> {
             x.as_ref()
         }
+        #[inline(always)]
+        fn key_of(x: &Option<T>) -> u32 {
+            if x.is_some() {
+                0
+            } else {
+                1
+            }
+        }
     }
     impl<T: 'static> Select<Option<T>> for None {
         type Out = ();
@@ -145,6 +197,14 @@ pub mod option {
                 Option::Some(&())
             } else {
                 Option::None
+            }
+        }
+        #[inline(always)]
+        fn key_of(x: &Option<T>) -> u32 {
+            if x.is_some() {
+                0
+            } else {
+                1
             }
         }
     }

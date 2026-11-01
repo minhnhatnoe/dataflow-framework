@@ -123,6 +123,8 @@ pub use pipeline::Pipeline;
 pub use plan::{MAX_COMPONENTS, MAX_DECISIONS, MAX_EDGES, MAX_TERMS};
 pub use select::{option, Select, GUARD};
 #[doc(hidden)]
+pub use select::ChainKey;
+#[doc(hidden)]
 pub use select::SelectChain;
 pub use sinks::{SinkList, Sinks};
 
