@@ -490,6 +490,16 @@ pub struct Plan {
     cp_t: [u32; MAX_LST],
     cp_next: [u32; MAX_LST],
     cp_len: usize,
+    /// Per entry of `lst` that is a handler: its candidate handled edges in the current context
+    /// (a list in `hp_e`/`hp_next`, `ALLT` = all its handled edges) and the list's tail. A switch
+    /// puts each edge only in the branches whose decision does not exclude it.
+    lst_h: [u32; MAX_LST],
+    lst_htail: [u32; MAX_LST],
+    hp_e: [u32; MAX_LST],
+    hp_next: [u32; MAX_LST],
+    hp_len: usize,
+    /// Handlers whose flags were already requested for a guarded run.
+    hg_done: [bool; MAX_COMPONENTS],
     /// Names for messages.
     nm_pool: [u8; NPOOL],
     nm_len: usize,
@@ -609,6 +619,12 @@ impl Plan {
             cp_t: [0; MAX_LST],
             cp_next: [0; MAX_LST],
             cp_len: 0,
+            lst_h: [0; MAX_LST],
+            lst_htail: [0; MAX_LST],
+            hp_e: [0; MAX_LST],
+            hp_next: [0; MAX_LST],
+            hp_len: 0,
+            hg_done: [false; MAX_COMPONENTS],
             nm_pool: [0; NPOOL],
             nm_len: 0,
             root_id,
@@ -1379,6 +1395,34 @@ impl Plan {
             self.cp_next[c as usize]
         }
     }
+    // Candidate handled edges of entry `q` of `lst`: a cursor `c` (`NONE` = end).
+    const fn h_skip(&self, mut e: u32) -> u32 {
+        while e != NONE && !self.edge_h[e as usize] {
+            e = self.edge_next[e as usize];
+        }
+        e
+    }
+    const fn h_start(&self, q: usize) -> u32 {
+        if self.lst_h[q] == ALLT {
+            self.h_skip(self.up_head[self.lst[q] as usize])
+        } else {
+            self.lst_h[q]
+        }
+    }
+    const fn h_edge(&self, q: usize, c: u32) -> u32 {
+        if self.lst_h[q] == ALLT {
+            c
+        } else {
+            self.hp_e[c as usize]
+        }
+    }
+    const fn h_next(&self, q: usize, c: u32) -> u32 {
+        if self.lst_h[q] == ALLT {
+            self.h_skip(self.edge_next[c as usize])
+        } else {
+            self.hp_next[c as usize]
+        }
+    }
     /// (some term of entry `q` is consistent with the context, some such term holds in it)
     const fn consistent_static(&self, q: usize) -> (bool, bool) {
         let mut cons = false;
@@ -1528,16 +1572,24 @@ impl Plan {
         }
     }
 
-    const fn mk_hrun(&mut self, i: usize, guarded: bool) -> u32 {
+    const fn mk_hrun(&mut self, i: usize, guarded: bool, q: usize) -> u32 {
         let start = self.hi_len;
-        let mut e = self.up_head[i];
-        while e != NONE {
-            let eu = e as usize;
-            let u = self.edge_to[eu] as usize;
-            if guarded && self.kind[u] == KIND_COMPONENT && !self.always[u] {
-                self.flag_need[u] = true;
+        if guarded && !self.hg_done[i] {
+            self.hg_done[i] = true;
+            let mut e = self.up_head[i];
+            while e != NONE {
+                let u = self.edge_to[e as usize] as usize;
+                if self.kind[u] == KIND_COMPONENT && !self.always[u] {
+                    self.flag_need[u] = true;
+                }
+                e = self.edge_next[e as usize];
             }
-            if self.edge_h[eu] {
+        }
+        let mut c = self.h_start(q);
+        while c != NONE {
+            let eu = self.h_edge(q, c) as usize;
+            let u = self.edge_to[eu] as usize;
+            {
                 let ps = self.ran_state(u);
                 let cs = if self.edge_dn[eu] == NONE { 1 } else { self.path_state(self.edge_dn[eu]) };
                 if ps != 0 && cs != 0 {
@@ -1566,7 +1618,7 @@ impl Plan {
                     self.hi_len += 1;
                 }
             }
-            e = self.edge_next[eu];
+            c = self.h_next(q, c);
         }
         let n = self.new_node(PG_HRUN, self.cpos[i], guarded as u32);
         self.pg_c[n as usize] = start as u32;
@@ -1626,9 +1678,9 @@ impl Plan {
         self.ib[self.ib_len] = n;
         self.ib_len += 1;
     }
-    const fn mk_run(&mut self, i: usize, guarded: bool) -> u32 {
+    const fn mk_run(&mut self, i: usize, guarded: bool, q: usize) -> u32 {
         if self.handler[i] {
-            return self.mk_hrun(i, guarded);
+            return self.mk_hrun(i, guarded, q);
         }
         if guarded {
             let mut e = self.up_head[i];
@@ -1691,14 +1743,14 @@ impl Plan {
                 continue;
             }
             if stat {
-                let n = self.mk_run(i, false);
+                let n = self.mk_run(i, false, k);
                 self.push_item(n);
                 k += 1;
                 continue;
             }
             let (found, x, prev) = self.first_pend(k);
             if !found {
-                let n = self.mk_run(i, true);
+                let n = self.mk_run(i, true, k);
                 self.push_item(n);
                 k += 1;
                 continue;
@@ -1771,11 +1823,13 @@ impl Plan {
             }
             q += 1;
         }
-        // layout: keys | start (nk+1) | stamp (nk) | child (nk)
+        // layout: keys | start (nk+1) | stamp (nk) | child (nk) | entry (nk) | edge stamp (nk)
         let st = m + nk;
         let sm = st + nk + 1;
         let ch = sm + nk;
-        if ch + nk > KPOOL {
+        let en = ch + nk;
+        let hs = en + nk;
+        if hs + nk > KPOOL {
             self.fail("the push program is too large: ", "raise dataflow_flat's key pool", "");
             return 0;
         }
@@ -1784,6 +1838,13 @@ impl Plan {
             self.kpool[st + z] = 0;
             z += 1;
         }
+        let mut z = 0;
+        while z < nk {
+            self.kpool[hs + z] = 0;
+            z += 1;
+        }
+        let mut hstamp = 0u32;
+        let hpbase = self.hp_len;
         // 2. count and bucket (pass 0 counts, pass 1 fills)
         let base = self.lst_len;
         let cpbase = self.cp_len;
@@ -1831,6 +1892,9 @@ impl Plan {
                                     self.lst_t[base + at] = NONE;
                                     self.lst_n[base + at] = 0;
                                     self.lst_tail[base + at] = NONE;
+                                    self.lst_h[base + at] = NONE;
+                                    self.lst_htail[base + at] = NONE;
+                                    self.kpool[en + r] = (base + at) as u32;
                                     self.kpool[ch + r] += 1;
                                 }
                             }
@@ -1857,13 +1921,94 @@ impl Plan {
                     }
                     cc = self.c_next(q, cc);
                 }
+                if pass == 1 && self.handler[i] {
+                    // the handled edges of the entry go to the branches that do not exclude them
+                    let mut c = self.h_start(q);
+                    while c != NONE {
+                        let e = self.h_edge(q, c);
+                        let eu = e as usize;
+                        let u = self.edge_to[eu] as usize;
+                        hstamp += 1;
+                        // the key the edge's own selector needs at this place
+                        let mut has_c = false;
+                        let mut ckey = 0;
+                        let mut dx = self.edge_dn[eu];
+                        while dx != NONE {
+                            let du = dx as usize;
+                            if self.dn_node[du] == x
+                                && self.dn_prev[du] == prev
+                                && self.dn_key[du] != crate::select::GUARD
+                                && !self.held(dx)
+                            {
+                                has_c = true;
+                                ckey = self.dn_key[du];
+                                break;
+                            }
+                            dx = self.dn_prev[du];
+                        }
+                        // does the parent run in every branch (some live term of it has no keyed decision here)?
+                        let mut universal = self.kind[u] == KIND_ROOT;
+                        if !universal {
+                            let cn = self.cn[u] as usize;
+                            let mut k2 = 0;
+                            while k2 < cn {
+                                let t = self.olist[self.co[u] as usize + k2];
+                                if !self.conflicts(t) && self.dec_at(t, x, prev) == NONE {
+                                    universal = true;
+                                    break;
+                                }
+                                k2 += 1;
+                            }
+                        }
+                        let cn = self.cn[u] as usize;
+                        let mut k2 = 0;
+                        let lim = if universal { nk } else { cn };
+                        while k2 < lim {
+                            let mut r = nk;
+                            if universal {
+                                r = k2;
+                            } else {
+                                let t = self.olist[self.co[u] as usize + k2];
+                                if !self.conflicts(t) {
+                                    let d = self.dec_at(t, x, prev);
+                                    if d != NONE {
+                                        let (found, rr) = self.find_key(m, nk, self.dn_key[d as usize]);
+                                        if found && self.kpool[hs + rr] != hstamp {
+                                            self.kpool[hs + rr] = hstamp;
+                                            r = rr;
+                                        }
+                                    }
+                                }
+                            }
+                            if r < nk && self.kpool[sm + r] == ord && (!has_c || self.kpool[m + r] == ckey) {
+                                let ent = self.kpool[en + r] as usize;
+                                let nd = self.hp_len;
+                                if nd == MAX_LST {
+                                    self.fail("the push program is too large: ", "raise dataflow_flat's list pool", "");
+                                    return 0;
+                                }
+                                self.hp_e[nd] = e;
+                                self.hp_next[nd] = NONE;
+                                if self.lst_htail[ent] == NONE {
+                                    self.lst_h[ent] = nd as u32;
+                                } else {
+                                    self.hp_next[self.lst_htail[ent] as usize] = nd as u32;
+                                }
+                                self.lst_htail[ent] = nd as u32;
+                                self.hp_len = nd + 1;
+                            }
+                            k2 += 1;
+                        }
+                        c = self.h_next(q, c);
+                    }
+                }
                 q += 1;
             }
             pass += 1;
         }
         let total = self.kpool[st + nk] as usize;
         self.lst_len = base + total;
-        self.kp_len = ch + nk;
+        self.kp_len = hs + nk;
         // 3. the branches
         let mut r = 0;
         while r < nk && !self.failed {
@@ -1915,6 +2060,7 @@ impl Plan {
         self.pg_e[n as usize] = depth;
         self.lst_len = base;
         self.cp_len = cpbase;
+        self.hp_len = hpbase;
         self.kp_len = m;
         n
     }
@@ -1925,6 +2071,7 @@ impl Plan {
         while q < n {
             self.lst[q] = self.by_cpos[q];
             self.lst_t[q] = ALLT;
+            self.lst_h[q] = ALLT;
             q += 1;
         }
         self.lst_len = n;
