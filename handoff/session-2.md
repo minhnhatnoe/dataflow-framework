@@ -74,3 +74,128 @@ With the fair harness (median of per-process minimum, 7 procs × 101 rounds, `ta
    - The typical dev build on master peaked at 6.2 GB.
    - The mono-items agent's typical dev build failed at its 5 GB cap on both sides.
 6. Docs rewrite (step 7), including the build-a-local guidance.
+
+## Closed by the user (2026-11-01)
+
+No LLVM issue. No rewrite of the Claude-authored commits. No headless restart job.
+
+## Handler API direction (user, 2026-11-01, not built)
+
+"Oms should be a component btw. I think the annotation should still be subscription": one derive and `#[subscribe]`, no `#[derive(Handler)]` / `#[handles]`. Catalog lists use a plain tuple plus `_`. Queued after the optimization work.
+
+## `update`-only output via reflection (2026-11-01, not built; needs the user's decision)
+
+`handoff/experiments/update-only/`: the author writes only `update -> &Output`. The library finds the field of type `Output` at compile time with `#![feature(type_info)]`, and reads it with one `unsafe` block (so it breaks `forbid(unsafe_code)` unless the user relaxes it).
+Miri clean under Stacked and Tree Borrows on a plain component. Two attacks from safe user code gave UB on the first version (lifetime laundering, because type IDs erase lifetimes; a packed struct at an unaligned address). Fixed by `C: 'static`, a check of the struct's alignment, and removing the nested-field search. Not integrated with the framework's storage or dispatch.
+
+## Scale limit (2026-11-01)
+
+The stack-frame error at about 2,000 components is fixed on master (`excl_group` loops instead of recursing). The next wall is the `long_running_const_eval` lint at about 2,000 components: it can only be allowed from the crate that evaluates the plan. With the allow, 4,079 components builds in release in 6:10 at a 14.6 GB peak. Open decision: rustflag or attribute in user apps, or split `Planned::PLAN` into chained consts.
+
+**Decided by the user:** option (a). Apps above about 2,000 components use the allow or the rustflag; the plan stays one constant. Document it in the docs rewrite.
+
+**Decided by the user (2026-11-01):** the `update`-only reflection design is stashed. `Blk`: re-test at 4,079 components, merge if the result looks good.
+
+## `Blk` re-test (2026-11-01, not merged)
+
+Clean numbers; they replace the 6:10 above, which was measured with other builds running.
+
+| Case | Master | `Blk` |
+|---|---|---|
+| 4,079 components, release build | 3:52, 14.6 GB | 3:34, 6.2 GB |
+| 2,044 components, `cargo check` | 18.5 s, 1.06 GB | 22.5 s, 1.26 GB |
+| 2,704 components, cold `cargo check` | 26.5 s, 1.32 GB | 43.6 s, 1.66 GB |
+| 2,704 components, check after an edit | 0.41 s | 0.49 s |
+| 823 components, framework run time | 108.6 ns | 108.3 ns |
+| 823 components, release app / runner | 13.3 / 18.4 s | 14.0 / 19.6 s |
+| 823 components, dev edit, same length (big, 4 rounds) | 1.7-2.1 s | 0.8-0.9 s |
+| 823 components, dev edit, same length (big + 3 small, 4 rounds) | 1.8-1.9 s | 0.8-0.9 s |
+| 823 components, dev edit, length changes (big + 3 small, 4 rounds) | 2.3 s | 4.9-5.0 s |
+
+On `blk-4k`: `cargo test` 18/18 suites, `check_errors.sh` 30/30, exchanges example ok.
+The length-changing edit is the one failed merge condition. It is real, not noise, and its cause is unknown.
+
+12,412 components on `Blk`: fails in the plan with "the push program is too large" (`MAX_LST = 32768` in `plan.rs`), not on memory. Exit 143 about 4 minutes in. The limit is not specific to `Blk`; master not run at this size. The cost of a larger table to small apps is unmeasured.
+
+Query-level reuse has never been measured: the only self-profile attempt could not be read (reader `decodeme` 10.1.3 expects file format 8, this toolchain writes 9).
+
+`patches/plan-linear-uncommitted.patch` and `patches/runtime-gap3-uncommitted.patch` hold uncommitted changes saved from worktrees before removing them.
+
+## Blk result (2026-11-01): not merged, branch `blk-4k`
+
+4,079 release: master 3:52, 14.63 GB; Blk 3:33, 6.17 GB. Typical run time equal (107.5). Typical release app 13.3 vs 14.0 s. Dev initial 17.8 vs 11.3 s. Same-length edit about 1.9 vs 0.85 s. Longer edit (6 alternating rounds) about 2.3 vs 5.05 s. Cold check at 2,704: 26.7 vs 43.6 s. Fails the "no worse on dev rebuilds" condition because of the longer edit. Perps (12,412) on Blk stops at "push program is too large: raise the list pool" (plan.rs), so a pool cap has to be raised to try that size.
+
+## Caching and the `Blk` slowdown (2026-11-01)
+
+Self-profile on the typical app (823 components, dev profile). Flags must be identical on every build, including the profile dir: changing any `-Z` flag forces a near-full rebuild of about 10 s. The reader needs `analyzeme`/`decodeme` 12.0.3 for file format 9. Each case was profiled once.
+
+- **Body edit in the app crate: reused, per component.** The plan is not re-evaluated (`eval_to_allocation_raw`: 0 executed) and trait resolution does not re-run. About 9-10k queries execute against 168k loaded on master (231k on `Blk`), `mir_borrowck` runs once per edited file, and 1-4 of 82 codegen units recompile.
+- **Body edit in the library crate: not reused.** About 130-178k `eval_to_allocation_raw` re-execute with only 1 codegen unit recompiled. Profiled, that is 8.2 s on master and 7.5 s on `Blk` (about 3.7 s self), but profiling inflates it: unprofiled, the same edit takes 3.65-3.94 s on master and 2.9 s on `Blk`. Cause not investigated. `typeck_root` shows only 2 executions in these profiles, so nothing is claimed about per-component type-check in this case.
+- **Not tested:** reuse across different roots or apps.
+
+**Why `Blk` is slower on a length change:** every length change re-runs `exported_generic_symbols`, part of sharing generics between crates. On master it costs about 0.46 s. On `Blk` it takes 2-5.5 s inclusive, because of the normalization and const evaluation it triggers (`try_normalize_generic_arg_after_erasing_regions`, `eval_to_allocation_raw`). Why a length change triggers it, and why `Blk`'s types are so costly there, are not established. Profiled `Blk` walls also differ by edit (6.5 s big only, 3.0 s big + 3 small), unexplained.
+
+Confirmed by turning it off with `RUSTFLAGS=-Zshare-generics=n` (dev rebuilds, 3 rounds, seconds):
+
+| Edit | Master | `Blk` | Master, flag | `Blk`, flag |
+|---|---|---|---|---|
+| Big, same length | 1.8-1.9 | 0.8 | 1.6 | 0.7-0.8 |
+| Big + 3 small, same length | 1.8 | 0.8-0.9 | 1.6-1.7 | 0.8 |
+| Big + 3 small, length changes | 2.2-2.5 | 4.8-4.9 | 1.6-1.7 | 0.8 |
+| First dev build (1 run) | 18.2 | 11.2 | 17.1 | 11.3 |
+
+With the flag on the typical app (one run each unless noted): release app/runner 13.3/18.3 s on master and 13.9/19.4 s on `Blk`, against 13.2/18.4 and 13.9/19.6 without it. The release runner binary is the same size with and without it (36,064,712 and 35,925,760 bytes). Framework run time 107.4 and 108.0 ns, against 108.4 and 108.8 without it, within noise. Library edit (2 real edits each) 2.92-2.96 s on master and 2.81-2.83 s on `Blk`, against 3.65-3.94 and 2.89-2.90 without it. On `blk-4k` with the flag: `cargo test` 18/18 suites, `check_errors.sh` 30/30.
+
+Build folder on this app: 3.6-3.7 GB on master, about 0.8 GB on `Blk`. Peak memory on a library edit: about 2.0 GB on master, 0.8 GB on `Blk`. `Blk` remains unmerged pending the user's decision.
+
+## Run-time gap: state and next step (2026-11-01)
+
+This replaces "mostly closed" above: +1.7 ns came from the cloud VM. It is about 8% on the local machine (107.6 vs 99.6 ns, `measure.py` medians).
+
+Typical harness, 823 components, `--mode on`, `taskset -c 2`, per packet:
+
+| | Cycles | Mispredicts | `ls_stlf` | `load_not_complete` |
+|---|---|---|---|---|
+| Framework, random keys | 603.8 | 2.20 | 12.80 | 29.2 |
+| Baseline, random keys | 557.9 | 2.24 | 3.21 | 18.6 |
+| Framework, sorted keys | 491.9 | 0.90 | 14.84 | |
+| Baseline, sorted keys | 488.9 | 0.89 | 3.85 | |
+
+About 46 cycles remain at equal mispredict counts, nearly all only with random keys. Marginal cycles per mispredict are about 85 vs 49.
+
+Ruled out as the main cause: compare tree (the flat chain took about 8 cycles and is merged), mispredict count, code footprint, alignment. Packet copy is at most about 12 cycles. Key in a register is about 9 cycles, not built: it needs a plan table.
+Open suspect, unconfirmed: about 7-9 extra store forwards per packet, from outputs stored and reloaded by readers.
+
+**Closed: gap accepted (2026-11-01), by the bounded rule of at least about 15 cycles.** The suspect was wrong. A `1:t`/`1:d` trace of one key-0 packet per side found no component output stored and reloaded by a reader; the extra close store/load pairs (about 9-14) are the packet copy (about 4-5) and the input-reference array `Big::update` receives (about 5-10). Whether each pair actually forwards was not checked.
+
+`--big-inline` (per packet, same session, 5 rounds) roughly halved `ls_stlf`, but cycles did not follow with random keys:
+
+| Keys | Variant | Cycles | Mispredicts | `ls_stlf` | `load_not_complete` |
+|---|---|---|---|---|---|
+| Random | Framework | 602.8 | 2.21 | 12.81 | 28.8 |
+| Random | `--big-inline` | 609.4 | 2.23 | 6.90 | 29.7 |
+| Random | Baseline | 556.2 | 2.24 | 3.22 | 18.1 |
+| Sorted | Framework | 491.6 | 0.90 | 14.85 | 4.6 |
+| Sorted | `--big-inline` | 482.7 | 0.90 | 6.51 | 4.2 |
+| Sorted | Baseline | 489.0 | 0.89 | 3.87 | 3.4 |
+
+So store forwards are not the main cost. The remaining gap is about 46 cycles with random keys only, cause unknown; marginal cost per mispredict is about 85 vs 49 cycles. Removal of the array in the `--big-inline` build was not verified directly. Branch `reg-outputs` has no commits.
+
+Measurement caveat: changing `-Z` flags on only the timed build forces a near-full rebuild of about 12 s on both sides.
+
+Open question, unanswered by the user: passing the root packet by reference (about 2-3 ns on a slower machine, changes the API). Left as is.
+
+## Handler API direction (after optimization, not built, syntax not confirmed)
+
+Replace `#[derive(Handler)]`/`#[handles]`. Agreed: Oms is a normal component and the annotation stays `#[subscribe]`. The user asked for "more rust syntax" and has not confirmed this form, so show it to them first:
+
+```rust
+#[subscribe(
+    limits: Limits,
+    impl Quoter<Btc>,
+    for S in AllSymbols { impl Quoter<S> },
+    for (X, S) in Product<Venues, Coins> { impl Book<X, S> },
+)]
+```
+
+With `impl<S> UpdateHandler<Quoter<S>>` plus plain `Component::update`, the buffer as a field on `self`, no `Collect`/`begin`/`Buf`. Catalogs are plain nested tuples with `M<X, S>` pairs and `Product`/`Concat`/`Zip`, no filtering.
