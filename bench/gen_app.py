@@ -929,7 +929,7 @@ pub fn run_all_batch(h: &mut Hand, pkts: &[Wire]) {{
 """)
 
 
-def gen_runner(out, M):
+def gen_runner(out, M, mode):
     r = f"{out}/runner"
     write(f"{r}/Cargo.toml", """[package]
 name = "runner"
@@ -947,11 +947,27 @@ app = { path = "../app", optional = true }
 baseline = { path = "../baseline", optional = true }
 dataflow-flat = { path = "%s/dataflow-flat", optional = true }
 """ % LIB)
+    KINDF = "" if mode == "enum" else """    // --kind E:B (E = 0 lighter, 1 binance, 2 hyper; B = d depth, t trade): time only those packets
+    let pk = match std::env::args().skip_while(|x| x != "--kind").nth(1) {
+        None => pk,
+        Some(k) => {
+            let (e, b) = k.split_once(':').unwrap();
+            let (e, d) = (e.parse::<usize>().unwrap(), b == "d");
+            pk.into_iter().filter(|w| {
+                let (we, f) = match w { Wire::Lighter(f) => (0, f), Wire::Binance(f) => (1, f), Wire::Hyper(f) => (2, f) };
+                we == e && matches!(f.body, Body::Depth(_)) == d
+            }).collect::<Vec<_>>()
+        }
+    };
+    let npk = pk.len();
+    eprintln!("packets {npk}");
+"""
     write(f"{r}/src/main.rs", f"""//! usage: runner [--packets N] [--reps R] [--rounds K] [--all]
 #![allow(long_running_const_eval)]
 //! Verifies framework == baseline (checksums), then times them in alternating rounds and prints
 //! `RESULT <side> min=<ns/packet> median=<ns/packet>` lines.
 use marketlib::{{feed_gen, stats}};
+#[allow(unused_imports)] use marketlib::wire::*;
 use std::time::Instant;
 
 const COUNTS: [u32; 3] = [{M.n[0]}, {M.n[1]}, {M.n[2]}];
@@ -967,7 +983,7 @@ fn main() {{
     let rounds = arg("--rounds", 11);
     let with_all = std::env::args().any(|x| x == "--all");
     let pk = feed_gen::packets(npk, COUNTS, 0x5EED);
-
+{KINDF}
     #[cfg(feature = "fw")]
     let mut fw = app::build();
     #[cfg(feature = "fw")]
@@ -1067,7 +1083,7 @@ members = ["marketlib", "app", "baseline", "runner"]
     gen_lib(out, M, a.mode, a.core_inline)
     gen_app(out, M, a.mode)
     gen_baseline(out, M, a.mode, a.core_inline)
-    gen_runner(out, M)
+    gen_runner(out, M, a.mode)
     print(f"{out}: mode={a.mode} markets L/B/H={M.n} components={M.components()} crosses={len(M.cross)} edges~{M.edges()}")
 
 
