@@ -357,6 +357,88 @@ impl Component for A {
 fn main() {}
 EOF
 
+# --- keyed selectors (On<S>) ---------------------------------------------------------------------------
+
+# Rule 6 when the orphan is the first leaf (it takes execution position 0, not the root): reported by the
+# plan, not as an arithmetic underflow in the component position.
+CMD[orphan_first]=build
+PATTERN[orphan_first]='E0080.*Orphan is not reachable from the root'
+read -r -d '' BODY[orphan_first] <<'EOF2'
+#[derive(ComponentSubscription)]
+pub struct Orphan;
+impl Component for Orphan {
+    type Config = ();
+    type Output = Option<u64>;
+    fn new((): (), _: Self::Init<'_>) -> (Self, Option<u64>) { (Orphan, None) }
+    fn update(&mut self, _: Self::Input<'_>) -> Option<u64> { None }
+}
+#[derive(ComponentSubscription)]
+#[subscribe(o: Orphan => Some, s: Src)]
+pub struct B;
+impl Component for B {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (B, 0) }
+    fn update(&mut self, _: Self::Input<'_>) -> u64 { 0 }
+}
+fn main() { let _ = Pipeline::<Poll, (B,)>::build(Configs::new()); }
+EOF2
+
+# On<S> on a parent whose output is not Keyed.
+CMD[on_not_keyed]=check
+PATTERN[on_not_keyed]='E0277.*On<_>. needs an output that implements .Keyed.'
+read -r -d '' BODY[on_not_keyed] <<'EOF2'
+use dataflow_flat::{On, Symbol};
+pub struct Btc;
+impl Symbol for Btc { const KEY: u32 = 0; const NAME: &'static str = "Btc"; }
+#[derive(ComponentSubscription)]
+#[subscribe(x: Src => On<Btc>)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (A, 0) }
+    fn update(&mut self, _: Self::Input<'_>) -> u64 { 0 }
+}
+fn main() {}
+EOF2
+
+# Two different symbol types with one KEY on one parent.
+CMD[symbols_share_key]=build
+PATTERN[symbols_share_key]='E0080.*symbols Btc and Xbt share key 0'
+read -r -d '' BODY[symbols_share_key] <<'EOF2'
+use dataflow_flat::{Keyed, On, Symbol};
+pub struct Btc;
+impl Symbol for Btc { const KEY: u32 = 0; const NAME: &'static str = "Btc"; }
+pub struct Xbt;
+impl Symbol for Xbt { const KEY: u32 = 0; const NAME: &'static str = "Xbt"; }
+pub struct Frame(u32, u64);
+impl Keyed for Frame {
+    type Item = u64;
+    fn key(&self) -> Option<u32> { Some(self.0) }
+    fn item(&self) -> &u64 { &self.1 }
+}
+#[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
+pub struct Ws;
+impl Component for Ws {
+    type Config = ();
+    type Output = Frame;
+    fn new((): (), _: Self::Init<'_>) -> (Self, Frame) { (Ws, Frame(0, 0)) }
+    fn update(&mut self, _: Self::Input<'_>) -> Frame { Frame(0, 0) }
+}
+#[derive(ComponentSubscription)]
+#[subscribe(a: Ws => On<Btc>, b: Ws => On<Xbt>)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (A, 0) }
+    fn update(&mut self, _: Self::Input<'_>) -> u64 { 0 }
+}
+fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }
+EOF2
+
 ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        self_cycle
        too_many_components root_not_a_root sink_is_the_root
@@ -364,7 +446,7 @@ ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        unreachable_component second_root wrong_root_type
        keep_input_reference name_input_struct_outside unused_config
        non_exclusive_join exclusive_join_ok demux_reader_not_implied selector_unreachable_component
-       selector_wrong_input)
+       selector_wrong_input orphan_first on_not_keyed symbols_share_key)
 
 run_case() {
     local name=$1 dir="$CASES_DIR/$1"

@@ -99,11 +99,11 @@ const MSG: usize = 512;
 
 /// Assemble the parts into a byte buffer (`panic!` can't format in a `const
 /// fn`). Returns the buffer and the length used.
-const fn message(parts: [&[u8]; 4]) -> ([u8; MSG], usize) {
+const fn message(parts: &[&[u8]]) -> ([u8; MSG], usize) {
     let mut buf = [0u8; MSG];
     let mut n = 0;
     let mut p = 0;
-    while p < 4 {
+    while p < parts.len() {
         let part = parts[p];
         let mut i = 0;
         while i < part.len() && n < buf.len() {
@@ -156,6 +156,7 @@ const fn enter<N: Node, C: [const] ChainWalk<N::Output>>(plan: &mut Plan, parent
         plan.table.put(slot, i);
         plan.ids[i] = id;
         plan.kind[i] = N::KIND;
+        plan.listener[i] = N::LISTENER;
         plan.first_parent[i] = parent;
         plan.first_pos[i] = pos;
         plan.len = i + 1;
@@ -359,6 +360,16 @@ pub struct Plan {
     dn_prev: [u32; MAX_DECISIONS],
     dn_id: [TypeId; MAX_DECISIONS],
     dn_key: [u32; MAX_DECISIONS],
+    /// Is the decision a keyed selector (`On`), and where its name is kept.
+    dn_keyed: [bool; MAX_DECISIONS],
+    dn_nm: [u32; MAX_DECISIONS],
+    /// Is the node a `Listener`? Its requests: `lk_n[i]` sorted, distinct keys
+    /// at `lk_pool[lk_off[i]..]`.
+    listener: [bool; MAX_COMPONENTS],
+    lk_off: [u32; MAX_COMPONENTS],
+    lk_n: [u32; MAX_COMPONENTS],
+    lk_pool: [u32; MAX_DECISIONS],
+    lk_len: usize,
     /// Terms: at `tpool[o]` the number of decisions, then the decisions.
     /// Offset 0 is the empty term ("always").
     tpool: [u32; TPOOL],
@@ -458,6 +469,13 @@ impl Plan {
             dn_prev: [NONE; MAX_DECISIONS],
             dn_id: [BLANK; MAX_DECISIONS],
             dn_key: [0; MAX_DECISIONS],
+            dn_keyed: [false; MAX_DECISIONS],
+            dn_nm: [NONE; MAX_DECISIONS],
+            listener: [false; MAX_COMPONENTS],
+            lk_off: [0; MAX_COMPONENTS],
+            lk_n: [0; MAX_COMPONENTS],
+            lk_pool: [0; MAX_DECISIONS],
+            lk_len: 0,
             tpool: [0; TPOOL],
             tp_len: 1,
             olist: [0; OPOOL],
@@ -508,9 +526,17 @@ impl Plan {
         }
         if !plan.failed {
             plan.number_components();
+            plan.collect_requests();
         }
         if !plan.failed {
             plan.build_program();
+        }
+        if plan.failed {
+            // The program of a failed plan is empty (the types computed from it
+            // must still be well-formed; `check` reports the error).
+            plan.pg_len = 0;
+            plan.ch_len = 0;
+            plan.root_prog = plan.new_node(PG_SEQ, 0, 0);
         }
         plan
     }
@@ -521,7 +547,7 @@ impl Plan {
     }
 
     const fn fail4(&mut self, a: &str, b: &str, c: &str, d: &str) {
-        self.fail_msg(message([a.as_bytes(), b.as_bytes(), c.as_bytes(), d.as_bytes()]));
+        self.fail_msg(message(&[a.as_bytes(), b.as_bytes(), c.as_bytes(), d.as_bytes()]));
     }
 
     const fn fail_msg(&mut self, m: ([u8; MSG], usize)) {
@@ -547,10 +573,15 @@ impl Plan {
 
     /// Keep (the start of) `name` for the messages about edge `e`.
     const fn set_edge_name(&mut self, e: usize, name: &str) {
+        self.edge_nm[e] = self.keep_name(name);
+    }
+
+    /// Keep (the start of) `name`; returns where, or `NONE` if the pool is full.
+    const fn keep_name(&mut self, name: &str) -> u32 {
         let bytes = name.as_bytes();
         let n = if bytes.len() < NAME { bytes.len() } else { NAME };
         if self.nm_len + 1 + n > NPOOL {
-            return;
+            return NONE;
         }
         let at = self.nm_len;
         self.nm_pool[at] = n as u8;
@@ -560,13 +591,16 @@ impl Plan {
             k += 1;
         }
         self.nm_len = at + 1 + n;
-        self.edge_nm[e] = at as u32;
+        at as u32
     }
 
     const fn edge_name(&self, e: usize) -> &str {
-        let at = self.edge_nm[e];
+        self.name_at(self.edge_nm[e], "a selected node")
+    }
+
+    const fn name_at(&self, at: u32, default: &'static str) -> &str {
         if at == NONE {
-            return "a selected node";
+            return default;
         }
         let at = at as usize;
         let n = self.nm_pool[at] as usize;
@@ -574,7 +608,7 @@ impl Plan {
         let (name, _) = rest.split_at(n);
         match core::str::from_utf8(name) {
             Ok(s) => s,
-            Err(_) => "a selected node",
+            Err(_) => default,
         }
     }
 
@@ -583,13 +617,39 @@ impl Plan {
     /// The decision for selector `id` (with `key`) applied to the output of
     /// node `node` after decision `prev` of its chain (`NONE` for the first):
     /// found, or recorded. Edges that share a chain prefix share its decisions.
-    pub(crate) const fn decision(&mut self, node: u32, prev: u32, id: TypeId, key: u32) -> u32 {
+    pub(crate) const fn decision(&mut self, node: u32, prev: u32, id: TypeId, key: u32, keyed: bool, label: &str) -> u32 {
         let mut d = 0;
         while d < self.dn_len {
             if self.dn_node[d] == node && self.dn_prev[d] == prev && self.dn_id[d] == id {
                 return d as u32;
             }
             d += 1;
+        }
+        if keyed {
+            // Two symbols with one key at one place would be one alternative
+            // with two names: reject.
+            let mut x = 0;
+            while x < self.dn_len {
+                if self.dn_keyed[x] && self.dn_node[x] == node && self.dn_prev[x] == prev && self.dn_key[x] == key {
+                    let mut digits = [0u8; 10];
+                    let mut nd = 0;
+                    let mut v = key;
+                    loop {
+                        digits[9 - nd] = b'0' + (v % 10) as u8;
+                        nd += 1;
+                        v /= 10;
+                        if v == 0 {
+                            break;
+                        }
+                    }
+                    let (_, num) = digits.split_at(10 - nd);
+                    let other = self.name_at(self.dn_nm[x], "a symbol");
+                    let m = message(&[b"symbols ", other.as_bytes(), b" and ", label.as_bytes(), b" share key ", num]);
+                    self.fail_msg(m);
+                    return x as u32;
+                }
+                x += 1;
+            }
         }
         if self.dn_len == MAX_DECISIONS {
             self.fail("too many selectors: ", "raise dataflow_flat::MAX_DECISIONS", "");
@@ -602,6 +662,10 @@ impl Plan {
         self.dn_key[d] = key;
         self.dn_owner[d] = self.cur_sub;
         self.dn_opos[d] = self.cur_pos;
+        self.dn_keyed[d] = keyed;
+        if keyed {
+            self.dn_nm[d] = self.keep_name(label);
+        }
         self.dn_len = d + 1;
         d as u32
     }
@@ -782,7 +846,7 @@ impl Plan {
                         k += 1;
                     }
                     if !ok {
-                        let m = message([
+                        let m = message(&[
                             name.as_bytes(),
                             b" reads ",
                             self.edge_name(e as usize).as_bytes(),
@@ -823,6 +887,50 @@ impl Plan {
                 e = self.edge_next[e as usize];
             }
         }
+    }
+
+    /// The requests of the listeners: for each listener node, the sorted,
+    /// distinct keys of the keyed decisions that read its output, directly or
+    /// after other selectors.
+    const fn collect_requests(&mut self) {
+        let mut i = 0;
+        while i < self.len {
+            if self.listener[i] {
+                self.lk_off[i] = self.lk_len as u32;
+                let mut n = 0usize;
+                let mut d = 0;
+                while d < self.dn_len {
+                    if self.dn_keyed[d] && self.dn_node[d] as usize == i {
+                        // Insert the key into the sorted run at lk_pool[off..off+n].
+                        let key = self.dn_key[d];
+                        let off = self.lk_len;
+                        let mut at = 0;
+                        while at < n && self.lk_pool[off + at] < key {
+                            at += 1;
+                        }
+                        if !(at < n && self.lk_pool[off + at] == key) {
+                            let mut m = n;
+                            while m > at {
+                                self.lk_pool[off + m] = self.lk_pool[off + m - 1];
+                                m -= 1;
+                            }
+                            self.lk_pool[off + at] = key;
+                            n += 1;
+                        }
+                    }
+                    d += 1;
+                }
+                self.lk_n[i] = n as u32;
+                self.lk_len += n;
+            }
+            i += 1;
+        }
+    }
+
+    /// The keys requested of the listener at plan index `i` (empty for other nodes).
+    pub(crate) fn listener_keys(&self, i: usize) -> &[u32] {
+        let off = self.lk_off[i] as usize;
+        &self.lk_pool[off..off + self.lk_n[i] as usize]
     }
 
     /// Component positions: the components in execution order.

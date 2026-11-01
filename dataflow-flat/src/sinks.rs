@@ -8,6 +8,7 @@ use crate::component::{DepList, Sub};
 use crate::drive::{ConstructCtx, ConstructPh, Drive, Exec, Fired, FiredOps, Pn, PushCtx, PushPh, RgCl, RootProg};
 use crate::flat::{FlatTop, Whole};
 use crate::gather::Layout;
+use crate::listen::{ListenCtx, ListenPh};
 use crate::node::{AnchorKind, Comp, Node, Root, KIND_ANCHOR};
 use crate::plan::{Plan, Planned, Upstream};
 use crate::store::{Empty, Finish, OutM, OutOptM, StateM, StateOptM};
@@ -110,6 +111,9 @@ pub trait Sinks<R>: SinkList {
     fn make(pass: &mut ConstructPass) -> Self::Store;
     #[doc(hidden)]
     fn push(store: &mut Self::Store, root: R);
+    /// Tell each listener the keys its subscribers read. Called once by `build`.
+    #[doc(hidden)]
+    fn listen(store: &mut Self::Store);
 }
 
 impl<R: Root, S: SinkList> Sinks<R> for S
@@ -119,6 +123,7 @@ where
     Whole<Anchor<R, S>>:
         Drive<Anchor<R, S>, ConstructPh<Anchor<R, S>>, <Whole<Anchor<R, S>> as RgCl>::Cl>,
     Pn<Anchor<R, S>, { RootProg::<Anchor<R, S>>::N }>: Exec<Anchor<R, S>, PushPh<Anchor<R, S>>>,
+    Whole<Anchor<R, S>>: Drive<Anchor<R, S>, ListenPh<Anchor<R, S>>, <Whole<Anchor<R, S>> as RgCl>::Cl>,
 {
     type Store = Store<<Anchor<R, S> as Layout>::States, <Anchor<R, S> as Layout>::Outs>;
 
@@ -147,5 +152,11 @@ where
         let mut ctx =
             PushCtx::<A<R, S>> { root: &root, states: &mut store.states, outs: &mut store.outs, fired: <<A<R, S> as Layout>::Fired as FiredOps>::new() };
         <Pn<A<R, S>, { RootProg::<A<R, S>>::N }> as Exec<A<R, S>, PushPh<A<R, S>>>>::exec(&mut ctx);
+    }
+
+    fn listen(store: &mut Self::Store) {
+        type A<R, S> = Anchor<R, S>;
+        let mut ctx = ListenCtx::<A<R, S>> { states: &mut store.states };
+        <Whole<A<R, S>> as Drive<A<R, S>, ListenPh<A<R, S>>, <Whole<A<R, S>> as RgCl>::Cl>>::drive(&mut ctx);
     }
 }

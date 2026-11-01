@@ -251,7 +251,7 @@ fn chain_ty(chain: &[Type]) -> TokenStream2 {
     t
 }
 
-#[proc_macro_derive(ComponentSubscription, attributes(subscribe))]
+#[proc_macro_derive(ComponentSubscription, attributes(subscribe, listener))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     expand(input).unwrap_or_else(|e| e.to_compile_error()).into()
@@ -409,6 +409,17 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     let module = format_ident!("__{}_input", name);
 
     // `Node` for a component. Its bounds are the component's own.
+    let listener = input.attrs.iter().any(|a| a.path().is_ident("listener"));
+    let listener_items = if listener {
+        quote! {
+            const LISTENER: bool = true;
+            fn __subscribe(this: &mut Self, keys: &[u32]) {
+                <Self as #krate::Listener>::subscribe(this, keys)
+            }
+        }
+    } else {
+        quote!()
+    };
     let (nimpl_generics, nty_generics, _) = generics.split_for_impl();
     let mut node_generics = generics.clone();
     node_generics.make_where_clause().predicates.push(parse_quote!(#name #ty_generics: #krate::Component));
@@ -461,6 +472,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
             type Subs = <#name #nty_generics as #krate::ComponentSubscription>::Deps;
             type Kind = #krate::CompKind;
             const KIND: u8 = #krate::KIND_COMPONENT;
+            #listener_items
         }
     })
 }
