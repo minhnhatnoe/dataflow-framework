@@ -102,6 +102,37 @@ macro_rules! pick_impl {
 }
 dataflow_macros::get_tuples!(pick_impl);
 
+/// The position `I` as a [`Target`].
+#[doc(hidden)]
+pub struct EntryPos<const I: usize>;
+impl<const I: usize> Target for EntryPos<I> {
+    const POS: usize = I;
+}
+
+/// The node and selector chain of the entry at position `P` in this node,
+/// which holds it in field `S`.
+#[doc(hidden)]
+pub trait PickEdge<W: Target, const S: usize> {
+    type E: Node;
+    type Ch;
+}
+impl<E: Node, C, const I: usize, W: Target> PickEdge<W, 0> for Sub<E, C, I> {
+    type E = E;
+    type Ch = C;
+}
+macro_rules! pick_edge_impl {
+    (($($g:ident)+) $k:tt $s:ident) => {
+        impl<W: Target, $($g: PosSpan),+> PickEdge<W, $k> for ($($g,)+)
+        where
+            $s: PosSelect<W> + PickEdge<W, { <$s as PosSelect<W>>::POS }>,
+        {
+            type E = <$s as PickEdge<W, { <$s as PosSelect<W>>::POS }>>::E;
+            type Ch = <$s as PickEdge<W, { <$s as PosSelect<W>>::POS }>>::Ch;
+        }
+    };
+}
+dataflow_macros::get_tuples!(pick_edge_impl);
+
 // ---------------------------------------------------------------------------
 // Down: the component type at plan index J below the one at plan index A
 // ---------------------------------------------------------------------------

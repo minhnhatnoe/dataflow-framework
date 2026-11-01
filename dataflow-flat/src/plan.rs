@@ -60,6 +60,21 @@ pub const MAX_DECISIONS: usize = 512;
 /// Upper bound on the terms of one node's condition (after absorption).
 pub const MAX_TERMS: usize = 64;
 
+/// Sizes of the push program (see [`Plan::build_program`]): nodes, child
+/// entries, the stack of component lists of the construction, the stack of
+/// small per-switch arrays, and the nesting depth of switches.
+const MAX_PROG: usize = 32768;
+const MAX_PCH: usize = 32768;
+const MAX_LST: usize = 32768;
+const KPOOL: usize = 32768;
+const MAX_CTX: usize = 32;
+
+/// Program node kinds.
+pub(crate) const PG_SEQ: u8 = 0;
+pub(crate) const PG_RUN: u8 = 1;
+pub(crate) const PG_RUN_IF: u8 = 2;
+pub(crate) const PG_SWITCH: u8 = 3;
+
 /// Sizes of the pools that hold terms (lists of decisions), the lists of
 /// terms of each node, and the names kept for messages.
 const TPOOL: usize = 16384;
@@ -153,6 +168,8 @@ const fn enter<N: Node, C: [const] ChainWalk<N::Output>>(plan: &mut Plan, parent
         if e == MAX_EDGES {
             plan.fail("too many subscriptions: ", "raise dataflow_flat::MAX_EDGES", "");
         } else {
+            plan.cur_sub = parent;
+            plan.cur_pos = pos;
             let dn = C::walk(plan, i as u32, NONE);
             plan.edge_to[e] = i as u32;
             plan.edge_dn[e] = dn;
@@ -374,6 +391,36 @@ pub struct Plan {
     cpos: [u32; MAX_COMPONENTS],
     by_cpos: [u32; MAX_COMPONENTS],
     n_comp: usize,
+    /// The subscriber and entry position the walk is at (owner of new decisions).
+    cur_sub: u32,
+    cur_pos: u32,
+    /// Per decision: the subscriber (plan index) and entry position of the edge
+    /// that first walked it.
+    dn_owner: [u32; MAX_DECISIONS],
+    dn_opos: [u32; MAX_DECISIONS],
+    /// Does a guarded run read whether this component fired?
+    flag_need: [bool; MAX_COMPONENTS],
+    /// The push program: nodes (`pg_*`) and their children (`ch_*`).
+    pg_len: usize,
+    pg_kind: [u8; MAX_PROG],
+    pg_a: [u32; MAX_PROG],
+    pg_b: [u32; MAX_PROG],
+    pg_c: [u32; MAX_PROG],
+    pg_d: [u32; MAX_PROG],
+    pg_e: [u32; MAX_PROG],
+    ch_len: usize,
+    ch_node: [u32; MAX_PCH],
+    ch_key: [u32; MAX_PCH],
+    root_prog: u32,
+    /// Work stacks of the construction of the program.
+    lst: [u32; MAX_LST],
+    lst_len: usize,
+    ib: [u32; MAX_LST],
+    ib_len: usize,
+    kpool: [u32; KPOOL],
+    kp_len: usize,
+    ctx: [u32; MAX_CTX],
+    ctx_len: usize,
     /// Names for messages.
     nm_pool: [u8; NPOOL],
     nm_len: usize,
@@ -441,6 +488,30 @@ impl Plan {
             cpos: [NONE; MAX_COMPONENTS],
             by_cpos: [NONE; MAX_COMPONENTS],
             n_comp: 0,
+            cur_sub: NONE,
+            cur_pos: 0,
+            dn_owner: [NONE; MAX_DECISIONS],
+            dn_opos: [0; MAX_DECISIONS],
+            flag_need: [false; MAX_COMPONENTS],
+            pg_len: 0,
+            pg_kind: [0; MAX_PROG],
+            pg_a: [0; MAX_PROG],
+            pg_b: [0; MAX_PROG],
+            pg_c: [0; MAX_PROG],
+            pg_d: [0; MAX_PROG],
+            pg_e: [0; MAX_PROG],
+            ch_len: 0,
+            ch_node: [0; MAX_PCH],
+            ch_key: [0; MAX_PCH],
+            root_prog: NONE,
+            lst: [0; MAX_LST],
+            lst_len: 0,
+            ib: [0; MAX_LST],
+            ib_len: 0,
+            kpool: [0; KPOOL],
+            kp_len: 0,
+            ctx: [0; MAX_CTX],
+            ctx_len: 0,
             nm_pool: [0; NPOOL],
             nm_len: 0,
             root_id,
@@ -456,6 +527,16 @@ impl Plan {
         if !plan.failed {
             plan.number_components();
             plan.collect_requests();
+        }
+        if !plan.failed {
+            plan.build_program();
+        }
+        if plan.failed {
+            // The program of a failed plan is empty (the types computed from it
+            // must still be well-formed; `check` reports the error).
+            plan.pg_len = 0;
+            plan.ch_len = 0;
+            plan.root_prog = plan.new_node(PG_SEQ, 0, 0);
         }
         plan
     }
@@ -579,6 +660,8 @@ impl Plan {
         self.dn_prev[d] = prev;
         self.dn_id[d] = id;
         self.dn_key[d] = key;
+        self.dn_owner[d] = self.cur_sub;
+        self.dn_opos[d] = self.cur_pos;
         self.dn_keyed[d] = keyed;
         if keyed {
             self.dn_nm[d] = self.keep_name(label);
@@ -864,6 +947,463 @@ impl Plan {
         }
     }
 
+
+    // -- the push program: construction ---------------------------------------
+    //
+    // The program is a tree of nodes: `Seq` (children in order), `Run` (a
+    // component, unconditionally), `RunIf` (a component guarded by its edges,
+    // as the flag-based push), `Switch` (branch on the key of the alternative
+    // a value is, one child per key). It is built by `emit` over a *context*
+    // of decisions known to hold: components whose condition has a term inside
+    // the context run straight-line; consecutive components that all wait for
+    // a decision at the same place of a node's trie form a segment, which
+    // becomes one switch whose branches repeat the process with the decision
+    // added. Order is kept: every list is in execution order and a segment is
+    // a run of consecutive entries of the list.
+
+    const fn dec_equiv(&self, a: u32, b: u32) -> bool {
+        let (a, b) = (a as usize, b as usize);
+        a == b
+            || (self.dn_node[a] == self.dn_node[b]
+                && self.dn_prev[a] == self.dn_prev[b]
+                && self.dn_key[a] == self.dn_key[b]
+                && self.dn_key[a] != crate::select::GUARD)
+    }
+    const fn held(&self, d: u32) -> bool {
+        let mut k = 0;
+        while k < self.ctx_len {
+            if self.dec_equiv(self.ctx[k], d) {
+                return true;
+            }
+            k += 1;
+        }
+        false
+    }
+    /// Does a decision of term `t` exclude a decision of the context?
+    const fn conflicts(&self, t: u32) -> bool {
+        let n = self.term_len(t);
+        let mut i = 0;
+        while i < n {
+            let x = self.term_item(t, i) as usize;
+            let mut j = 0;
+            while j < self.ctx_len {
+                let y = self.ctx[j] as usize;
+                if x != y
+                    && self.dn_node[x] == self.dn_node[y]
+                    && self.dn_prev[x] == self.dn_prev[y]
+                    && self.dn_key[x] != self.dn_key[y]
+                    && self.dn_key[x] != crate::select::GUARD
+                    && self.dn_key[y] != crate::select::GUARD
+                {
+                    return true;
+                }
+                j += 1;
+            }
+            i += 1;
+        }
+        false
+    }
+    const fn term_held(&self, t: u32) -> bool {
+        let n = self.term_len(t);
+        let mut i = 0;
+        while i < n {
+            if !self.held(self.term_item(t, i)) {
+                return false;
+            }
+            i += 1;
+        }
+        true
+    }
+    /// (some term is consistent with the context, some such term holds in it)
+    const fn consistent_static(&self, i: usize) -> (bool, bool) {
+        let mut cons = false;
+        let mut k = 0;
+        let cn = self.cn[i] as usize;
+        while k < cn {
+            let t = self.olist[self.co[i] as usize + k];
+            if !self.conflicts(t) {
+                cons = true;
+                if self.term_held(t) {
+                    return (true, true);
+                }
+            }
+            k += 1;
+        }
+        (cons, false)
+    }
+    /// Has node `x` run, with its output current, whenever the context holds?
+    const fn node_ready(&self, x: usize) -> bool {
+        if self.kind[x] == KIND_ROOT {
+            return true;
+        }
+        let mut k = 0;
+        let cn = self.cn[x] as usize;
+        while k < cn {
+            let t = self.olist[self.co[x] as usize + k];
+            if !self.conflicts(t) && self.term_held(t) {
+                return true;
+            }
+            k += 1;
+        }
+        false
+    }
+    /// The unheld keyed decision at place `(x, prev)` in term `t`, or `NONE`.
+    const fn dec_at(&self, t: u32, x: u32, prev: u32) -> u32 {
+        let n = self.term_len(t);
+        let mut i = 0;
+        while i < n {
+            let d = self.term_item(t, i);
+            let du = d as usize;
+            if self.dn_node[du] == x
+                && self.dn_prev[du] == prev
+                && self.dn_key[du] != crate::select::GUARD
+                && !self.held(d)
+            {
+                return d;
+            }
+            i += 1;
+        }
+        NONE
+    }
+    /// Does component `i` wait, in every consistent term, for a keyed decision at `(x, prev)`?
+    const fn can_pend_at(&self, i: usize, x: u32, prev: u32) -> bool {
+        let mut any = false;
+        let cn = self.cn[i] as usize;
+        let mut k = 0;
+        while k < cn {
+            let t = self.olist[self.co[i] as usize + k];
+            if !self.conflicts(t) {
+                if self.term_held(t) || self.dec_at(t, x, prev) == NONE {
+                    return false;
+                }
+                any = true;
+            }
+            k += 1;
+        }
+        any
+    }
+    /// The first place at which component `i` can wait for a keyed decision.
+    const fn first_pend(&self, i: usize) -> (bool, u32, u32) {
+        let cn = self.cn[i] as usize;
+        let mut k = 0;
+        while k < cn {
+            let t = self.olist[self.co[i] as usize + k];
+            if !self.conflicts(t) {
+                let n = self.term_len(t);
+                let mut j = 0;
+                while j < n {
+                    let d = self.term_item(t, j);
+                    let du = d as usize;
+                    let (x, prev) = (self.dn_node[du], self.dn_prev[du]);
+                    if self.dn_key[du] != crate::select::GUARD
+                        && !self.held(d)
+                        && (prev == NONE || self.held(prev))
+                        && self.node_ready(x as usize)
+                        && self.can_pend_at(i, x, prev)
+                    {
+                        return (true, x, prev);
+                    }
+                    j += 1;
+                }
+                return (false, 0, 0);
+            }
+            k += 1;
+        }
+        (false, 0, 0)
+    }
+
+    const fn new_node(&mut self, kind: u8, a: u32, b: u32) -> u32 {
+        let n = self.pg_len;
+        if n == MAX_PROG {
+            self.fail("the push program is too large: ", "raise dataflow_flat's MAX_PROG", "");
+            return 0;
+        }
+        self.pg_kind[n] = kind;
+        self.pg_a[n] = a;
+        self.pg_b[n] = b;
+        self.pg_len = n + 1;
+        n as u32
+    }
+    const fn push_item(&mut self, n: u32) {
+        if self.ib_len == MAX_LST {
+            self.fail("the push program is too large: ", "raise dataflow_flat's list pool", "");
+            return;
+        }
+        self.ib[self.ib_len] = n;
+        self.ib_len += 1;
+    }
+    const fn mk_run(&mut self, i: usize, guarded: bool) -> u32 {
+        if guarded {
+            let mut e = self.up_head[i];
+            while e != NONE {
+                let u = self.edge_to[e as usize] as usize;
+                if self.kind[u] == KIND_COMPONENT && !self.always[u] {
+                    self.flag_need[u] = true;
+                }
+                e = self.edge_next[e as usize];
+            }
+        }
+        let kind = if guarded { PG_RUN_IF } else { PG_RUN };
+        self.new_node(kind, self.cpos[i], 0)
+    }
+
+    /// Binary search in `kpool[m..m+nk]`.
+    const fn find_key(&self, m: usize, nk: usize, key: u32) -> (bool, usize) {
+        let (mut lo, mut hi) = (0, nk);
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            let v = self.kpool[m + mid];
+            if v == key {
+                return (true, mid);
+            } else if v < key {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        (false, lo)
+    }
+
+    const fn find_decision(&self, x: u32, prev: u32, key: u32) -> u32 {
+        let mut d = 0;
+        while d < self.dn_len {
+            if self.dn_node[d] == x && self.dn_prev[d] == prev && self.dn_key[d] == key {
+                return d as u32;
+            }
+            d += 1;
+        }
+        NONE
+    }
+
+    /// The program for the components `lst[lo..hi]` under the current context.
+    const fn emit(&mut self, lo: usize, hi: usize) -> u32 {
+        let mark = self.ib_len;
+        let mut k = lo;
+        while k < hi && !self.failed {
+            let i = self.lst[k] as usize;
+            let (cons, stat) = self.consistent_static(i);
+            if !cons {
+                k += 1;
+                continue;
+            }
+            if stat {
+                let n = self.mk_run(i, false);
+                self.push_item(n);
+                k += 1;
+                continue;
+            }
+            let (found, x, prev) = self.first_pend(i);
+            if !found {
+                let n = self.mk_run(i, true);
+                self.push_item(n);
+                k += 1;
+                continue;
+            }
+            let mut j = k + 1;
+            while j < hi {
+                let i2 = self.lst[j] as usize;
+                let (c2, s2) = self.consistent_static(i2);
+                if c2 && (s2 || !self.can_pend_at(i2, x, prev)) {
+                    break;
+                }
+                j += 1;
+            }
+            let n = self.emit_switch(k, j, x, prev);
+            self.push_item(n);
+            k = j;
+        }
+        let count = self.ib_len - mark;
+        let node = if count == 1 {
+            self.ib[mark]
+        } else {
+            let first = self.ch_len;
+            if first + count > MAX_PCH {
+                self.fail("the push program is too large: ", "raise dataflow_flat's child pool", "");
+                self.ib_len = mark;
+                return 0;
+            }
+            let mut c = 0;
+            while c < count {
+                self.ch_node[first + c] = self.ib[mark + c];
+                c += 1;
+            }
+            self.ch_len = first + count;
+            self.new_node(PG_SEQ, first as u32, count as u32)
+        };
+        self.ib_len = mark;
+        node
+    }
+
+    /// A switch for the segment `lst[lo..hi]` at the place `(x, prev)`.
+    const fn emit_switch(&mut self, lo: usize, hi: usize, x: u32, prev: u32) -> u32 {
+        let m = self.kp_len;
+        // 1. the keys, sorted
+        let mut nk = 0;
+        let mut q = lo;
+        while q < hi {
+            let i = self.lst[q] as usize;
+            let cn = self.cn[i] as usize;
+            let mut k = 0;
+            while k < cn {
+                let t = self.olist[self.co[i] as usize + k];
+                if !self.conflicts(t) {
+                    let d = self.dec_at(t, x, prev);
+                    if d != NONE {
+                        let key = self.dn_key[d as usize];
+                        let (found, at) = self.find_key(m, nk, key);
+                        if !found {
+                            if m + nk + 1 >= KPOOL {
+                                self.fail("the push program is too large: ", "raise dataflow_flat's key pool", "");
+                                return 0;
+                            }
+                            let mut z = nk;
+                            while z > at {
+                                self.kpool[m + z] = self.kpool[m + z - 1];
+                                z -= 1;
+                            }
+                            self.kpool[m + at] = key;
+                            nk += 1;
+                        }
+                    }
+                }
+                k += 1;
+            }
+            q += 1;
+        }
+        // layout: keys | start (nk+1) | stamp (nk) | child (nk)
+        let st = m + nk;
+        let sm = st + nk + 1;
+        let ch = sm + nk;
+        if ch + nk > KPOOL {
+            self.fail("the push program is too large: ", "raise dataflow_flat's key pool", "");
+            return 0;
+        }
+        let mut z = 0;
+        while z < nk + 1 {
+            self.kpool[st + z] = 0;
+            z += 1;
+        }
+        // 2. count and bucket (pass 0 counts, pass 1 fills)
+        let base = self.lst_len;
+        let mut pass = 0;
+        while pass < 2 {
+            let mut z = 0;
+            while z < nk {
+                self.kpool[sm + z] = 0;
+                z += 1;
+            }
+            if pass == 1 {
+                let mut sum = 0u32;
+                let mut z = 0;
+                while z < nk {
+                    let c = self.kpool[st + z];
+                    self.kpool[st + z] = sum;
+                    self.kpool[ch + z] = sum;
+                    sum += c;
+                    z += 1;
+                }
+                self.kpool[st + nk] = sum;
+                if base + sum as usize > MAX_LST {
+                    self.fail("the push program is too large: ", "raise dataflow_flat's list pool", "");
+                    return 0;
+                }
+            }
+            let mut q = lo;
+            while q < hi {
+                let i = self.lst[q] as usize;
+                let ord = (q - lo + 1) as u32;
+                let cn = self.cn[i] as usize;
+                let mut k = 0;
+                while k < cn {
+                    let t = self.olist[self.co[i] as usize + k];
+                    if !self.conflicts(t) {
+                        let d = self.dec_at(t, x, prev);
+                        if d != NONE {
+                            let (_, r) = self.find_key(m, nk, self.dn_key[d as usize]);
+                            if self.kpool[sm + r] != ord {
+                                self.kpool[sm + r] = ord;
+                                if pass == 0 {
+                                    self.kpool[st + r] += 1;
+                                } else {
+                                    let at = self.kpool[ch + r] as usize;
+                                    self.lst[base + at] = i as u32;
+                                    self.kpool[ch + r] += 1;
+                                }
+                            }
+                        }
+                    }
+                    k += 1;
+                }
+                q += 1;
+            }
+            pass += 1;
+        }
+        let total = self.kpool[st + nk] as usize;
+        self.lst_len = base + total;
+        self.kp_len = ch + nk;
+        // 3. the branches
+        let mut r = 0;
+        while r < nk && !self.failed {
+            let key = self.kpool[m + r];
+            let d = self.find_decision(x, prev, key);
+            if self.ctx_len == MAX_CTX {
+                self.fail("selectors are nested too deeply for the push program", "", "");
+                return 0;
+            }
+            self.ctx[self.ctx_len] = d;
+            self.ctx_len += 1;
+            let (blo, bhi) = (base + self.kpool[st + r] as usize, base + self.kpool[st + r + 1] as usize);
+            let c = self.emit(blo, bhi);
+            self.ctx_len -= 1;
+            self.kpool[ch + r] = c;
+            r += 1;
+        }
+        if self.failed {
+            return 0;
+        }
+        // 4. the node
+        let first = self.ch_len;
+        if first + nk > MAX_PCH {
+            self.fail("the push program is too large: ", "raise dataflow_flat's child pool", "");
+            return 0;
+        }
+        let mut r = 0;
+        while r < nk {
+            self.ch_node[first + r] = self.kpool[ch + r];
+            self.ch_key[first + r] = self.kpool[m + r];
+            r += 1;
+        }
+        self.ch_len = first + nk;
+        // the owner of the selector at this place (first key's decision)
+        let d0 = self.find_decision(x, prev, self.kpool[m]);
+        let owner = self.dn_owner[d0 as usize] as usize;
+        let mut depth = 0u32;
+        let mut p = prev;
+        while p != NONE {
+            depth += 1;
+            p = self.dn_prev[p as usize];
+        }
+        let n = self.new_node(PG_SWITCH, first as u32, nk as u32);
+        self.pg_c[n as usize] = self.cpos[owner];
+        self.pg_d[n as usize] = self.dn_opos[d0 as usize];
+        self.pg_e[n as usize] = depth;
+        self.lst_len = base;
+        self.kp_len = m;
+        n
+    }
+
+    const fn build_program(&mut self) {
+        let n = self.n_comp;
+        let mut q = 0;
+        while q < n {
+            self.lst[q] = self.by_cpos[q];
+            q += 1;
+        }
+        self.lst_len = n;
+        self.ctx_len = 0;
+        self.root_prog = self.emit(0, n);
+    }
+
     // -- queries ------------------------------------------------------------
 
     /// Is the node with this `TypeId` in the plan? (Run time, at build.)
@@ -925,7 +1465,7 @@ impl Plan {
     /// The `fired` flag of the component at plan index `i` (`NO_FLAG` if no
     /// condition reads whether it fired).
     pub(crate) const fn flag_idx(&self, i: usize) -> usize {
-        if self.flag[i] == NONE {
+        if self.flag[i] == NONE || !self.flag_need[i] {
             NO_FLAG
         } else {
             self.flag[i] as usize
@@ -934,7 +1474,53 @@ impl Plan {
 
     /// Number of `fired` flags a push needs.
     pub(crate) const fn n_flags(&self) -> usize {
-        self.n_flags
+        let mut n = 0;
+        let mut i = 0;
+        while i < self.len {
+            if self.flag_need[i] {
+                n += 1;
+            }
+            i += 1;
+        }
+        n
+    }
+
+    // -- the push program -----------------------------------------------------
+    pub(crate) const fn root_prog(&self) -> usize {
+        self.root_prog as usize
+    }
+    pub(crate) const fn pg_kind_of(&self, n: usize) -> u8 {
+        self.pg_kind[n]
+    }
+    /// Run: the component position. Seq/Switch: first child entry.
+    pub(crate) const fn pg_a_of(&self, n: usize) -> usize {
+        self.pg_a[n] as usize
+    }
+    /// Seq/Switch: number of child entries.
+    pub(crate) const fn pg_b_of(&self, n: usize) -> usize {
+        self.pg_b[n] as usize
+    }
+    /// Switch: component position and entry position of the edge that owns the
+    /// selector, and the depth of the selector in its chain.
+    pub(crate) const fn sw_pos(&self, n: usize) -> usize {
+        self.pg_c[n] as usize
+    }
+    pub(crate) const fn sw_entry(&self, n: usize) -> usize {
+        self.pg_d[n] as usize
+    }
+    pub(crate) const fn sw_depth(&self, n: usize) -> usize {
+        self.pg_e[n] as usize
+    }
+    pub(crate) const fn ch_node_of(&self, k: usize) -> usize {
+        self.ch_node[k] as usize
+    }
+    pub(crate) const fn ch_key_of(&self, k: usize) -> u32 {
+        self.ch_key[k]
+    }
+    /// Number of program nodes.
+    #[allow(dead_code)]
+    pub(crate) const fn prog_len(&self) -> usize {
+        self.pg_len
     }
 
     /// Number of terms of the condition of the node at plan index `i`.
@@ -1093,11 +1679,13 @@ mod trace {
         type Out = Poll;
         const KEY: u32 = 0;
         fn select(x: &Poll) -> Option<&Poll> { Some(x) }
+        fn key_of(_: &Poll) -> u32 { 0 }
     }
     impl crate::Select<Poll> for K1 {
         type Out = Poll;
         const KEY: u32 = 1;
         fn select(x: &Poll) -> Option<&Poll> { Some(x) }
+        fn key_of(_: &Poll) -> u32 { 1 }
     }
     macro_rules! scomp {
         ($name:ident, [$($sub:tt)*]) => {
@@ -1126,10 +1714,16 @@ mod trace {
         assert!(plan.always_idx(at(0)));
         assert!(!plan.always_idx(at(1)) && !plan.always_idx(at(2)) && !plan.always_idx(at(3)));
         assert_eq!((plan.n_terms(at(1)), plan.n_terms(at(2)), plan.n_terms(at(3))), (1, 1, 2));
-        // X and Y are read by the conditional Z; Z is read by nobody.
-        assert_eq!(plan.n_flags(), 2);
-        assert_ne!(plan.flag_idx(at(1)), plan.flag_idx(at(2)));
-        assert_eq!(plan.flag_idx(at(3)), NO_FLAG);
+        // The push dispatches on K0/K1 and runs X, Y, Z straight-line in each branch:
+        // no guarded run reads whether anything fired, so no flags.
+        assert_eq!(plan.n_flags(), 0);
+        assert_eq!(plan.flag_idx(at(1)), NO_FLAG);
+        // Program: one switch with two branches (K0: X, Z; K1: Y, Z).
+        assert_eq!(plan.pg_kind_of(plan.root_prog()), PG_SWITCH);
+        assert_eq!(plan.pg_b_of(plan.root_prog()), 2);
+        assert_eq!((plan.ch_key_of(plan.pg_a_of(plan.root_prog())), plan.ch_key_of(plan.pg_a_of(plan.root_prog()) + 1)), (0, 1));
+        let k0 = plan.ch_node_of(plan.pg_a_of(plan.root_prog()));
+        assert_eq!((plan.pg_kind_of(k0), plan.pg_b_of(k0)), (PG_SEQ, 2));
         assert_eq!(plan.n_components(), 3);
     }
 

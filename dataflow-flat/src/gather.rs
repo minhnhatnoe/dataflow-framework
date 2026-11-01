@@ -136,7 +136,8 @@ pub trait GatherIn<A: Layout>: DepList {
 macro_rules! gather_in_leaf {
     ([$($E:ident $C:ident $I:ident)*]) => {
         impl<A: Layout, $($E: Source<A>, $C: SelectChain<<$E as Node>::Output>, const $I: usize,)*> GatherIn<A> for ($(Sub<$E, $C, $I>,)*) {
-            #[inline]
+            #[cfg_attr(not(debug_assertions), inline(always))]
+            #[cfg_attr(debug_assertions, inline)]
             #[allow(unused_variables)]
             fn gather<'a>(root: &'a A::Root, outs: &'a A::Outs) -> Self::Inputs<'a> {
                 ($(<$C as SelectChain<<$E as Node>::Output>>::get(<$E as Source<A>>::fetch(root, outs)),)*)
@@ -148,7 +149,8 @@ dataflow_macros::leaf_shapes!(gather_in_leaf);
 macro_rules! gather_in_inner {
     ([$($K:ident)*]) => {
         impl<A: Layout, $($K: GatherIn<A>,)*> GatherIn<A> for ($($K,)*) {
-            #[inline]
+            #[cfg_attr(not(debug_assertions), inline(always))]
+            #[cfg_attr(debug_assertions, inline)]
             fn gather<'a>(root: &'a A::Root, outs: &'a A::Outs) -> Self::Inputs<'a> {
                 ($(<$K as GatherIn<A>>::gather(root, outs),)*)
             }

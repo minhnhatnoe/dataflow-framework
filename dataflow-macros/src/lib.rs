@@ -623,6 +623,20 @@ fn expand_demux(input: DeriveInput) -> syn::Result<TokenStream2> {
     let module = Ident::new(&snake_case(&name.to_string()), name.span());
     let mut items = Vec::new();
     let mut structs = Vec::new();
+    // `key_of`: the variant index of a value, for every selector of the enum.
+    let key_arms: Vec<TokenStream2> = data
+        .variants
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            let vname = &v.ident;
+            let i = i as u32;
+            match &v.fields {
+                syn::Fields::Unit => quote!(#name::#vname => #i),
+                _ => quote!(#name::#vname(..) => #i),
+            }
+        })
+        .collect();
     for (key, v) in data.variants.iter().enumerate() {
         let key = key as u32;
         let vname = &v.ident;
@@ -649,6 +663,12 @@ fn expand_demux(input: DeriveInput) -> syn::Result<TokenStream2> {
                     match __x {
                         #pat => ::core::option::Option::Some(#val),
                         _ => ::core::option::Option::None,
+                    }
+                }
+                #[inline(always)]
+                fn key_of(__x: &#name) -> u32 {
+                    match __x {
+                        #(#key_arms,)*
                     }
                 }
             }

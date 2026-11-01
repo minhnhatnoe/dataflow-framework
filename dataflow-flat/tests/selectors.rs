@@ -208,6 +208,9 @@ impl Select<Num> for Big {
     fn select(x: &Num) -> Option<&u32> {
         (x.0 > 10).then_some(&x.0)
     }
+    fn key_of(_: &Num) -> u32 {
+        GUARD
+    }
 }
 
 mod guard {
