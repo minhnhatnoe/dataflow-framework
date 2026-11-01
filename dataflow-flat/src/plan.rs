@@ -24,8 +24,8 @@
 //!   listing order per subscriber ([`Plan::upstream`]). Phase 1b computes
 //!   conditions from these.
 //!
-//! The checks that need only the walk are made in it, as const panics with the
-//! component's name: a graph with a second root or a root that is not the
+//! The checks that need only the walk are made in it and reported by
+//! [`Plan::check`] (a const panic with the component's name): a graph with a second root or a root that is not the
 //! pipeline's `R`, and a component that is not reachable from the root.
 //!
 //! A dependency cycle is found before the walk runs: the walk's trait bounds
@@ -59,10 +59,13 @@ const NO_PARENT: u32 = u32::MAX;
 // Const panics with a name
 // ---------------------------------------------------------------------------
 
-/// Panic in constant evaluation with `name` followed by `tail`. (`panic!` can't
-/// format in a `const fn`, so the message is assembled in a byte buffer.)
-const fn panic_named(name: &str, tail: &str) -> ! {
-    let mut buf = [0u8; 512];
+/// Longest error message kept in the plan.
+const MSG: usize = 256;
+
+/// Assemble `name` followed by `tail` into a byte buffer (`panic!` can't format
+/// in a `const fn`). Returns the buffer and the length used.
+const fn message(name: &str, tail: &str) -> ([u8; MSG], usize) {
+    let mut buf = [0u8; MSG];
     let mut n = 0;
     let parts = [name.as_bytes(), tail.as_bytes()];
     let mut p = 0;
@@ -76,11 +79,7 @@ const fn panic_named(name: &str, tail: &str) -> ! {
         }
         p += 1;
     }
-    let (msg, _) = buf.split_at(n);
-    match core::str::from_utf8(msg) {
-        Ok(s) => core::panicking::panic_display(&s),
-        Err(_) => panic!("invalid message"),
-    }
+    (buf, n)
 }
 
 // ---------------------------------------------------------------------------
@@ -107,14 +106,16 @@ const fn enter<N: Node>(plan: &mut Plan, parent: u32, pos: u32) -> (u32, bool) {
         (at, false)
     } else {
         if N::KIND == KIND_ROOT && !(id == plan.root_id) {
-            panic_named(
+            plan.fail(
                 type_name::<N>(),
                 " is a root, but the pipeline's root is a different type: a pipeline has exactly one root",
             );
         }
         let i = plan.len;
         if i == MAX_COMPONENTS {
-            panic!("too many components: raise dataflow_flat::MAX_COMPONENTS");
+            // Not recorded, not walked: the plan is not meaningful from here on.
+            plan.fail("too many components: ", "raise dataflow_flat::MAX_COMPONENTS");
+            return (0, false);
         }
         plan.table.put(slot, i);
         plan.ids[i] = id;
@@ -128,11 +129,12 @@ const fn enter<N: Node>(plan: &mut Plan, parent: u32, pos: u32) -> (u32, bool) {
     if parent != NO_PARENT {
         let e = plan.n_edges;
         if e == MAX_EDGES {
-            panic!("too many subscriptions: raise dataflow_flat::MAX_EDGES");
+            plan.fail("too many subscriptions: ", "raise dataflow_flat::MAX_EDGES");
+        } else {
+            plan.edge_from[e] = parent;
+            plan.edge_to[e] = i as u32;
+            plan.n_edges = e + 1;
         }
-        plan.edge_from[e] = parent;
-        plan.edge_to[e] = i as u32;
-        plan.n_edges = e + 1;
         // A node reached again is finished: if the root is upstream of it, it
         // is upstream of `parent` too. (A new node reports when it is left.)
         if !new && plan.reach[i] {
@@ -152,7 +154,7 @@ const fn leave<N: Node>(plan: &mut Plan, i: u32) {
     plan.done += 1;
     let reach = N::KIND == KIND_ROOT || N::KIND == KIND_ANCHOR || plan.has_up[i];
     if !reach {
-        panic_named(type_name::<N>(), " is not reachable from the root");
+        plan.fail(type_name::<N>(), " is not reachable from the root");
     }
     plan.reach[i] = true;
     if N::KIND == KIND_ROOT {
@@ -273,6 +275,13 @@ pub struct Plan {
     /// The pipeline's root type, and its index once the walk has met it.
     root_id: TypeId,
     root_idx: u32,
+    /// The first error the walk met (0 = none) and its message. The walk
+    /// carries on with a plan that is merely not meaningful: failing in the
+    /// plan itself, inside the types computed from it, makes the compiler
+    /// search for a very long time. [`Plan::check`] reports it, once.
+    failed: bool,
+    msg: [u8; MSG],
+    msg_len: usize,
 }
 
 impl Plan {
@@ -301,12 +310,36 @@ impl Plan {
             n_edges: 0,
             root_id,
             root_idx: NO_PARENT,
+            failed: false,
+            msg: [0; MSG],
+            msg_len: 0,
         };
         visit::<A>(&mut plan, NO_PARENT, 0);
-        if plan.root_idx == NO_PARENT || plan.post_of[plan.root_idx as usize] != 0 {
-            panic!("the root is not reachable from the sinks");
+        if !plan.failed && (plan.root_idx == NO_PARENT || plan.post_of[plan.root_idx as usize] != 0) {
+            plan.fail("the sinks", " do not depend on the root");
         }
         plan
+    }
+
+    /// Record the first error.
+    const fn fail(&mut self, name: &str, tail: &str) {
+        if !self.failed {
+            let (msg, len) = message(name, tail);
+            self.failed = true;
+            self.msg = msg;
+            self.msg_len = len;
+        }
+    }
+
+    /// Panic (in constant evaluation) with the first error the walk met, if any.
+    pub(crate) const fn check(&self) {
+        if self.failed {
+            let (msg, _) = self.msg.split_at(self.msg_len);
+            match core::str::from_utf8(msg) {
+                Ok(s) => core::panicking::panic_display(&s),
+                Err(_) => panic!("invalid message"),
+            }
+        }
     }
 
     /// Is the node with this `TypeId` in the plan? (Run time, at build.)
@@ -414,4 +447,52 @@ impl Plan {
 #[doc(hidden)]
 pub trait Planned: Node {
     const PLAN: &'static Plan;
+    /// Evaluating this reports the plan's error, if any (a const panic naming
+    /// the component). Evaluated once, by `Pipeline::build`.
+    const CHECK: () = Self::PLAN.check();
+}
+
+#[cfg(test)]
+mod trace {
+    use super::*;
+    use crate::node::{KIND_COMPONENT, KIND_ROOT};
+    use crate::sinks::Anchor;
+    use crate::{Component, ComponentSubscription, Root};
+
+    #[derive(Root)]
+    pub struct Poll;
+
+    macro_rules! comp {
+        ($name:ident, [$($n:ident: $d:ty),*]) => {
+            #[derive(ComponentSubscription)]
+            #[subscribe($($n: $d),*)]
+            pub struct $name;
+            impl Component for $name {
+                type Config = ();
+                type Output = u8;
+                fn new((): (), _: Self::Init<'_>) -> (Self, u8) { ($name, 0) }
+                fn update(&mut self, _: Self::Input<'_>) -> u8 { 0 }
+            }
+        };
+    }
+    comp!(A, [p: Poll]);
+    comp!(B, [a: A, p: Poll]);
+    comp!(C, [a: A]);
+
+    #[test]
+    fn plan_positions_and_upstreams() {
+        let plan = <Anchor<Poll, (B, C)> as Planned>::PLAN;
+        plan.check();
+        // Post-order: Poll, A, B, C, anchor.
+        assert_eq!(plan.len(), 5);
+        assert_eq!(plan.kind_of(plan.idx_at_post(0)), KIND_ROOT);
+        assert_eq!(plan.kind_of(plan.idx_at_post(1)), KIND_COMPONENT);
+        assert_eq!(plan.kind_of(plan.idx_at_post(4)), KIND_ANCHOR);
+        // B (position 2) lists A then Poll; C (3) lists A; the anchor lists B, C.
+        assert_eq!((plan.upstream_count(2), plan.upstream(2, 0), plan.upstream(2, 1)), (2, 1, 0));
+        assert_eq!((plan.upstream_count(3), plan.upstream(3, 0)), (1, 1));
+        assert_eq!((plan.upstream_count(4), plan.upstream(4, 0), plan.upstream(4, 1)), (2, 2, 3));
+        assert_eq!(plan.upstream_count(0), 0);
+        assert!(plan.contains(TypeId::of::<A>()) && !plan.contains(TypeId::of::<u8>()));
+    }
 }

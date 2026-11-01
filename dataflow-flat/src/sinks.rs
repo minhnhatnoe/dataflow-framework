@@ -126,6 +126,8 @@ where
 
     fn make(pass: &mut ConstructPass) -> Self::Store {
         type A<R, S> = Anchor<R, S>;
+        // Report an invalid graph (a second root, an unreachable component).
+        const { <A<R, S> as Planned>::CHECK };
         let mut states = <<A<R, S> as Layout>::StatesOpt as Empty>::empty();
         let mut outs = <<A<R, S> as Layout>::OutsOpt as Empty>::empty();
         {

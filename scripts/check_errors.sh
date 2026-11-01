@@ -14,14 +14,18 @@ CASES_DIR="$ROOT/target/error-cases"
 export CARGO_TARGET_DIR="$ROOT/target/error-cases-target"
 TIMEOUT="${TIMEOUT:-120}"
 
-PRELUDE='use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline, Root};
+PRELUDE='use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline, Root, Sinks};
+
+#[derive(Root)]
+pub struct Poll;
 
 #[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
 pub struct Src;
 impl Component for Src {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { Src }
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (Src, 0) }
     fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 1 }
 }
 '
@@ -39,13 +43,13 @@ pub struct A;
 impl Component for A {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { A }
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (A, 0) }
     fn update(&mut self, input: Self::Input<'"'"'_>) -> u64 { *input.valeu }
 }
 fn main() {}'
 
 CMD[not_a_component]=check
-PATTERN[not_a_component]='E0277.*Component|Component.*not (satisfied|implemented)'
+PATTERN[not_a_component]='E0277.*Node|Node.*not (satisfied|implemented)'
 BODY[not_a_component]='
 #[derive(ComponentSubscription)]
 #[subscribe(value: String)]
@@ -53,7 +57,7 @@ pub struct A;
 impl Component for A {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { A }
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (A, 0) }
     fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 0 }
 }
 fn main() {}'
@@ -67,7 +71,7 @@ pub struct A;
 impl Component for A {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { A }
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (A, 0) }
     fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 0 }
 }
 fn main() {}'
@@ -81,14 +85,15 @@ pub struct A;
 impl Component for A {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { A }
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (A, 0) }
     fn update(&mut self, input: Self::Input<'"'"'_>) -> u64 { let s: &String = input.value; s.len() as u64 }
 }
 fn main() {}'
 
 CMD[cycle]=check
-# The trait solver cannot prove that the walk over a cyclic graph is possible; it names a component of the cycle.
-PATTERN[cycle]='E0275.*overflow evaluating the requirement .*Upstream'
+# The trait solver cannot prove that a component of a cyclic graph is a node (its `Node` impl needs its
+# subscriptions to be nodes, which needs itself); it names a component of the cycle.
+PATTERN[cycle]='E0275.*overflow evaluating the requirement .*(Upstream|Node|DepList)'
 BODY[cycle]='
 #[derive(ComponentSubscription)]
 #[subscribe(b: B)]
@@ -96,7 +101,7 @@ pub struct A;
 impl Component for A {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { A }
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (A, 0) }
     fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 0 }
 }
 #[derive(ComponentSubscription)]
@@ -105,14 +110,14 @@ pub struct B;
 impl Component for B {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { B }
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (B, 0) }
     fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 0 }
 }
-fn main() { let _ = Pipeline::<A>::build(Configs::new()); }'
+fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }'
 
 # A component that subscribes to itself.
 CMD[self_cycle]=check
-PATTERN[self_cycle]='E0275.*overflow evaluating the requirement .*Upstream'
+PATTERN[self_cycle]='E0275.*overflow evaluating the requirement .*(Upstream|Node|DepList)'
 BODY[self_cycle]='
 #[derive(ComponentSubscription)]
 #[subscribe(me: A)]
@@ -120,30 +125,87 @@ pub struct A;
 impl Component for A {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { A }
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (A, 0) }
     fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 0 }
 }
-fn main() { let _ = Pipeline::<A>::build(Configs::new()); }'
+fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }'
 
-# The root is an ordinary component; anything else is not a root.
-CMD[root_not_a_component]=check
-PATTERN[root_not_a_component]='E0277.*(String: Root|can.t be the root of a .Pipeline.)'
-BODY[root_not_a_component]='
-fn main() { let _ = Pipeline::<String>::build(Configs::new()); }'
+# The root type must be a `#[derive(Root)]`.
+CMD[root_not_a_root]=check
+PATTERN[root_not_a_root]='E0277.*(String: Root|not valid sinks)'
+BODY[root_not_a_root]='
+fn main() { let _ = Pipeline::<String, (Src,)>::build(Configs::new()); }'
 
-# Generic code over the root needs the `Root` bound (and nothing else).
-CMD[generic_missing_root_bound]=check
-PATTERN[generic_missing_root_bound]='E0277.*can.t be the root of a .Pipeline.'
-BODY[generic_missing_root_bound]='
-fn drive<A: Component>(p: &mut Pipeline<A>) -> A::Output { p.run() }
+# Sinks are components: the root is not one.
+CMD[sink_is_the_root]=check
+PATTERN[sink_is_the_root]='E0277.*(Poll: Comp|Poll: Component|not valid sinks)'
+BODY[sink_is_the_root]='
+fn main() { let _ = Pipeline::<Poll, (Poll,)>::build(Configs::new()); }'
+
+# Generic code over a pipeline needs the `Sinks` bound (and nothing else).
+CMD[generic_missing_sinks_bound]=check
+PATTERN[generic_missing_sinks_bound]='E0277.*(not valid sinks|Sinks<R>)'
+BODY[generic_missing_sinks_bound]='
+fn drive<R, S>(p: &mut Pipeline<R, S>, r: R) { p.push(r) }
 fn main() {}'
 
 # ...and with it, generic code compiles with no feature gate in the user crate.
-CMD[generic_root_bound_ok]=check
-PATTERN[generic_root_bound_ok]='NOERROR'
-BODY[generic_root_bound_ok]='
-fn drive<A: Root>(p: &mut Pipeline<A>) -> A::Output { p.run() }
-fn main() { let mut p = Pipeline::<Src>::build(Configs::new()).unwrap(); let _: u64 = drive(&mut p); }'
+CMD[generic_sinks_bound_ok]=check
+PATTERN[generic_sinks_bound_ok]='NOERROR'
+BODY[generic_sinks_bound_ok]='
+fn drive<R, S: Sinks<R>>(p: &mut Pipeline<R, S>, r: R) { p.push(r) }
+fn main() { let mut p = Pipeline::<Poll, (Src,)>::build(Configs::new()).unwrap(); drive(&mut p, Poll); }'
+
+# A component that nothing connects to the root. Reported by the plan's
+# constant evaluation, so only `cargo build` sees it.
+CMD[unreachable_component]=build
+PATTERN[unreachable_component]='E0080.*Orphan is not reachable from the root'
+BODY[unreachable_component]='
+#[derive(ComponentSubscription)]
+pub struct Orphan;
+impl Component for Orphan {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (Orphan, 0) }
+    fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 0 }
+}
+#[derive(ComponentSubscription)]
+#[subscribe(s: Src, o: Orphan)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (A, 0) }
+    fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 0 }
+}
+fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }'
+
+# A second `#[derive(Root)]` type in the graph.
+CMD[second_root]=build
+# (The second root takes a component position, so the compiler usually reports the graph as not valid
+# before the plan's own message; either is an error naming the problem.)
+PATTERN[second_root]='E0080.*Other is a root, but the pipeline.s root is a different type|E0277.*dataflow graph is not valid.*second root'
+BODY[second_root]='
+#[derive(Root)]
+pub struct Other;
+#[derive(ComponentSubscription)]
+#[subscribe(s: Src, o: Other)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (A, 0) }
+    fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 0 }
+}
+fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }'
+
+# The graph's root is not the pipeline'"'"'s `R`.
+CMD[wrong_root_type]=build
+PATTERN[wrong_root_type]='E0080.*Poll is a root, but the pipeline.s root is a different type|E0277.*Is<'
+BODY[wrong_root_type]='
+#[derive(Root)]
+pub struct Other;
+fn main() { let _ = Pipeline::<Other, (Src,)>::build(Configs::new()); }'
 
 CMD[keep_input_reference]=check
 PATTERN[keep_input_reference]='lifetime may not live long enough|borrowed data escapes|E0521'
@@ -154,7 +216,7 @@ pub struct A { kept: Option<&'"'"'static u64> }
 impl Component for A {
     type Config = ();
     type Output = u64;
-    fn new((): ()) -> Self { A { kept: None } }
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (A { kept: None }, 0) }
     fn update(&mut self, input: Self::Input<'"'"'_>) -> u64 { self.kept = Some(input.value); 0 }
 }
 fn main() {}'
@@ -173,11 +235,11 @@ pub struct Unused;
 impl Component for Unused {
     type Config = ();
     type Output = ();
-    fn new((): ()) -> Self { Unused }
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, ()) { (Unused, ()) }
     fn update(&mut self, _: Self::Input<'"'"'_>) {}
 }
 fn main() {
-    match Pipeline::<Src>::build(Configs::new().with::<Unused>(())) {
+    match Pipeline::<Poll, (Src,)>::build(Configs::new().with::<Unused>(())) {
         Ok(_) => println!("unexpectedly built"),
         Err(e) => println!("{e:?}"),
     }
@@ -188,28 +250,29 @@ fn main() {
 CMD[too_many_components]=build
 PATTERN[too_many_components]='E0080|too many components'
 BODY[too_many_components]=$(python3 - <<'PY'
-# 30 groups of 20 leaves: 600 leaves + 30 groups + the root = 631 components.
+# 30 groups of 20 leaves: 600 leaves + 30 groups + A = 631 components.
 G, K = 30, 20
 out = []
 def comp(name, subs):
     attr = "#[subscribe(%s)] " % ", ".join(f"s{i}: {d}" for i, d in enumerate(subs)) if subs else ""
     out.append(f"#[derive(ComponentSubscription)] {attr}pub struct {name};")
-    out.append(f"impl Component for {name} {{ type Config = (); type Output = u64; fn new((): ()) -> Self {{ {name} }} fn update(&mut self, _: Self::Input<'_>) -> u64 {{ 0 }} }}")
+    out.append(f"impl Component for {name} {{ type Config = (); type Output = u64; fn new((): (), _: Self::Init<'_>) -> (Self, u64) {{ ({name}, 0) }} fn update(&mut self, _: Self::Input<'_>) -> u64 {{ 0 }} }}")
 for g in range(G):
     for k in range(K):
-        comp(f"L{g}_{k}", [])
+        comp(f"L{g}_{k}", ["Poll"])
     comp(f"G{g}", [f"L{g}_{k}" for k in range(K)])
 comp("A", [f"G{g}" for g in range(G)])
-out.append("fn main() { let _ = Pipeline::<A>::build(Configs::new()); }")
+out.append("fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }")
 print("\n".join(out))
 PY
 )
 
 ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        self_cycle
-       too_many_components root_not_a_component generic_missing_root_bound
-       generic_root_bound_ok keep_input_reference
-       name_input_struct_outside unused_config)
+       too_many_components root_not_a_root sink_is_the_root
+       generic_missing_sinks_bound generic_sinks_bound_ok
+       unreachable_component second_root wrong_root_type
+       keep_input_reference name_input_struct_outside unused_config)
 
 run_case() {
     local name=$1 dir="$CASES_DIR/$1"

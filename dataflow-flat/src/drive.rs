@@ -77,7 +77,15 @@ pub trait Phase {
 }
 
 /// The work of phase `Ph` at component position `P`.
+///
+/// Fails to hold when the graph is not valid: typically a second
+/// `#[derive(Root)]` type (which takes a component position), or a component
+/// whose subscriptions don't match.
 #[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "the dataflow graph is not valid: the node at component position {P} can't be run (a second root in the graph, or a subscription that is not a node of this pipeline?)",
+    label = "`{Self}` can't run position {P}"
+)]
 pub trait StepAt<Ph: Phase, const P: usize>: Planned {
     fn step(ctx: &mut Ph::Ctx<'_>);
 }

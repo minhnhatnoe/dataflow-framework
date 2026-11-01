@@ -1,3 +1,5 @@
+> **Status: redesign in progress (phase 1a done: root/components/sinks, `push`, stored outputs; demuxers and conditions are phase 1b). This file still describes the previous model; the source of truth for the new one is the event spec (`event-spec.md`, not yet in the repo). Do not rely on the sections below until the rewrite.**
+
 # Working on this repo
 
 Read `README.md` first. It covers the requirements, the full design, why each alternative was rejected, and the known limitations. The person cares about the concept more than polish, so check claims by building small artifacts rather than reasoning about them.
