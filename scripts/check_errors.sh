@@ -245,9 +245,10 @@ fn main() {
     }
 }'
 
-# More than MAX_COMPONENTS (512) components: 600 leaves under one root. Reported by the
+# More than MAX_COMPONENTS (512 with the `small-limits` feature) components: 600 leaves under one root. Reported by the
 # plan's constant evaluation, so only `cargo build` sees it.
 CMD[too_many_components]=build
+FEATURES[too_many_components]=small-limits
 PATTERN[too_many_components]='E0080|too many components'
 BODY[too_many_components]=$(python3 - <<'PY'
 # 30 groups of 20 leaves: 600 leaves + 30 groups + A = 631 components.

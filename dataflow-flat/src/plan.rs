@@ -47,24 +47,39 @@ use crate::table::Table;
 /// Upper bound on nodes (the root, the components and the anchor) per
 /// pipeline. Compile-time memory grows with MAX_COMPONENTS x (number of
 /// nodes), so raise it only as needed.
+#[cfg(not(feature = "small-limits"))]
+pub const MAX_COMPONENTS: usize = 1 << 15;
+/// Tiny limit for the error-case script (feature `small-limits`).
+#[cfg(feature = "small-limits")]
 pub const MAX_COMPONENTS: usize = 512;
 
 /// Upper bound on subscription entries per pipeline, summed over all
 /// components.
-pub const MAX_EDGES: usize = 4096;
+pub const MAX_EDGES: usize = 1 << 17;
 
 /// Upper bound on distinct selector decisions per pipeline (see
 /// [`Plan::decision`]).
-pub const MAX_DECISIONS: usize = 512;
+pub const MAX_DECISIONS: usize = 1 << 15;
 
 /// Upper bound on the terms of one node's condition (after absorption).
-pub const MAX_TERMS: usize = 64;
+pub const MAX_TERMS: usize = 1 << 13;
 
 /// Sizes of the pools that hold terms (lists of decisions), the lists of
 /// terms of each node, and the names kept for messages.
-const TPOOL: usize = 16384;
-const OPOOL: usize = 8192;
-const NPOOL: usize = 8192;
+const TPOOL: usize = 1 << 19;
+const OPOOL: usize = 1 << 17;
+const NPOOL: usize = 1 << 21;
+/// Slots of the decision tables (open addressing, a power of two, twice the decisions).
+const DCAP: usize = MAX_DECISIONS * 2;
+/// A hash of three integers, for the decision tables.
+const fn mix3(a: u32, b: u32, c: u32) -> usize {
+    let mut h = a.wrapping_mul(0x9E37_79B1) ^ b.wrapping_mul(0x85EB_CA6B).rotate_left(13) ^ c.wrapping_mul(0xC2B2_AE35).rotate_left(7);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2C1B_3C6D);
+    h ^= h >> 12;
+    h as usize
+}
+
 /// Longest name kept for a message.
 const NAME: usize = 96;
 
@@ -346,6 +361,26 @@ pub struct Plan {
     /// Is the decision a keyed selector (`On`), and where its name is kept.
     dn_keyed: [bool; MAX_DECISIONS],
     dn_nm: [u32; MAX_DECISIONS],
+    /// The place of a decision: the first decision with its node and previous
+    /// decision. Its depth in the chain (1 for the first).
+    dn_place: [u32; MAX_DECISIONS],
+    dn_depth: [u32; MAX_DECISIONS],
+    /// Open-addressing tables (decision + 1, 0 = empty): by (node, prev, key),
+    /// and by (node, prev) for the places.
+    dtab: [u32; DCAP],
+    ptab: [u32; DCAP],
+    /// Scratch for the conditions (kept here so that no frame zeroes arrays
+    /// of this size): candidate terms, their order and lengths, the kept
+    /// flags, the lists by representative decision, the places in use.
+    sc_cand: [u32; MAX_TERMS],
+    sc_ord: [u32; MAX_TERMS],
+    sc_len: [u32; MAX_TERMS],
+    sc_keep: [bool; MAX_TERMS],
+    sc_next: [u32; MAX_TERMS],
+    sc_offs: [u32; MAX_TERMS],
+    sc_keys: [u32; MAX_TERMS],
+    sc_head: [u32; MAX_DECISIONS],
+    sc_used: [bool; MAX_DECISIONS],
     /// Is the node a `Listener`? Its requests: `lk_n[i]` sorted, distinct keys
     /// at `lk_pool[lk_off[i]..]`.
     listener: [bool; MAX_COMPONENTS],
@@ -424,6 +459,19 @@ impl Plan {
             dn_key: [0; MAX_DECISIONS],
             dn_keyed: [false; MAX_DECISIONS],
             dn_nm: [NONE; MAX_DECISIONS],
+            dn_place: [0; MAX_DECISIONS],
+            dn_depth: [0; MAX_DECISIONS],
+            dtab: [0; DCAP],
+            ptab: [0; DCAP],
+            sc_cand: [0; MAX_TERMS],
+            sc_ord: [0; MAX_TERMS],
+            sc_len: [0; MAX_TERMS],
+            sc_keep: [false; MAX_TERMS],
+            sc_next: [NONE; MAX_TERMS],
+            sc_offs: [0; MAX_TERMS],
+            sc_keys: [0; MAX_TERMS],
+            sc_head: [NONE; MAX_DECISIONS],
+            sc_used: [false; MAX_DECISIONS],
             listener: [false; MAX_COMPONENTS],
             lk_off: [0; MAX_COMPONENTS],
             lk_n: [0; MAX_COMPONENTS],
@@ -537,19 +585,20 @@ impl Plan {
     /// node `node` after decision `prev` of its chain (`NONE` for the first):
     /// found, or recorded. Edges that share a chain prefix share its decisions.
     pub(crate) const fn decision(&mut self, node: u32, prev: u32, id: TypeId, key: u32, keyed: bool, label: &str) -> u32 {
-        let mut d = 0;
-        while d < self.dn_len {
-            if self.dn_node[d] == node && self.dn_prev[d] == prev && self.dn_id[d] == id {
-                return d as u32;
+        let mut sl = mix3(node, prev, key) & (DCAP - 1);
+        loop {
+            let h = self.dtab[sl];
+            if h == 0 {
+                break;
             }
-            d += 1;
-        }
-        if keyed {
-            // Two symbols with one key at one place would be one alternative
-            // with two names: reject.
-            let mut x = 0;
-            while x < self.dn_len {
-                if self.dn_keyed[x] && self.dn_node[x] == node && self.dn_prev[x] == prev && self.dn_key[x] == key {
+            let x = (h - 1) as usize;
+            if self.dn_node[x] == node && self.dn_prev[x] == prev {
+                if self.dn_id[x] == id {
+                    return x as u32;
+                }
+                if keyed && self.dn_keyed[x] && self.dn_key[x] == key {
+                    // Two symbols with one key at one place would be one
+                    // alternative with two names: reject.
                     let mut digits = [0u8; 10];
                     let mut nd = 0;
                     let mut v = key;
@@ -567,8 +616,8 @@ impl Plan {
                     self.fail_msg(m);
                     return x as u32;
                 }
-                x += 1;
             }
+            sl = (sl + 1) & (DCAP - 1);
         }
         if self.dn_len == MAX_DECISIONS {
             self.fail("too many selectors: ", "raise dataflow_flat::MAX_DECISIONS", "");
@@ -583,6 +632,24 @@ impl Plan {
         if keyed {
             self.dn_nm[d] = self.keep_name(label);
         }
+        self.dn_depth[d] = if prev == NONE { 1 } else { self.dn_depth[prev as usize] + 1 };
+        // The place: the first decision with this node and previous decision.
+        let mut ps = mix3(node, prev, 0) & (DCAP - 1);
+        loop {
+            let h = self.ptab[ps];
+            if h == 0 {
+                self.ptab[ps] = d as u32 + 1;
+                self.dn_place[d] = d as u32;
+                break;
+            }
+            let x = (h - 1) as usize;
+            if self.dn_node[x] == node && self.dn_prev[x] == prev {
+                self.dn_place[d] = x as u32;
+                break;
+            }
+            ps = (ps + 1) & (DCAP - 1);
+        }
+        self.dtab[sl] = d as u32 + 1;
         self.dn_len = d + 1;
         d as u32
     }
@@ -691,6 +758,228 @@ impl Plan {
         false
     }
 
+    /// Absorption (rule 4's first half): from the candidates `sc_cand[..m]`
+    /// keep those no other candidate implies (is a subset of); the kept ones go
+    /// to `sc_offs`, in candidate order. Returns how many.
+    ///
+    /// Candidates are taken shortest first, so a later candidate never makes an
+    /// earlier kept one redundant; a candidate is redundant iff a kept term is a
+    /// subset of it, and every kept term is listed under its deepest decision
+    /// (its representative), which a superset must hold, so only the lists of
+    /// the candidate's own decisions are searched.
+    const fn absorb(&mut self, m: usize) -> usize {
+        let mut q = 0;
+        while q < m {
+            self.sc_ord[q] = q as u32;
+            self.sc_len[q] = self.term_len(self.sc_cand[q]) as u32;
+            self.sc_keep[q] = false;
+            q += 1;
+        }
+        // Shell sort of the order by length.
+        let mut gap = m / 2;
+        while gap > 0 {
+            let mut a = gap;
+            while a < m {
+                let v = self.sc_ord[a];
+                let lv = self.sc_len[v as usize];
+                let mut b = a;
+                while b >= gap && self.sc_len[self.sc_ord[b - gap] as usize] > lv {
+                    self.sc_ord[b] = self.sc_ord[b - gap];
+                    b -= gap;
+                }
+                self.sc_ord[b] = v;
+                a += 1;
+            }
+            gap /= 2;
+        }
+        let mut r = 0;
+        while r < m {
+            let o = self.sc_ord[r] as usize;
+            let t = self.sc_cand[o];
+            let len = self.term_len(t);
+            if len == 0 {
+                // "always" implies nothing else is needed (all later terms are supersets).
+                self.sc_keep[o] = true;
+                break;
+            }
+            let mut absorbed = false;
+            let mut k = 0;
+            while k < len && !absorbed {
+                let mut s = self.sc_head[self.term_item(t, k) as usize];
+                while s != NONE {
+                    if self.subset(self.sc_cand[s as usize], t) {
+                        absorbed = true;
+                        break;
+                    }
+                    s = self.sc_next[s as usize];
+                }
+                k += 1;
+            }
+            if !absorbed {
+                self.sc_keep[o] = true;
+                let rep = self.rep_of(t) as usize;
+                self.sc_next[o] = self.sc_head[rep];
+                self.sc_head[rep] = o as u32;
+            }
+            r += 1;
+        }
+        // Clear the lists and collect in candidate order.
+        let mut n = 0;
+        let mut q = 0;
+        while q < m {
+            if self.sc_keep[q] {
+                let t = self.sc_cand[q];
+                if self.term_len(t) > 0 {
+                    let rep = self.rep_of(t) as usize;
+                    self.sc_head[rep] = NONE;
+                }
+                self.sc_offs[n] = t;
+                n += 1;
+            }
+            q += 1;
+        }
+        n
+    }
+
+    /// The deepest decision of a non-empty term (the first of them).
+    const fn rep_of(&self, t: u32) -> u32 {
+        let mut best = self.term_item(t, 0);
+        let mut k = 1;
+        while k < self.term_len(t) {
+            let x = self.term_item(t, k);
+            if self.dn_depth[x as usize] > self.dn_depth[best as usize] {
+                best = x;
+            }
+            k += 1;
+        }
+        best
+    }
+
+    /// Are the terms `sc_ord[lo..hi]` pairwise exclusive? Partition them by
+    /// the key they hold at one place that they do not all share, and recurse
+    /// into each group; terms with no decision at that place are compared with
+    /// everything else directly. Near-linear when the terms are the leaves of
+    /// a decision tree, as a join of exclusive branches is.
+    const fn excl_group(&mut self, lo: usize, hi: usize) -> bool {
+        if hi - lo <= 1 {
+            return true;
+        }
+        let t0 = self.sc_ord[lo];
+        let n0 = self.term_len(t0);
+        let mut place = NONE;
+        let mut k = 0;
+        while k < n0 {
+            let pl = self.dn_place[self.term_item(t0, k) as usize];
+            if !self.sc_used[pl as usize] {
+                place = pl;
+                break;
+            }
+            k += 1;
+        }
+        if place == NONE {
+            // Every decision of the first term is shared by the whole group.
+            return false;
+        }
+        // The key each term holds at `place` (+1; 0 = none).
+        let mut guard = false;
+        let mut q = lo;
+        while q < hi {
+            let t = self.sc_ord[q];
+            let mut key = 0;
+            let mut k = 0;
+            while k < self.term_len(t) {
+                let x = self.term_item(t, k) as usize;
+                if self.dn_place[x] == place {
+                    if self.dn_key[x] == crate::select::GUARD {
+                        guard = true;
+                    }
+                    key = self.dn_key[x].wrapping_add(1);
+                    break;
+                }
+                k += 1;
+            }
+            self.sc_keys[q] = key;
+            q += 1;
+        }
+        if guard {
+            return self.excl_pairs(lo, hi);
+        }
+        // Sort the group by key.
+        let len = hi - lo;
+        let mut gap = len / 2;
+        while gap > 0 {
+            let mut a = lo + gap;
+            while a < hi {
+                let v = self.sc_ord[a];
+                let kv = self.sc_keys[a];
+                let mut b = a;
+                while b >= lo + gap && self.sc_keys[b - gap] > kv {
+                    self.sc_ord[b] = self.sc_ord[b - gap];
+                    self.sc_keys[b] = self.sc_keys[b - gap];
+                    b -= gap;
+                }
+                self.sc_ord[b] = v;
+                self.sc_keys[b] = kv;
+                a += 1;
+            }
+            gap /= 2;
+        }
+        // Terms with no decision at the place come first (key 0).
+        let mut none_end = lo;
+        while none_end < hi && self.sc_keys[none_end] == 0 {
+            none_end += 1;
+        }
+        let mut i = none_end;
+        while i < hi {
+            let key = self.sc_keys[i];
+            let mut j = i;
+            while j < hi && self.sc_keys[j] == key {
+                j += 1;
+            }
+            self.sc_used[place as usize] = true;
+            let ok = self.excl_group(i, j);
+            self.sc_used[place as usize] = false;
+            if !ok {
+                return false;
+            }
+            i = j;
+        }
+        if none_end > lo {
+            if !self.excl_group(lo, none_end) {
+                return false;
+            }
+            // The terms without the place against all the others.
+            let mut u = lo;
+            while u < none_end {
+                let mut v = none_end;
+                while v < hi {
+                    if !self.exclusive(self.sc_ord[u], self.sc_ord[v]) {
+                        return false;
+                    }
+                    v += 1;
+                }
+                u += 1;
+            }
+        }
+        true
+    }
+
+    /// Pairwise check of `sc_ord[lo..hi]`.
+    const fn excl_pairs(&self, lo: usize, hi: usize) -> bool {
+        let mut a = lo;
+        while a < hi {
+            let mut b = a + 1;
+            while b < hi {
+                if !self.exclusive(self.sc_ord[a], self.sc_ord[b]) {
+                    return false;
+                }
+                b += 1;
+            }
+            a += 1;
+        }
+        true
+    }
+
     // -- conditions -------------------------------------------------------
 
     /// The root fires on every push.
@@ -708,8 +997,8 @@ impl Plan {
         if self.failed {
             return;
         }
-        let mut offs = [0u32; MAX_TERMS];
-        let mut n = 0usize;
+        // Candidate terms: each edge's parent terms, extended by its chain.
+        let mut m = 0usize;
         let mut e = self.up_head[i];
         while e != NONE {
             let u = self.edge_to[e as usize] as usize;
@@ -722,26 +1011,28 @@ impl Plan {
                 if t == NONE {
                     return;
                 }
-                if !insert_term(self, &mut offs, &mut n, t) {
-                    self.fail(name, " has more than ", "64 distinct conditions (MAX_TERMS)");
+                if m == MAX_TERMS {
+                    self.fail(name, " has too many distinct conditions: ", "raise dataflow_flat::MAX_TERMS");
                     return;
                 }
+                self.sc_cand[m] = t;
+                m += 1;
                 k += 1;
             }
             e = self.edge_next[e as usize];
         }
+        let n = self.absorb(m);
         // Rule 4: after absorption, the terms are pairwise exclusive.
-        let mut a = 0;
-        while a < n {
-            let mut b = a + 1;
-            while b < n {
-                if !self.exclusive(offs[a], offs[b]) {
-                    self.fail(name, " joins branches that can fire in the same step", "");
-                    return;
-                }
-                b += 1;
+        {
+            let mut q = 0;
+            while q < n {
+                self.sc_ord[q] = self.sc_offs[q];
+                q += 1;
             }
-            a += 1;
+            if !self.excl_group(0, n) {
+                self.fail(name, " joins branches that can fire in the same step", "");
+                return;
+            }
         }
         // Rule 5: every term of the condition implies each selected edge.
         let mut e = self.up_head[i];
@@ -751,7 +1042,7 @@ impl Plan {
             if d != NONE {
                 let mut a = 0;
                 while a < n {
-                    let t = offs[a];
+                    let t = self.sc_offs[a];
                     let mut ok = false;
                     let cn = self.cn[u] as usize;
                     let mut k = 0;
@@ -786,11 +1077,11 @@ impl Plan {
         self.cn[i] = n as u32;
         let mut k = 0;
         while k < n {
-            self.olist[self.ol_len + k] = offs[k];
+            self.olist[self.ol_len + k] = self.sc_offs[k];
             k += 1;
         }
         self.ol_len += n;
-        let always = n == 1 && self.term_len(offs[0]) == 0;
+        let always = n == 1 && self.term_len(self.sc_offs[0]) == 0;
         self.always[i] = always;
         // The firing of the components this one reads is read by its check.
         if !always {
@@ -875,7 +1166,10 @@ impl Plan {
     pub(crate) const fn index_of(&self, hash: u64, id: TypeId) -> usize {
         match self.table.at(self.table.slot(&self.ids, hash, id)) {
             Some(i) => i,
-            None => panic!("node not in plan"),
+            None => {
+                self.check();
+                panic!("node not in plan")
+            }
         }
     }
 
@@ -1002,35 +1296,6 @@ impl Plan {
     pub(crate) const fn first_pos_of(&self, i: usize) -> u32 {
         self.first_pos[i]
     }
-}
-
-/// Add term `t` to the set `offs[..*n]` unless a term already there implies it
-/// is redundant (is a subset of `t`); drop the terms `t` makes redundant.
-/// Returns false if the set is full.
-const fn insert_term(plan: &Plan, offs: &mut [u32; MAX_TERMS], n: &mut usize, t: u32) -> bool {
-    let mut k = 0;
-    while k < *n {
-        if plan.subset(offs[k], t) {
-            return true;
-        }
-        k += 1;
-    }
-    let mut w = 0;
-    k = 0;
-    while k < *n {
-        if !plan.subset(t, offs[k]) {
-            offs[w] = offs[k];
-            w += 1;
-        }
-        k += 1;
-    }
-    *n = w;
-    if *n == MAX_TERMS {
-        return false;
-    }
-    offs[*n] = t;
-    *n += 1;
-    true
 }
 
 /// An anchor whose plan has been computed, evaluated once per pipeline type.

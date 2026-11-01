@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 
 use crate::build::ConstructPass;
 use crate::component::{DepList, Sub};
-use crate::drive::{ConstructCtx, ConstructPh, Drive, Fired, FiredOps, PushCtx, PushPh, RgCl};
+use crate::drive::{ConstructCtx, ConstructPh, Drive, FiredOps, FiredTy, NFlags, PushCtx, PushPh, RgCl};
 use crate::flat::{FlatTop, Whole};
 use crate::gather::Layout;
 use crate::listen::{ListenCtx, ListenPh};
@@ -61,6 +61,7 @@ where
         + FlatTop<StateOptM>
         + FlatTop<OutOptM>,
 
+    NFlags<Anchor<R, S>>: FiredTy,
     <Anchor<R, S> as FlatTop<StateOptM>>::Of: Empty + Finish<Done = <Anchor<R, S> as FlatTop<StateM>>::Of>,
     <Anchor<R, S> as FlatTop<OutOptM>>::Of: Empty + Finish<Done = <Anchor<R, S> as FlatTop<OutM>>::Of>,
 {
@@ -69,7 +70,7 @@ where
     type Outs = <Anchor<R, S> as FlatTop<OutM>>::Of;
     type StatesOpt = <Anchor<R, S> as FlatTop<StateOptM>>::Of;
     type OutsOpt = <Anchor<R, S> as FlatTop<OutOptM>>::Of;
-    type Fired = Fired;
+    type Fired = <NFlags<Anchor<R, S>> as FiredTy>::T;
 }
 
 /// The storage of a pipeline.

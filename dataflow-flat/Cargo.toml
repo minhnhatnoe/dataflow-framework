@@ -3,6 +3,10 @@ name = "dataflow-flat"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# Lowers MAX_COMPONENTS to 512 so that scripts/check_errors.sh can reach the limit cheaply.
+small-limits = []
+
 [dependencies]
 dataflow-macros = { path = "../dataflow-macros" }
 

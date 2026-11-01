@@ -23,7 +23,7 @@ use crate::flat::{bound, class, ClassOf, Inner, Leaf, Loc, NthT, Whole};
 use crate::gather::Ready;
 use crate::gather::{GatherIn, GatherInit, Layout};
 use crate::node::{Comp, Node};
-use crate::plan::{Planned, MAX_COMPONENTS, NO_FLAG};
+use crate::plan::{Planned, NO_FLAG};
 use crate::store::AtPos;
 
 // ---------------------------------------------------------------------------
@@ -178,8 +178,33 @@ where
 /// array is split into locals and the unused flags vanish: with no conditions
 /// there is no `fired` state in the generated code.
 #[doc(hidden)]
-pub struct Fired {
-    bits: [bool; MAX_COMPONENTS],
+pub struct Fired<const N: usize> {
+    bits: [bool; N],
+}
+/// The number of `fired` flags pipeline `A` needs.
+#[doc(hidden)]
+pub struct NFlags<A>(PhantomData<A>);
+impl<A: Planned> NFlags<A> {
+    pub const N: usize = A::PLAN.n_flags();
+}
+/// `Fired<N>` for a constant, as a type (the pattern of `flat::RngTy`: the
+/// constant lives in the where clause of an impl, not in an associated type).
+#[doc(hidden)]
+pub trait FiredSized<const N: usize> {
+    type T: FiredOps;
+}
+impl<const N: usize> FiredSized<N> for () {
+    type T = Fired<N>;
+}
+#[doc(hidden)]
+pub trait FiredTy {
+    type T: FiredOps;
+}
+impl<A: Planned> FiredTy for NFlags<A>
+where
+    (): FiredSized<{ NFlags::<A>::N }>,
+{
+    type T = <() as FiredSized<{ NFlags::<A>::N }>>::T;
 }
 /// Operations on the `fired` flags (of whichever size the pipeline needs).
 #[doc(hidden)]
@@ -188,11 +213,11 @@ pub trait FiredOps {
     fn set(&mut self, flag: usize);
     fn get(&self, flag: usize) -> bool;
 }
-impl FiredOps for Fired {
+impl<const N: usize> FiredOps for Fired<N> {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn new() -> Fired {
-        Fired { bits: [false; MAX_COMPONENTS] }
+    fn new() -> Self {
+        Fired { bits: [false; N] }
     }
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
