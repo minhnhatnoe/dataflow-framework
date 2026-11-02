@@ -1,0 +1,30 @@
+--- dataflow-flat/src/handler.rs	2026-11-02 14:54:25.298105338 -0500
++++ target/a-test/dataflow-flat/src/handler.rs	2026-11-02 15:07:32.097836861 -0500
+@@ -70,7 +70,7 @@
+ )]
+ pub trait UpdateHandler<E: HandledEdge>: Component {
+     /// Called once per push in which the edge `E` fired, before `update`.
+-    fn on_update(&mut self, v: &E::Value);
++    fn on_update(&mut self, input: Self::Input<'_>, v: &E::Value);
+ }
+ 
+ /// The selector chain of a handled edge: `C` with the marker `Em`. Reads as
+@@ -183,6 +183,7 @@
+         >>::Em,
+     >,
+     A::States: AtPos<H, P>,
++    <H as ComponentSubscription>::Deps: GatherIn<A, P>,
+ {
+     #[cfg_attr(not(debug_assertions), inline(always))]
+     #[cfg_attr(debug_assertions, inline)]
+@@ -194,8 +195,10 @@
+         if (mode & 1 == 0 || <E<A, P, I> as Source<A>>::fires(&ctx.fired))
+             && (mode & 2 == 0 || <C<A, P, I> as HdChain<<E<A, P, I> as Node>::Output>>::matches_inner(x))
+         {
++            let inputs = <<H as ComponentSubscription>::Deps as GatherIn<A, P>>::gather(ctx.root, &*ctx.outs);
+             <H as UpdateHandler<<C<A, P, I> as HdChain<<E<A, P, I> as Node>::Output>>::Em>>::on_update(
+                 <A::States as AtPos<H, P>>::at_mut(&mut *ctx.states),
++                <H as ComponentSubscription>::input(inputs),
+                 <C<A, P, I> as HdChain<<E<A, P, I> as Node>::Output>>::value(x),
+             );
+         }

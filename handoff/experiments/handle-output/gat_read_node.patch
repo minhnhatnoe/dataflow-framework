@@ -1,0 +1,261 @@
+--- dataflow-flat/src/node.rs	2026-11-02 14:54:25.298269779 -0500
++++ target/gat-patch/dataflow-flat/src/node.rs	2026-11-02 15:06:40.213514535 -0500
+@@ -31,7 +31,15 @@
+ 
+ /// A thing that can be subscribed to. Sealed: use `#[derive(Root)]` or
+ /// `#[derive(ComponentSubscription)]`.
+-pub trait Node: __private::Sealed + Sized + 'static {
++pub trait Edge {
++    type Read<'a>
++    where
++        Self: 'a;
++}
++pub trait Node: __private::Sealed + Edge + Sized + 'static
++where
++    for<'a> Self: Edge<Read<'a> = &'a <Self as Node>::Output>,
++{
+     /// What subscribers read in `update`.
+     type Output: 'static;
+     /// The node's subscriptions, as a [`DepList`].
+@@ -60,6 +68,7 @@
+ pub trait NodeKind: 'static {
+     type Init<'a, N: Node>;
+ }
++pub type ReadOf<'a, N> = <N as Edge>::Read<'a>;
+ 
+ /// The root: nothing is known about it before the first push.
+ #[doc(hidden)]
+@@ -141,6 +150,9 @@
+ #[doc(hidden)]
+ pub struct SlotNode<E, C>(pub core::marker::PhantomData<fn() -> (E, C)>);
+ impl<E: Node, C: crate::select::SelectChain<E::Output>> __private::Sealed for SlotNode<E, C> {}
++impl<E: Node, C: crate::select::SelectChain<E::Output>> Edge for SlotNode<E, C> {
++    type Read<'a> = &'a C::Out;
++}
+ impl<E: Node, C: crate::select::SelectChain<E::Output>> Node for SlotNode<E, C> {
+     type Output = C::Out;
+     type Subs = ();
+--- dataflow-flat/src/gather.rs	2026-11-02 14:54:25.298034024 -0500
++++ target/gat-patch/dataflow-flat/src/gather.rs	2026-11-02 15:06:45.123021592 -0500
+@@ -52,6 +52,7 @@
+ pub trait SourceKind<N: Node, A: Layout>: NodeKind {
+     /// What `update` reads.
+     fn fetch<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a N::Output;
++    fn read<'a>(root: &'a A::Root, outs: &'a A::Outs) -> crate::node::ReadOf<'a, N>;
+     /// What `new` is given while the pipeline is built.
+     fn seed<'a>(outs: &'a A::OutsOpt) -> <Self as NodeKind>::Init<'a, N>;
+     /// Did the node fire in this step?
+@@ -69,6 +70,11 @@
+     }
+     #[cfg_attr(not(debug_assertions), inline(always))]
+     #[cfg_attr(debug_assertions, inline)]
++    fn read<'a>(root: &'a A::Root, _: &'a A::Outs) -> &'a N::Output {
++        root.conv()
++    }
++    #[cfg_attr(not(debug_assertions), inline(always))]
++    #[cfg_attr(debug_assertions, inline)]
+     fn seed<'a>(_: &'a A::OutsOpt) {}
+     #[cfg_attr(not(debug_assertions), inline(always))]
+     #[cfg_attr(debug_assertions, inline)]
+@@ -89,6 +95,11 @@
+     }
+     #[cfg_attr(not(debug_assertions), inline(always))]
+     #[cfg_attr(debug_assertions, inline)]
++    fn read<'a>(_: &'a A::Root, outs: &'a A::Outs) -> &'a N::Output {
++        <A::Outs as AtPos<N::Output, { PosOf::<A, N>::P }>>::at(outs)
++    }
++    #[cfg_attr(not(debug_assertions), inline(always))]
++    #[cfg_attr(debug_assertions, inline)]
+     fn seed<'a>(outs: &'a A::OutsOpt) -> &'a N::Output {
+         <A::OutsOpt as AtPos<Option<N::Output>, { PosOf::<A, N>::P }>>::at(outs)
+             .as_ref()
+@@ -112,6 +123,7 @@
+ #[doc(hidden)]
+ pub trait Source<A: Layout>: Node {
+     fn fetch<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a Self::Output;
++    fn read<'a>(root: &'a A::Root, outs: &'a A::Outs) -> crate::node::ReadOf<'a, Self>;
+     fn seed<'a>(outs: &'a A::OutsOpt) -> crate::node::InitOf<'a, Self>;
+     fn fires(fired: &FiredOf<A>) -> bool;
+ }
+@@ -126,6 +138,11 @@
+     }
+     #[cfg_attr(not(debug_assertions), inline(always))]
+     #[cfg_attr(debug_assertions, inline)]
++    fn read<'a>(root: &'a A::Root, outs: &'a A::Outs) -> crate::node::ReadOf<'a, N> {
++        <N::Kind as SourceKind<N, A>>::read(root, outs)
++    }
++    #[cfg_attr(not(debug_assertions), inline(always))]
++    #[cfg_attr(debug_assertions, inline)]
+     fn seed<'a>(outs: &'a A::OutsOpt) -> crate::node::InitOf<'a, N> {
+         <N::Kind as SourceKind<N, A>>::seed(outs)
+     }
+@@ -292,13 +309,13 @@
+ /// the slot.
+ #[doc(hidden)]
+ pub trait ChainRead<E: Source<A>, A: Layout, const P: usize, const I: usize>: SelectChain<E::Output> {
+-    fn read<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a Self::Out;
++    fn read<'a>(root: &'a A::Root, outs: &'a A::Outs) -> <Self as SelectChain<E::Output>>::Read<'a, E>;
+ }
+ impl<E: Source<A>, A: Layout, const P: usize, const I: usize> ChainRead<E, A, P, I> for () {
+     #[cfg_attr(not(debug_assertions), inline(always))]
+     #[cfg_attr(debug_assertions, inline)]
+-    fn read<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a E::Output {
+-        <E as Source<A>>::fetch(root, outs)
++    fn read<'a>(root: &'a A::Root, outs: &'a A::Outs) -> crate::node::ReadOf<'a, E> {
++        <E as Source<A>>::read(root, outs)
+     }
+ }
+ impl<E: Source<A>, A: Layout, S: Select<E::Output>, T: SelectChain<S::Out>, const P: usize, const I: usize> ChainRead<E, A, P, I> for (S, T)
+@@ -308,29 +325,29 @@
+ {
+     #[cfg_attr(not(debug_assertions), inline(always))]
+     #[cfg_attr(debug_assertions, inline)]
+-    fn read<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a <Self as SelectChain<E::Output>>::Out {
++    fn read<'a>(root: &'a A::Root, outs: &'a A::Outs) -> <(S, T) as SelectChain<E::Output>>::Read<'a, E> {
+         <(S, T) as ReadVia<E, A, <SlotAt<A, P, I> as ModeTy>::Mode, { SlotAt::<A, P, I>::POS }>>::read_via(root, outs)
+     }
+ }
+ #[doc(hidden)]
+ pub trait ReadVia<E: Source<A>, A: Layout, Mode, const POS: usize>: SelectChain<E::Output> {
+-    fn read_via<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a Self::Out;
++    fn read_via<'a>(root: &'a A::Root, outs: &'a A::Outs) -> <Self as SelectChain<E::Output>>::Read<'a, E>;
+ }
+-impl<E: Source<A>, A: Layout, C: SelectChain<E::Output>, const POS: usize> ReadVia<E, A, Direct, POS> for C {
++impl<E: Source<A>, A: Layout, S: Select<E::Output>, T: SelectChain<S::Out>, const POS: usize> ReadVia<E, A, Direct, POS> for (S, T) {
+     #[cfg_attr(not(debug_assertions), inline(always))]
+     #[cfg_attr(debug_assertions, inline)]
+-    fn read_via<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a C::Out {
+-        C::get(<E as Source<A>>::fetch(root, outs))
++    fn read_via<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a T::Out {
++        <(S, T)>::get(<E as Source<A>>::fetch(root, outs))
+     }
+ }
+-impl<E: Source<A>, A: Layout, C: SelectChain<E::Output>, const POS: usize> ReadVia<E, A, Stored, POS> for C
++impl<E: Source<A>, A: Layout, S: Select<E::Output>, T: SelectChain<S::Out>, const POS: usize> ReadVia<E, A, Stored, POS> for (S, T)
+ where
+-    A::Outs: AtPos<C::Out, POS>,
++    A::Outs: AtPos<T::Out, POS>,
+ {
+     #[cfg_attr(not(debug_assertions), inline(always))]
+     #[cfg_attr(debug_assertions, inline)]
+-    fn read_via<'a>(_: &'a A::Root, outs: &'a A::Outs) -> &'a C::Out {
+-        <A::Outs as AtPos<C::Out, POS>>::at(outs)
++    fn read_via<'a>(_: &'a A::Root, outs: &'a A::Outs) -> &'a T::Out {
++        <A::Outs as AtPos<T::Out, POS>>::at(outs)
+     }
+ }
+ 
+--- dataflow-flat/src/select.rs	2026-11-02 14:54:25.298751958 -0500
++++ target/gat-patch/dataflow-flat/src/select.rs	2026-11-02 15:03:43.655083841 -0500
+@@ -71,6 +71,7 @@
+     /// output for a plain edge, a [`SelInit`] (the initial value of the slot)
+     /// for a selected one.
+     type Init<'a, N: Node<Output = In>>;
++    type Read<'a, N: Node>;
+     /// Is the chain empty?
+     const PLAIN: bool;
+     /// Does the chain match?
+@@ -82,6 +83,7 @@
+ impl<In: 'static> SelectChain<In> for () {
+     type Out = In;
+     type Init<'a, N: Node<Output = In>> = crate::node::InitOf<'a, N>;
++    type Read<'a, N: Node> = crate::node::ReadOf<'a, N>;
+     const PLAIN: bool = true;
+     #[cfg_attr(not(debug_assertions), inline(always))]
+     #[cfg_attr(debug_assertions, inline)]
+@@ -97,6 +99,7 @@
+ impl<In: 'static, S: Select<In>, T: SelectChain<S::Out>> SelectChain<In> for (S, T) {
+     type Out = T::Out;
+     type Init<'a, N: Node<Output = In>> = SelInit<'a, T::Out>;
++    type Read<'a, N: Node> = &'a T::Out;
+     const PLAIN: bool = false;
+     #[cfg_attr(not(debug_assertions), inline(always))]
+     #[cfg_attr(debug_assertions, inline)]
+--- dataflow-flat/src/component.rs	2026-11-02 14:54:25.297750299 -0500
++++ target/gat-patch/dataflow-flat/src/component.rs	2026-11-02 15:02:33.966518132 -0500
+@@ -114,7 +114,7 @@
+ macro_rules! dep_list_leaf {
+     ([$($E:ident $C:ident $I:ident)*]) => {
+         impl<$($E: Node, $C: SelectChain<$E::Output>, const $I: usize,)*> DepList for ($(Sub<$E, $C, $I>,)*) {
+-            type Inputs<'a> = ($(&'a <$C as SelectChain<$E::Output>>::Out,)*);
++            type Inputs<'a> = ($(<$C as SelectChain<$E::Output>>::Read<'a, $E>,)*);
+             type Inits<'a> = ($(<$C as SelectChain<$E::Output>>::Init<'a, $E>,)*);
+             const LEN: usize = [$(stringify!($E),)* ""].len() - 1;
+         }
+--- dataflow-flat/src/handler.rs	2026-11-02 14:54:25.298105338 -0500
++++ target/gat-patch/dataflow-flat/src/handler.rs	2026-11-02 15:03:43.655260404 -0500
+@@ -82,6 +82,7 @@
+ impl<In: 'static, Em: 'static, C: SelectChain<In>> SelectChain<In> for Hd<Em, C> {
+     type Out = ();
+     type Init<'a, N: Node<Output = In>> = C::Init<'a, N>;
++    type Read<'a, N: Node> = &'a ();
+     const PLAIN: bool = C::PLAIN;
+     #[cfg_attr(not(debug_assertions), inline(always))]
+     #[cfg_attr(debug_assertions, inline)]
+--- dataflow-flat/src/sinks.rs	2026-11-02 14:54:25.298816520 -0500
++++ target/gat-patch/dataflow-flat/src/sinks.rs	2026-11-02 15:06:40.222135786 -0500
+@@ -42,6 +42,9 @@
+ #[doc(hidden)]
+ pub struct Anchor<R, S>(PhantomData<fn() -> (R, S)>);
+ impl<R: 'static, S: SinkList> crate::node::__private::Sealed for Anchor<R, S> {}
++impl<R: 'static, S: SinkList> crate::node::Edge for Anchor<R, S> {
++    type Read<'a> = &'a ();
++}
+ impl<R: 'static, S: SinkList> Node for Anchor<R, S> {
+     type Output = ();
+     type Subs = S::Subs;
+--- dataflow-flat/src/lib.rs	2026-11-02 14:54:25.298216678 -0500
++++ target/gat-patch/dataflow-flat/src/lib.rs	2026-11-02 15:06:52.421285470 -0500
+@@ -141,7 +141,7 @@
+ #[doc(hidden)]
+ pub use build::ConstructPass;
+ pub use component::{Component, ComponentSubscription, DepList, Sub};
+-pub use node::{InitOf, Node, Root};
++pub use node::{Edge, InitOf, Node, Root};
+ pub use pipeline::Pipeline;
+ pub use plan::{MAX_COMPONENTS, MAX_DECISIONS, MAX_EDGES, MAX_TERMS};
+ pub use request::{Listener, Request};
+--- dataflow-macros/src/lib.rs	2026-11-02 14:54:25.300325395 -0500
++++ target/gat-patch/dataflow-macros/src/lib.rs	2026-11-02 15:06:52.422441320 -0500
+@@ -883,11 +883,7 @@
+         .map(|&i| {
+             let (s, c) = (&subs[i], &field_chains[i]);
+             let t = &s.ty;
+-            if s.chain.is_empty() {
+-                quote!(<#t as #krate::Node>::Output)
+-            } else {
+-                quote!(<#c as #krate::SelectChain<<#t as #krate::Node>::Output>>::Out)
+-            }
++            quote!(<#c as #krate::SelectChain<<#t as #krate::Node>::Output>>::Read<#lt, #t>)
+         })
+         .collect();
+     let init_types: Vec<TokenStream2> = keep
+@@ -1151,6 +1147,9 @@
+     let node_impls = quote! {
+         impl #nimpl_generics #krate::__private::Sealed for #name #nty_generics #node_where {}
+ 
++        impl #nimpl_generics #krate::Edge for #name #nty_generics #node_where {
++            type Read<'a> = &'a <#name #nty_generics as #krate::Component>::Output where Self: 'a;
++        }
+         impl #nimpl_generics #krate::Node for #name #nty_generics #node_where {
+             type Output = <#name #nty_generics as #krate::Component>::Output;
+             type Subs = <#name #nty_generics as #krate::ComponentSubscription>::Deps;
+@@ -1241,7 +1240,7 @@
+         #[doc(hidden)]
+         #[allow(non_camel_case_types)]
+         pub struct #input_name #input_decl_generics #input_where {
+-            #( pub #field_names: &#lt #input_types, )*
++            #( pub #field_names: #input_types, )*
+             #[doc(hidden)]
+             pub __marker: #marker_ty,
+         }
+@@ -1311,6 +1310,9 @@
+     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+     Ok(quote! {
+         impl #impl_generics #krate::__private::Sealed for #name #ty_generics #where_clause {}
++        impl #impl_generics #krate::Edge for #name #ty_generics #where_clause {
++            type Read<'a> = &'a Self where Self: 'a;
++        }
+         impl #impl_generics #krate::Node for #name #ty_generics #where_clause {
+             type Output = Self;
+             type Subs = ();
