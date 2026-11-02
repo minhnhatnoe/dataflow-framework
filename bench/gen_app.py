@@ -72,7 +72,20 @@ def mname(e, b):
 
 CARGO_CONFIG = """[build]
 # Without this, exported_generic_symbols re-runs on any edit that changes a line's length (dev rebuild 4.9 s vs 0.8 s).
-rustflags = ["-Zshare-generics=n"]
+rustflags = ["-Zshare-generics=n", "-Ctarget-cpu=native"]
+# Sets _RJEM_MALLOC_CONF for rustc ([env] does not reach it); the script is copied into the app, so it can live anywhere.
+rustc-wrapper = "scripts/rustc-env.sh"
+"""
+
+PROFILE = """
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false
+debug-assertions = false
+overflow-checks = false
 """
 
 
@@ -1054,7 +1067,7 @@ fn main() {{
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--size", default="tiny")
-    ap.add_argument("--mode", default="1a", choices=["1a", "enum", "req"],
+    ap.add_argument("--mode", required=True, choices=["1a", "enum", "req"],
                     help="1a: no selectors, everything runs; enum: selectors via one #[derive(Demux)] enum per exchange (works on phase 1b)")
     ap.add_argument("--lib", help="path of the dataflow checkout to depend on (default: this repo)")
     ap.add_argument("--out")
@@ -1085,7 +1098,9 @@ def main():
     write(f"{out}/Cargo.toml", """[workspace]
 resolver = "2"
 members = ["marketlib", "app", "baseline", "runner"]
-""")
+""" + PROFILE)
+    os.makedirs(f"{out}/scripts", exist_ok=True)
+    shutil.copy(f"{os.path.dirname(os.path.abspath(__file__))}/../scripts/rustc-env.sh", f"{out}/scripts/rustc-env.sh")
     shutil.copy(f"{LIB}/rust-toolchain.toml", f"{out}/rust-toolchain.toml")
     write(f"{out}/.cargo/config.toml", CARGO_CONFIG)
     if os.path.exists(f"{LIB}/Cargo.lock") and not os.path.exists(f"{out}/Cargo.lock"):
