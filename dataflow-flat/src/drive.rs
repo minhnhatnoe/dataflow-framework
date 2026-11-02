@@ -457,6 +457,11 @@ impl PgKindOf<5> for () {
     type Ty = RunSwK;
 }
 #[doc(hidden)]
+pub struct TailK;
+impl PgKindOf<6> for () {
+    type Ty = TailK;
+}
+#[doc(hidden)]
 pub trait ExecK<A: Layout, Ph, K> {
     fn exec_k(ctx: &mut PushCtx<'_, A>);
 }
@@ -558,6 +563,29 @@ where
     #[cfg_attr(debug_assertions, inline)]
     fn exec_k(ctx: &mut PushCtx<'_, A>) {
         <NodeRg<A, N> as SeqDrive<A, Ph, <NodeRg<A, N> as RgCl>::Cl>>::seq(ctx)
+    }
+}
+
+/// The runs the branches of a switch share (`PG_TAIL`), as a function of their own in release builds.
+#[doc(hidden)]
+#[cfg_attr(not(debug_assertions), inline(never))]
+#[cfg_attr(debug_assertions, inline)]
+pub fn exec_tail<A: Layout, Ph, const N: usize>(ctx: &mut PushCtx<'_, A>)
+where
+    NodeRg<A, N>: RgCl,
+    NodeRg<A, N>: SeqDrive<A, Ph, <NodeRg<A, N> as RgCl>::Cl>,
+{
+    <NodeRg<A, N> as SeqDrive<A, Ph, <NodeRg<A, N> as RgCl>::Cl>>::seq(ctx)
+}
+impl<A: Layout, Ph, const N: usize> ExecK<A, Ph, TailK> for Pn<A, N>
+where
+    NodeRg<A, N>: RgCl,
+    NodeRg<A, N>: SeqDrive<A, Ph, <NodeRg<A, N> as RgCl>::Cl>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn exec_k(ctx: &mut PushCtx<'_, A>) {
+        exec_tail::<A, Ph, N>(ctx)
     }
 }
 

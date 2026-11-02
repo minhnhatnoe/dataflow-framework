@@ -87,6 +87,11 @@ pub(crate) const PG_HRUN: u8 = 4;
 /// key is taken from the value `update` returned, before it is stored, so the dispatch
 /// does not wait for a store-to-load round trip.
 pub(crate) const PG_RUNSW: u8 = 5;
+/// A sequence of plain runs shared by the branches of a switch, compiled once as a function of
+/// its own (`Plan::share_tail`).
+pub(crate) const PG_TAIL: u8 = 6;
+/// The fewest runs worth a shared tail (0 disables sharing).
+const TAIL_MIN: usize = 2;
 /// Items (handled edges that may fire) of all handler runs in the program.
 const HPOOL: usize = 1 << 17;
 
@@ -1785,6 +1790,107 @@ impl Plan {
         node
     }
 
+    /// The items (program nodes in order) of branch node `n`: a Seq's children, else `n` itself.
+    const fn items_of(&self, n: u32) -> (usize, usize, bool) {
+        let nu = n as usize;
+        if self.pg_kind[nu] == PG_SEQ {
+            (self.pg_a[nu] as usize, self.pg_b[nu] as usize, true)
+        } else {
+            (nu, 1, false)
+        }
+    }
+    const fn item_at(&self, n: u32, i: usize) -> u32 {
+        let (s, _, seq) = self.items_of(n);
+        if seq {
+            self.ch_node[s + i]
+        } else {
+            n
+        }
+    }
+    /// The branches `kpool[ch..ch+nk]` of a switch end in the same plain runs: those runs become one
+    /// out-of-line node (`PG_TAIL`) that every branch calls. The code of a joined cone then exists
+    /// once per switch instead of once per branch (the leaves of a market's depth and trade
+    /// updates share it). Order is kept: the shared runs are the last of every branch.
+    const fn share_tail(&mut self, _m: usize, ch: usize, nk: usize) {
+        if nk < 2 || TAIL_MIN == 0 {
+            return;
+        }
+        // the longest common suffix of plain runs
+        let mut l = 0;
+        loop {
+            let mut ok = true;
+            let mut r = 0;
+            while r < nk {
+                let (_, len, _) = self.items_of(self.kpool[ch + r]);
+                if l >= len {
+                    ok = false;
+                    break;
+                }
+                let it = self.item_at(self.kpool[ch + r], len - 1 - l) as usize;
+                let it0 = {
+                    let (_, len0, _) = self.items_of(self.kpool[ch]);
+                    self.item_at(self.kpool[ch], len0 - 1 - l) as usize
+                };
+                if self.pg_kind[it] != PG_RUN || self.pg_kind[it0] != PG_RUN || self.pg_a[it] != self.pg_a[it0] {
+                    ok = false;
+                    break;
+                }
+                r += 1;
+            }
+            if !ok {
+                break;
+            }
+            l += 1;
+        }
+        if l < TAIL_MIN {
+            return;
+        }
+        // the shared node: the last `l` runs of the first branch
+        let (s0, len0, seq0) = self.items_of(self.kpool[ch]);
+        let _ = seq0;
+        if self.ch_len + l > MAX_PCH {
+            self.fail("the push program is too large: ", "raise dataflow_flat's child pool", "");
+            return;
+        }
+        let tfirst = self.ch_len;
+        let mut i = 0;
+        while i < l {
+            self.ch_node[tfirst + i] = self.item_at(self.kpool[ch], len0 - l + i);
+            i += 1;
+        }
+        let _ = s0;
+        self.ch_len = tfirst + l;
+        let t = self.new_node(PG_TAIL, tfirst as u32, l as u32);
+        if self.failed {
+            return;
+        }
+        let mut r = 0;
+        while r < nk {
+            let b = self.kpool[ch + r];
+            let (_, len, _) = self.items_of(b);
+            let keep = len - l;
+            if keep == 0 {
+                self.kpool[ch + r] = t;
+            } else {
+                if self.ch_len + keep + 1 > MAX_PCH {
+                    self.fail("the push program is too large: ", "raise dataflow_flat's child pool", "");
+                    return;
+                }
+                let first = self.ch_len;
+                let mut i = 0;
+                while i < keep {
+                    self.ch_node[first + i] = self.item_at(b, i);
+                    i += 1;
+                }
+                self.ch_node[first + keep] = t;
+                self.ch_len = first + keep + 1;
+                let n = self.new_node(PG_SEQ, first as u32, (keep + 1) as u32);
+                self.kpool[ch + r] = n;
+            }
+            r += 1;
+        }
+    }
+
     /// A switch for the segment `lst[lo..hi]` at the place `(x, prev)`.
     const fn emit_switch(&mut self, lo: usize, hi: usize, x: u32, prev: u32) -> u32 {
         let m = self.kp_len;
@@ -2025,6 +2131,10 @@ impl Plan {
             self.kpool[ch + r] = c;
             r += 1;
         }
+        if self.failed {
+            return 0;
+        }
+        self.share_tail(m + 0, ch, nk);
         if self.failed {
             return 0;
         }
