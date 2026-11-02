@@ -327,3 +327,15 @@ Allocator: keep `-1/-1`. `muzzy_decay_ms:-1` alone is fine up to 4,079 (32.3 s, 
 Dev edits, medians of 3, `enum`. Check at 2,044 / 4,079: body 0.37 / 0.61 s, subscription 0.44 / 0.91 s, add 15.4 / 33.7 s, library 7.8 / 23.3 s. Build at 4,079: first 50.5 s, 7.5 GB; body 3.3 s; subscription 14.9 s (first run 40.2 s); library 19.8 s; add killed at 8 GB. Build at 2,044: first 24.2 s, 3.7 GB; add 20.8 s, 4.4 GB. The check library edit grows 3.1x; `memset` goes from about 1.0 s to about 6.9 s and accounts for about 78% of the excess (callers not recorded).
 
 rustc: page-fault regression bisected to rust-lang/rust#159115 (`c7d7da342`, parent 730k faults, it 2.43M on the reproducer). Not filed; draft is with the user. Reproducer generator: `target/probe-ex/rr/repro.py` (scratch).
+
+## Release at `perps` and `full`, plan limits, rustc fix (2026-11-02)
+
+`perps` release, full profile. 3ee3e0a: 4,348 s, 27.17 GB. After outlining switch leaf arms and construction, and release-only `inline(always)` on lookups (42f26e3, ad0b0d2): 553.6 s, 24.35 GB. After the storage descent (3804207, 8253688): 537.2 s, 12.08 GB. Framework min 117.86 ns vs 117.53 ns before the descent (6 alternating runs, cpu 10), under the threshold. Typical after the first two commits: gap 5.7 to 3.9 ns, build 28.2 to 21.1 s.
+
+Descent, other sizes: typical 1.06 to 0.93 GB, +0.14 ns; 4,079 3.50 to 2.94 GB, +0.95 ns (consistent across two sessions); 6,114 6.17 to 4.33 GB. Not byte-identical at typical (104 bytes of `.text`, in the `Finish` functions).
+
+Gap to hand-written code, `enum`: 823 3.9 ns, 4,079 9.1 ns, `perps` 26 to 27 ns. An agent's earlier split at `perps`: `--keys 64` 7.4, `--keys 179` 17.8, full keys 30, `--sort` 12.4, so most of it appears only when keys vary. No hardware counters at `perps` (`perf_event_paranoid` reset to 4 after restart). On `znver3` 4,079 gains about 1.3 ns; `+prefer-256-bit` nothing.
+
+`full` (generator gives 30,186 components): plan limits raised (33661c2). Cold check with patched rustc, empty `MALLOC_CONF`: 310 s, 10.1 GB, 4.8M faults. Release on 2ebfcdd, 26 GB cap: type check 169 s, 8.4 GB; front end ends at 250 s, 20 GB; RSS falls to about 5 GB; LLVM climbs about 150 MB/s and the rustc was OOM-killed at 432 s (`anon-rss` 27.2 GB), still climbing. At `perps` the same climb goes from 4.4 to 11.8 GB in about 40 s and then stays flat.
+
+rustc: `MAX_POOLED_RECORDERS` 4 to 256 in `compiler/rustc_middle/src/dep_graph/edges.rs` (local stage 1, single runs, default allocator): minimal reproducer 953k to 164k faults; 4,079 cold 54.7-58.3 s, about 12M to 35.2 s, 0.84M, +90 MB; library edit 71.5 s, 37M to 9.05 s, 0.57M. Minimal reproducer: `target/probe-ex/rr/minimal/repro.sh` (scratch). Not filed. Whether a smaller pool suffices and rustc's `tests/incremental` are still open. `muzzy_decay_ms:-1` alone is not a workaround at `perps`.
