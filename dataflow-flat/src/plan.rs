@@ -33,7 +33,7 @@
 //! are proved by the trait solver, and on a cyclic graph the proof needs itself.
 //! That is reported as "overflow evaluating the requirement `(B,): Upstream`",
 //! naming a component of the cycle. The proof is as deep as the graph, so
-//! graphs deeper than about 40 layers need `#![recursion_limit = "256"]` in the
+//! graphs deeper than about 88 layers need `#![recursion_limit = "256"]` in the
 //! user's crate (README, "Graph depth").
 
 use std::any::{type_name, TypeId};
