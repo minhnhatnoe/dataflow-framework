@@ -27,7 +27,7 @@ use crate::component::{Component, ComponentSubscription, DepList};
 use crate::flat::{bound, class, ClassOf, EntryPos, Inner, Leaf, Loc, NthS, NthT, PickEdge, PosSelect, Whole};
 use crate::gather::{ChainKeyAt, ChainKeyPre, GatherCx, GatherIn, GatherInit, Layout, Ready, Source};
 use crate::split::SplitAt;
-use crate::select::{ChainInitial, ChainKey, Keep, SelectChain};
+use crate::select::{ChainInitial, Keep, SelectChain};
 use crate::node::{Comp, SlotNode, Vertex};
 use crate::plan::{Planned, NO_FLAG};
 use crate::store::AtPos;
