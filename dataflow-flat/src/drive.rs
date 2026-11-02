@@ -24,10 +24,10 @@ use std::marker::PhantomData;
 
 use crate::build::ConstructPass;
 use crate::component::{Component, ComponentSubscription};
-use crate::flat::{bound, class, ClassOf, EntryPos, Inner, Leaf, Loc, NthT, PickEdge, PosSelect, Whole};
+use crate::flat::{bound, class, ClassOf, EntryPos, Inner, Leaf, Loc, NthS, NthT, PickEdge, PosSelect, Whole};
 use crate::gather::{GatherIn, GatherInit, Layout, Ready, Source};
-use crate::select::ChainKey;
-use crate::node::{Comp, Node};
+use crate::select::{ChainInitial, ChainKey, Keep, SelectChain};
+use crate::node::{Comp, Node, SlotNode};
 use crate::plan::{Planned, NO_FLAG};
 use crate::store::AtPos;
 
@@ -156,7 +156,7 @@ impl<A: Layout, const P: usize> StepAt<ConstructPh<A>, P> for A
 where
     A: NthT<P>,
     <A as NthT<P>>::T: Comp,
-    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherInit<A>,
+    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherInit<A, P>,
     A::StatesOpt: AtPos<Option<<A as NthT<P>>::T>, P>,
     A::OutsOpt: AtPos<Option<<<A as NthT<P>>::T as Node>::Output>, P>,
 {
@@ -164,7 +164,7 @@ where
         type C<A, const P: usize> = <A as NthT<P>>::T;
         let config = ctx.pass.take_config::<C<A, P>>();
         let (state, out) = {
-            let raw = <<C<A, P> as ComponentSubscription>::Deps as GatherInit<A>>::gather(&*ctx.outs);
+            let raw = <<C<A, P> as ComponentSubscription>::Deps as GatherInit<A, P>>::gather(&*ctx.outs);
             let mut init = <C<A, P> as ComponentSubscription>::init(raw);
             <C<A, P> as ComponentSubscription>::__fill_requests(&mut init, &mut *ctx.pass);
             <C<A, P> as crate::component::Component>::new(config, init)
@@ -267,10 +267,13 @@ macro_rules! run_body {
         // The inputs borrow the stored outputs and the root only while
         // `update` runs; the write to the output comes after.
         let out = {
-            let inputs = <<C<$A, $P> as ComponentSubscription>::Deps as GatherIn<$A>>::gather($ctx.root, &*$ctx.outs);
+            let inputs = <<C<$A, $P> as ComponentSubscription>::Deps as GatherIn<$A, $P>>::gather($ctx.root, &*$ctx.outs);
             <$A::States as AtPos<C<$A, $P>, $P>>::at_mut(&mut *$ctx.states).update(<C<$A, $P> as ComponentSubscription>::input(inputs))
         };
         *<$A::Outs as AtPos<<C<$A, $P> as Node>::Output, $P>>::at_mut(&mut *$ctx.outs) = out;
+        // Stored selected values whose source is this component: written when their
+        // selectors match, before any subscriber of this step reads them.
+        <SrcSlots<$A, $P> as Drive<$A, SlotWriteBy<$A>, <SrcSlots<$A, $P> as RgCl>::Cl>>::drive($ctx);
         if CondAt::<$A, $P>::FLAG != NO_FLAG {
             $ctx.fired.set(CondAt::<$A, $P>::FLAG);
         }
@@ -288,9 +291,11 @@ impl<A: Layout, const P: usize> RunAt<PushPh<A>, P> for A
 where
     A: NthT<P>,
     <A as NthT<P>>::T: Comp,
-    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A>,
+    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P>,
     A::States: AtPos<<A as NthT<P>>::T, P>,
     A::Outs: AtPos<<<A as NthT<P>>::T as Node>::Output, P>,
+    SrcSlots<A, P>: RgCl,
+    SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
@@ -308,9 +313,11 @@ impl<A: Layout, const P: usize> RunIfAt<PushPh<A>, P> for A
 where
     A: NthT<P>,
     <A as NthT<P>>::T: Comp,
-    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A> + Ready<A>,
+    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P> + Ready<A>,
     A::States: AtPos<<A as NthT<P>>::T, P>,
     A::Outs: AtPos<<<A as NthT<P>>::T as Node>::Output, P>,
+    SrcSlots<A, P>: RgCl,
+    SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
@@ -627,5 +634,102 @@ where
     fn exec_k(ctx: &mut PushCtx<'_, A>) {
         let key = <Pn<A, N> as SwitchKey<A, Ph>>::key(ctx.root, &*ctx.outs);
         <NodeRg<A, N> as BstExec<A, Ph, <NodeRg<A, N> as RgCl>::Cl>>::bst(ctx, key);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Stored selected values (slots)
+// ---------------------------------------------------------------------------
+//
+// A slot has a storage position after the components (`flat::SlotTy`). It is
+// initialised before any component is constructed (`SlotInitPh`), so that `new`
+// can read it, and written in a push right after its source has run (`SlotWriteBy`,
+// from the run of the source component, or at the start of the push for the root),
+// when the chain matches the source's new output.
+
+/// The slots of the root, as a range of storage positions.
+#[doc(hidden)]
+pub struct RootSlots<A>(PhantomData<A>);
+impl<A: Planned> Rg for RootSlots<A> {
+    const LO: usize = A::PLAN.root_slots_lo();
+    const HI: usize = A::PLAN.root_slots_hi();
+}
+/// The slots whose source is the component at position `P`.
+#[doc(hidden)]
+pub struct SrcSlots<A, const P: usize>(PhantomData<A>);
+impl<A: Planned, const P: usize> Rg for SrcSlots<A, P> {
+    const LO: usize = A::PLAN.comp_slots_lo(P);
+    const HI: usize = A::PLAN.comp_slots_hi(P);
+}
+/// All the slots.
+#[doc(hidden)]
+pub struct AllSlots<A>(PhantomData<A>);
+impl<A: Planned> Rg for AllSlots<A> {
+    const LO: usize = Whole::<A>::N;
+    const HI: usize = Whole::<A>::T;
+}
+
+/// Phase: write the slots of the range (during a push).
+#[doc(hidden)]
+pub struct SlotWriteBy<A>(PhantomData<A>);
+impl<A: Layout> Phase for SlotWriteBy<A> {
+    type Ctx<'c> = PushCtx<'c, A>;
+}
+/// Phase: give every slot its initial value (while the pipeline is built).
+#[doc(hidden)]
+pub struct SlotInitPh<A>(PhantomData<A>);
+impl<A: Layout> Phase for SlotInitPh<A> {
+    type Ctx<'c> = ConstructCtx<'c, A>;
+}
+
+/// The work of a slot node at storage position `P`.
+#[doc(hidden)]
+pub trait SlotStep<A: Layout, const P: usize> {
+    fn write(ctx: &mut PushCtx<'_, A>);
+    fn init(ctx: &mut ConstructCtx<'_, A>);
+}
+impl<E, C, A, const P: usize> SlotStep<A, P> for SlotNode<E, C>
+where
+    A: Layout,
+    E: Source<A>,
+    C: SelectChain<<E as Node>::Output> + ChainInitial<<E as Node>::Output>,
+    <C as SelectChain<<E as Node>::Output>>::Out: Keep,
+    A::Outs: AtPos<<C as SelectChain<<E as Node>::Output>>::Out, P>,
+    A::StatesOpt: AtPos<Option<SlotNode<E, C>>, P>,
+    A::OutsOpt: AtPos<Option<<C as SelectChain<<E as Node>::Output>>::Out>, P>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn write(ctx: &mut PushCtx<'_, A>) {
+        let x = <E as Source<A>>::fetch(ctx.root, &*ctx.outs);
+        if <C as SelectChain<<E as Node>::Output>>::matches(x) {
+            let v = <C as SelectChain<<E as Node>::Output>>::get(x).clone();
+            *<A::Outs as AtPos<<C as SelectChain<<E as Node>::Output>>::Out, P>>::at_mut(&mut *ctx.outs) = v;
+        }
+    }
+    fn init(ctx: &mut ConstructCtx<'_, A>) {
+        *<A::StatesOpt as AtPos<Option<SlotNode<E, C>>, P>>::at_mut(&mut *ctx.states) = Some(SlotNode(PhantomData));
+        *<A::OutsOpt as AtPos<Option<<C as SelectChain<<E as Node>::Output>>::Out>, P>>::at_mut(&mut *ctx.outs) =
+            Some(<C as ChainInitial<<E as Node>::Output>>::initial());
+    }
+}
+impl<A: Layout, const P: usize> StepAt<SlotWriteBy<A>, P> for A
+where
+    A: NthS<crate::store::StateM, P>,
+    <A as NthS<crate::store::StateM, P>>::T: SlotStep<A, P>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn step(ctx: &mut PushCtx<'_, A>) {
+        <<A as NthS<crate::store::StateM, P>>::T as SlotStep<A, P>>::write(ctx)
+    }
+}
+impl<A: Layout, const P: usize> StepAt<SlotInitPh<A>, P> for A
+where
+    A: NthS<crate::store::StateM, P>,
+    <A as NthS<crate::store::StateM, P>>::T: SlotStep<A, P>,
+{
+    fn step(ctx: &mut ConstructCtx<'_, A>) {
+        <<A as NthS<crate::store::StateM, P>>::T as SlotStep<A, P>>::init(ctx)
     }
 }

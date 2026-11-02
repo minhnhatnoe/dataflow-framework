@@ -5,7 +5,10 @@ use std::marker::PhantomData;
 
 use crate::build::ConstructPass;
 use crate::component::{DepList, Sub};
-use crate::drive::{ConstructCtx, ConstructPh, Drive, Exec, FiredOps, FiredTy, NFlags, Pn, PushCtx, PushPh, RgCl, RootProg};
+use crate::drive::{
+    AllSlots, ConstructCtx, ConstructPh, Drive, Exec, FiredOps, FiredTy, NFlags, Pn, PushCtx, PushPh, RgCl, RootProg, RootSlots,
+    SlotInitPh, SlotWriteBy,
+};
 use crate::flat::{FlatTop, Whole};
 use crate::gather::Layout;
 use crate::listen::{ListenCtx, ListenPh};
@@ -131,6 +134,10 @@ where
     Pn<Anchor<R, S>, { RootProg::<Anchor<R, S>>::N }>: Exec<Anchor<R, S>, PushPh<Anchor<R, S>>>,
     Whole<Anchor<R, S>>: Drive<Anchor<R, S>, ListenPh<Anchor<R, S>>, <Whole<Anchor<R, S>> as RgCl>::Cl>,
     Whole<Anchor<R, S>>: Drive<Anchor<R, S>, ReqPh<Anchor<R, S>>, <Whole<Anchor<R, S>> as RgCl>::Cl>,
+    AllSlots<Anchor<R, S>>: RgCl,
+    AllSlots<Anchor<R, S>>: Drive<Anchor<R, S>, SlotInitPh<Anchor<R, S>>, <AllSlots<Anchor<R, S>> as RgCl>::Cl>,
+    RootSlots<Anchor<R, S>>: RgCl,
+    RootSlots<Anchor<R, S>>: Drive<Anchor<R, S>, SlotWriteBy<Anchor<R, S>>, <RootSlots<Anchor<R, S>> as RgCl>::Cl>,
 {
     type Store = Store<<Anchor<R, S> as Layout>::States, <Anchor<R, S> as Layout>::Outs>;
 
@@ -146,6 +153,8 @@ where
         let mut outs = <<A<R, S> as Layout>::OutsOpt as Empty>::EMPTY;
         {
             let mut ctx = ConstructCtx::<A<R, S>> { states: &mut states, outs: &mut outs, pass };
+            // The stored selected values first: `new` reads their initial values.
+            <AllSlots<A<R, S>> as Drive<A<R, S>, SlotInitPh<A<R, S>>, <AllSlots<A<R, S>> as RgCl>::Cl>>::drive(&mut ctx);
             <Whole<A<R, S>> as Drive<A<R, S>, ConstructPh<A<R, S>>, <Whole<A<R, S>> as RgCl>::Cl>>::drive(&mut ctx);
         }
         Store { states: states.finish(), outs: outs.finish() }
@@ -158,6 +167,8 @@ where
         type A<R, S> = Anchor<R, S>;
         let mut ctx =
             PushCtx::<A<R, S>> { root: &root, states: &mut store.states, outs: &mut store.outs, fired: <<A<R, S> as Layout>::Fired as FiredOps>::new() };
+        // The root has "run": its stored selected values take the pushed value if it matches.
+        <RootSlots<A<R, S>> as Drive<A<R, S>, SlotWriteBy<A<R, S>>, <RootSlots<A<R, S>> as RgCl>::Cl>>::drive(&mut ctx);
         <Pn<A<R, S>, { RootProg::<A<R, S>>::N }> as Exec<A<R, S>, PushPh<A<R, S>>>>::exec(&mut ctx);
     }
 

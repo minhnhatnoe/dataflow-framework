@@ -350,13 +350,86 @@ comp!(D2, [K3(K1(p)): Poll]);
 comp!(J, [a0: A0, a1: A1, a2: A2, d1: D1, d2: D2, a4: A4, a5: A5]);
 fn main() { let _ = Pipeline::<Poll, (J,)>::build(Configs::new()); }"
 
-# Rule 5: a selected edge read in steps where its selectors do not match (J also runs when K1 matches).
+# Rule 5 is gone: a selected edge read in steps where its selectors do not match is stored (J also runs when K1
+# matches, and reads the last K0 value). It needs an initial value from the selector: these hand-written selectors
+# have no `Initial` impl.
 CMD[demux_reader_not_implied]=build
-PATTERN[demux_reader_not_implied]='E0080.*J reads .*Poll through selectors in steps where they do not match; subscribe to a component that stores it'
+PATTERN[demux_reader_not_implied]='E0277.*the selector .K1. has no initial value'
 BODY[demux_reader_not_implied]="$SELECTORS
 comp!(A, [K0(p): Poll]);
 comp!(J, [a: A, K1(p): Poll]);
 fn main() { let _ = Pipeline::<Poll, (J,)>::build(Configs::new()); }"
+
+# The same graph with `Initial` impls compiles. A covered edge (A below) is not stored and needs none.
+CMD[stored_selector_ok]=build
+PATTERN[stored_selector_ok]='NOERROR'
+BODY[stored_selector_ok]="$SELECTORS
+impl Clone for Poll { fn clone(&self) -> Poll { Poll } }
+impl dataflow_flat::Initial<Poll> for K0 { fn initial() -> Poll { Poll } }
+impl dataflow_flat::Initial<Poll> for K1 { fn initial() -> Poll { Poll } }
+comp!(A, [K0(p): Poll]);
+comp!(J, [a: A, K1(p): Poll]);
+fn main() { let _ = Pipeline::<Poll, (J,)>::build(Configs::new()); }"
+
+# A stored payload without `Default` (the selector's initial value is `Default::default()`).
+CMD[stored_payload_no_default]=build
+PATTERN[stored_payload_no_default]='E0277.*(has no initial value|NoDef: (std::default::)?Default|NoDef. doesn.t implement)'
+read -r -d '' BODY[stored_payload_no_default] <<'EOT'
+#[derive(Clone)]
+pub struct NoDef(u8);
+#[derive(Root, dataflow_flat::Demux)]
+pub enum E { X(NoDef), Y(u64) }
+#[derive(ComponentSubscription)]
+#[subscribe(E::X(x): E, E::Y(y): E)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (A, 0) }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 { *i.y + i.x.0 as u64 }
+}
+fn main() { let _ = Pipeline::<E, (A,)>::build(Configs::new()); }
+EOT
+
+# A stored payload without `Clone`.
+CMD[stored_payload_no_clone]=build
+PATTERN[stored_payload_no_clone]='E0277.*NoClone. is read through selectors in steps where they do not match, so it is stored, and must implement .Clone.'
+read -r -d '' BODY[stored_payload_no_clone] <<'EOT'
+#[derive(Default)]
+pub struct NoClone(u8);
+#[derive(Root, dataflow_flat::Demux)]
+pub enum E { X(NoClone), Y(u64) }
+#[derive(ComponentSubscription)]
+#[subscribe(E::X(x): E, E::Y(y): E)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (A, 0) }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 { *i.y + i.x.0 as u64 }
+}
+fn main() { let _ = Pipeline::<E, (A,)>::build(Configs::new()); }
+EOT
+
+# A payload with neither `Default` nor `Clone` compiles when its variant is only read covered (`X` here: the
+# subscriber runs only when it matches) or as a handled entry.
+CMD[unstored_payload_ok]=build
+PATTERN[unstored_payload_ok]='NOERROR'
+read -r -d '' BODY[unstored_payload_ok] <<'EOT'
+pub struct Opaque(u8);
+#[derive(Root, dataflow_flat::Demux)]
+pub enum E { X(Opaque), Y(u64) }
+#[derive(ComponentSubscription)]
+#[subscribe(E::X(x): E)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (A, 0) }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 { i.x.0 as u64 }
+}
+fn main() { let _ = Pipeline::<E, (A,)>::build(Configs::new()); }
+EOT
 
 # Rule 6 through selectors: B is reached from the root only via a selector on a component nothing connects.
 CMD[selector_unreachable_component]=build
@@ -735,7 +808,8 @@ ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        generic_missing_sinks_bound generic_sinks_bound_ok
        unreachable_component second_root wrong_root_type
        keep_input_reference name_input_struct_outside unused_config
-       non_exclusive_join exclusive_join_ok deep_non_exclusive_join deep_exclusive_join_ok demux_reader_not_implied selector_unreachable_component
+       non_exclusive_join exclusive_join_ok deep_non_exclusive_join deep_exclusive_join_ok demux_reader_not_implied stored_selector_ok
+       stored_payload_no_default stored_payload_no_clone unstored_payload_ok selector_unreachable_component
        selector_wrong_input orphan_first on_not_keyed symbols_share_key
        handler_missing_update handler_missing_update_note handler_non_exclusive_join handler_exclusive_ok handler_duplicate_marker handler_selected_missing_update handler_bare_wildcard
        pattern_struct pattern_multi_field pattern_range pattern_range_literal pattern_guard pattern_or pattern_literal

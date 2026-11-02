@@ -9,8 +9,10 @@
 //!
 //! A selector is a zero-sized type implementing [`Select<In>`]: it tests a
 //! pattern on a value of type `In` and, when it matches, gives a reference to
-//! the matched part. Selectors are not nodes: they have no state, nothing is
-//! stored, and they appear only in subscriptions. Library selectors:
+//! the matched part. Selectors are not nodes: they have no state and appear only
+//! in subscriptions. (A subscriber that reads a selected input in steps where
+//! it does not match gets the last matched value, kept by the plan in a slot,
+//! or the selector's [`Initial`] value.) Library selectors:
 //! `option::Some` and `option::None` (the derive maps a bare `Some` / `None`
 //! in a chain to them); `#[derive(Demux)]` on an enum generates one selector
 //! per variant in a module named after the enum in snake_case; a guard is a
@@ -72,7 +74,8 @@ pub trait SelectChain<In: 'static>: 'static {
     /// The value at the end of the chain.
     type Out: 'static;
     /// What `new` gets for an edge with this chain from node `N`: the stored
-    /// output for a plain edge, `()` for a selected one.
+    /// output for a plain edge, a [`SelInit`] (the initial value of the slot)
+    /// for a selected one.
     type Init<'a, N: Node<Output = In>>;
     /// Is the chain empty?
     const PLAIN: bool;
@@ -99,7 +102,7 @@ impl<In: 'static> SelectChain<In> for () {
 }
 impl<In: 'static, S: Select<In>, T: SelectChain<S::Out>> SelectChain<In> for (S, T) {
     type Out = T::Out;
-    type Init<'a, N: Node<Output = In>> = ();
+    type Init<'a, N: Node<Output = In>> = SelInit<'a, T::Out>;
     const PLAIN: bool = false;
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
@@ -116,6 +119,110 @@ impl<In: 'static, S: Select<In>, T: SelectChain<S::Out>> SelectChain<In> for (S,
             Some(y) => T::get(y),
             None => selector_mismatch(),
         }
+    }
+}
+
+/// What `new` is given for a selected input: the value the input has before its
+/// selectors have matched (the selector's initial value, see [`Initial`]). It
+/// dereferences to the selected part. The value exists for an input that is
+/// *stored*, i.e. one that can be read in a step where its selectors do not
+/// match; an input that is always covered has no slot and no initial value, and
+/// dereferencing it panics when the pipeline is built ([`SelInit::get`] gives
+/// `None` instead).
+pub struct SelInit<'a, T>(pub(crate) Option<&'a T>);
+impl<'a, T> SelInit<'a, T> {
+    /// The initial value, if this input has one.
+    pub fn get(&self) -> Option<&'a T> {
+        self.0
+    }
+}
+impl<T> Clone for SelInit<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<T> Copy for SelInit<'_, T> {}
+impl<T: core::fmt::Debug> core::fmt::Debug for SelInit<'_, T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+impl<T> core::ops::Deref for SelInit<'_, T> {
+    type Target = T;
+    #[inline]
+    fn deref(&self) -> &T {
+        match self.0 {
+            Some(x) => x,
+            None => no_initial_value(),
+        }
+    }
+}
+#[cold]
+#[inline(never)]
+fn no_initial_value() -> ! {
+    panic!(
+        "`new` read a selected input that has no initial value: only an input that can be read in a step where \
+         its selectors do not match is stored and starts from the selector's initial value; this one is always \
+         matched when its subscriber runs (`SelInit::get` tests for it)"
+    )
+}
+
+/// The value a selector's part has before the selector has ever matched.
+/// `#[derive(Demux)]` selectors implement it with `Default::default()` of the
+/// payload (a variant whose payload is not `Default` has no usable impl, which
+/// only matters if it is read in steps where it does not match). `Some`, `Ok`,
+/// `Err` and `On` do likewise; a hand-written selector implements it however
+/// it likes.
+#[diagnostic::on_unimplemented(
+    message = "the selector `{Self}` has no initial value for `{In}`",
+    label = "a selected input that is read in steps where its selectors do not match starts from the selector's initial value",
+    note = "the payload must implement `Default` (for `#[derive(Demux)]`, `Some`, `Ok`, `Err` and `On`), or write `impl Initial<{In}> for {Self}`"
+)]
+pub trait Initial<In: 'static>: Select<In> {
+    fn initial() -> Self::Out;
+}
+
+/// The initial value at the end of a selector chain: the last selector's.
+#[doc(hidden)]
+pub trait ChainInitial<In: 'static>: SelectChain<In> {
+    fn initial() -> Self::Out;
+}
+impl<In: 'static, S: Initial<In>> ChainInitial<In> for (S, ()) {
+    fn initial() -> S::Out {
+        S::initial()
+    }
+}
+impl<In: 'static, S: Select<In>, S2: Select<S::Out>, T2: SelectChain<S2::Out>> ChainInitial<In> for (S, (S2, T2))
+where
+    (S2, T2): ChainInitial<S::Out>,
+{
+    fn initial() -> <(S2, T2) as SelectChain<S::Out>>::Out {
+        <(S2, T2) as ChainInitial<S::Out>>::initial()
+    }
+}
+
+/// A stored selected value is cloned out of the source's output.
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is read through selectors in steps where they do not match, so it is stored, and must implement `Clone`",
+    label = "the last matching value is cloned into the pipeline's storage"
+)]
+pub trait Keep: Clone + 'static {}
+#[diagnostic::do_not_recommend]
+impl<T: Clone + 'static> Keep for T {}
+
+/// Identity, for a conditional impl on a concrete type (a `where` that does
+/// not hold on a concrete type is an error; on a generic parameter it is not).
+#[doc(hidden)]
+pub trait Identity {
+    type Is;
+    fn from_is(x: Self::Is) -> Self;
+}
+impl<T> Identity for T {
+    type Is = T;
+    #[inline(always)]
+    fn from_is(x: T) -> T {
+        x
     }
 }
 
@@ -246,6 +353,15 @@ impl<In: Keyed, S: Symbol> Select<In> for On<S> {
     }
 }
 
+impl<In: Keyed + 'static, S: Symbol> Initial<In> for On<S>
+where
+    In::Item: Default,
+{
+    fn initial() -> In::Item {
+        Default::default()
+    }
+}
+
 /// A component that wants to know which keys its subscribers read: declared
 /// with `#[listener]` on the `ComponentSubscription` derive. At
 /// [`Pipeline::build`](crate::Pipeline::build), after every component is
@@ -282,6 +398,14 @@ pub mod option {
                 1
             }
         }
+    }
+    impl<T: Default + 'static> super::Initial<Option<T>> for Some {
+        fn initial() -> T {
+            T::default()
+        }
+    }
+    impl<T: 'static> super::Initial<Option<T>> for None {
+        fn initial() {}
     }
     impl<T: 'static> Select<Option<T>> for None {
         type Out = ();
@@ -332,6 +456,16 @@ pub mod result {
             } else {
                 1
             }
+        }
+    }
+    impl<T: Default + 'static, E: 'static> super::Initial<Result<T, E>> for Ok {
+        fn initial() -> T {
+            T::default()
+        }
+    }
+    impl<T: 'static, E: Default + 'static> super::Initial<Result<T, E>> for Err {
+        fn initial() -> E {
+            E::default()
         }
     }
     impl<T: 'static, E: 'static> Select<Result<T, E>> for Err {

@@ -122,3 +122,35 @@ impl<C> Comp for C where
     C: crate::component::Component + Node<Output = <C as crate::component::Component>::Output, Kind = CompKind>
 {
 }
+
+// ---------------------------------------------------------------------------
+// Stored selected values
+// ---------------------------------------------------------------------------
+
+/// Kind number of a slot (see [`SlotNode`]).
+#[doc(hidden)]
+pub const KIND_SLOT: u8 = 4;
+
+/// The kind of a [`SlotNode`]. Never subscribed to.
+#[doc(hidden)]
+pub struct SlotKind;
+impl NodeKind for SlotKind {
+    type Init<'a, N: Node> = ();
+}
+
+/// A stored selected value: the last value the selector chain `C` matched on
+/// the output of `E`, kept for the subscribers that read it in steps where the
+/// chain does not match. It is not a component: it has no subscriptions and is
+/// not in the plan's walk. It takes a *position* after the components in the
+/// flat storage, so that its value (`Output`) is stored like a component's
+/// output.
+#[doc(hidden)]
+pub struct SlotNode<E, C>(pub core::marker::PhantomData<fn() -> (E, C)>);
+impl<E: Node, C: crate::select::SelectChain<E::Output>> __private::Sealed for SlotNode<E, C> {}
+impl<E: Node, C: crate::select::SelectChain<E::Output>> Node for SlotNode<E, C> {
+    type Output = C::Out;
+    type Subs = ();
+    type Kind = SlotKind;
+    type Requests = crate::request::NoRequests;
+    const KIND: u8 = KIND_SLOT;
+}
