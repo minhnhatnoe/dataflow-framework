@@ -40,6 +40,12 @@ hand_init = " ".join(f"q{i}: (0, 0)," for i in range(n))
 hand_arms = "\n".join(f"            {i} => {{ self.q{i} = (m.v, m.v * 2 + {i}); self.oms = (self.q{i}.1, 1); self.tail(); }}" for i in range(n))
 pick = "\n".join(f"        if i.q{i}.0 > best.0 {{ best = *i.q{i}; }}" for i in range(n))
 
+def _cargo_config(d):
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    os.makedirs(os.path.join(d, ".cargo"), exist_ok=True)
+    open(os.path.join(d, ".cargo", "config.toml"), "w").write(
+        '[build]\nrustflags = ["-Zshare-generics=n", "-Ctarget-cpu=native"]\nrustc-wrapper = "' + root + '/scripts/rustc-env.sh"\n')
+
 cargo = f"""[package]
 name = "handler_bench"
 version = "0.0.0"
@@ -56,11 +62,17 @@ hand = []
 
 [profile.release]
 opt-level = 3
-debug = 1
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false
+debug-assertions = false
+overflow-checks = false
 
 [workspace]
 """
 open(os.path.join(out, "Cargo.toml"), "w").write(cargo)
+_cargo_config(out)
 
 main = f"""#![allow(dead_code, unused_imports)]
 use std::sync::atomic::{{AtomicU64, Ordering}};

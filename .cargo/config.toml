@@ -1,3 +1,5 @@
 [build]
 # Without this, exported_generic_symbols re-runs on any edit that changes a line's length (dev rebuild on 823 components 4.9 s vs 0.8 s).
-rustflags = ["-Zshare-generics=n"]
+rustflags = ["-Zshare-generics=n", "-Ctarget-cpu=native"]
+# Sets _RJEM_MALLOC_CONF for rustc ([env] does not reach it). A path with a slash is relative to the directory that holds .cargo.
+rustc-wrapper = "scripts/rustc-env.sh"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measurement harness for the generated market app (bench/gen_app.py).
 
-usage: scripts/measure.py [--sizes tiny,small,typical] [--mode 1a|enum|on] [--lib CHECKOUT] [--out DIR] [--steps gen,release,run,dev,mono]
+usage: scripts/measure.py [--sizes tiny,small,typical] --mode 1a|enum|req|on [--lib CHECKOUT] [--out DIR] [--steps gen,release,run,dev,mono]
                           [--cpu 2] [--procs 5] [--cap-small 60] [--cap-big 600] [--sink-scan 8] [--keep-going]
 
 For each size it generates the workspace under DIR/gen/<size>-<mode>/ and records CSVs under DIR/csv/:
@@ -143,6 +143,17 @@ def do_size(a, size):
         print(r.stdout.strip(), r.stderr.strip())
         for kv in re.findall(r"(\w+)=(\[[^\]]*\]|\S+)", r.stdout.split(": ", 1)[1]):
             rec.add("meta", *kv)
+    # Which build profile the numbers use: the generated workspace's [profile.release] and rustflags.
+    try:
+        toml = open(f"{gen}/Cargo.toml").read()
+        prof = toml.split("[profile.release]", 1)[1].split("[", 1)[0].split() if "[profile.release]" in toml else []
+        prof = " ".join(prof).replace(" = ", "=") if prof else "default"
+        flags = re.search(r"rustflags = (\[.*\])", open(f"{gen}/.cargo/config.toml").read())
+    except OSError:
+        prof, flags = "unknown", None
+    rec.add("meta", "profile_release", prof.replace(",", ";"))
+    rec.add("meta", "rustflags", (flags.group(1) if flags else "none").replace(",", ";"))
+    print(f"[{tag}] profile.release: {prof}; rustflags: {flags.group(1) if flags else 'none'}", flush=True)
     fw_ok = True
 
     if "release" in steps:
@@ -223,7 +234,7 @@ def do_size(a, size):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sizes", default="tiny,small")
-    ap.add_argument("--mode", default="1a", help="1a | enum | on (see bench/gen_app.py)")
+    ap.add_argument("--mode", required=True, help="1a | enum | req | on (see bench/gen_app.py)")
     ap.add_argument("--lib", help="dataflow checkout to build against (default: this repo)")
     ap.add_argument("--out", default="/tmp/claude-1000/-home-noe-TGT-dataflow-framework/093ee37d-6bfd-475e-b7a4-1d29416bf0b3/scratchpad/harness")
     ap.add_argument("--steps", default="gen,release,mono,run,dev")

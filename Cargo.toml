@@ -3,3 +3,12 @@ resolver = "2"
 members = ["dataflow-flat", "dataflow-macros", "bench", "dataflow-flat/tests/samename/foo-v1", "dataflow-flat/tests/samename/foo-v2"]
 # `cargo build` / `cargo test` without -p: everything except the 400-component benchmark.
 default-members = ["dataflow-flat", "dataflow-macros", "dataflow-flat/tests/samename/foo-v1", "dataflow-flat/tests/samename/foo-v2"]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false
+debug-assertions = false
+overflow-checks = false

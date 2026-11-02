@@ -168,15 +168,27 @@ dataflow-flat = {{ path = "{root}/dataflow-flat" }}
 
 [profile.release]
 opt-level = 3
-debug = 1
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false
+debug-assertions = false
+overflow-checks = false
 
 [workspace]
 """
+
+def _cargo_config(d):
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    os.makedirs(os.path.join(d, ".cargo"), exist_ok=True)
+    open(os.path.join(d, ".cargo", "config.toml"), "w").write(
+        '[build]\nrustflags = ["-Zshare-generics=n", "-Ctarget-cpu=native"]\nrustc-wrapper = "' + root + '/scripts/rustc-env.sh"\n')
 
 def write(name, main):
     d = os.path.join(out, name)
     os.makedirs(os.path.join(d, "src"), exist_ok=True)
     open(os.path.join(d, "Cargo.toml"), "w").write(cargo(f"ek_{name}"))
+    _cargo_config(d)
     open(os.path.join(d, "src", "main.rs"), "w").write(main)
 
 # ---- F ---------------------------------------------------------------------------------------------------
