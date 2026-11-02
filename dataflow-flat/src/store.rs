@@ -173,15 +173,15 @@ pub trait AtPos<V, const P: usize> {
 }
 impl<V, const P: usize, T> AtPos<V, P> for T
 where
-    T: SelP<P> + Access<V, P, { <T as SelP<P>>::POS }>,
+    T: Access<V, P, 0>,
 {
     #[inline]
     fn at(&self) -> &V {
-        Access::<V, P, { <T as SelP<P>>::POS }>::get(self)
+        Access::<V, P, 0>::get(self)
     }
     #[inline]
     fn at_mut(&mut self) -> &mut V {
-        Access::<V, P, { <T as SelP<P>>::POS }>::get_mut(self)
+        Access::<V, P, 0>::get_mut(self)
     }
 }
 
@@ -239,7 +239,7 @@ dataflow_macros::select_tuples!(finish_impl);
 // Blocks: the nominal nodes of the tree (see `flat::Blk`)
 // ---------------------------------------------------------------------------
 
-use crate::flat::{Blk, Fields};
+use crate::flat::{Blk, FieldIdx, FieldSel, Fields, Ix};
 
 impl<R: Fields<M, LO, HI>, M: Mapper, const LO: usize, const HI: usize> Span for Blk<R, M, LO, HI> {
     const LO: usize = LO;
@@ -253,17 +253,45 @@ impl<R: Fields<M, LO, HI>, M: Mapper, const LO: usize, const HI: usize, const P:
 impl<R: Fields<M, LO, HI>, M: Mapper, V, const LO: usize, const HI: usize, const P: usize> Access<V, P, 0>
     for Blk<R, M, LO, HI>
 where
-    <R as Fields<M, LO, HI>>::F: SelP<P> + Access<V, P, { <<R as Fields<M, LO, HI>>::F as SelP<P>>::POS }>,
+    FieldIdx<LO, HI, P>: FieldSel,
+    <R as Fields<M, LO, HI>>::F: Field<V, P, <FieldIdx<LO, HI, P> as FieldSel>::Ix>,
 {
     #[inline]
     fn get(&self) -> &V {
-        Access::<V, P, { <<R as Fields<M, LO, HI>>::F as SelP<P>>::POS }>::get(&self.0)
+        Field::<V, P, <FieldIdx<LO, HI, P> as FieldSel>::Ix>::get(&self.0)
     }
     #[inline]
     fn get_mut(&mut self) -> &mut V {
-        Access::<V, P, { <<R as Fields<M, LO, HI>>::F as SelP<P>>::POS }>::get_mut(&mut self.0)
+        Field::<V, P, <FieldIdx<LO, HI, P> as FieldSel>::Ix>::get_mut(&mut self.0)
     }
 }
+
+/// Field `K` of a block's tuple; its element is a slot or a block (both are
+/// `Access<.., 0>`). Unlike `Access` for a tuple, it needs no `Span` of the
+/// siblings: the field index comes from the block's range alone.
+#[doc(hidden)]
+pub trait Field<V, const P: usize, I> {
+    fn get(&self) -> &V;
+    fn get_mut(&mut self) -> &mut V;
+}
+macro_rules! field_impl {
+    (($($g:ident)+) $k:tt $s:ident) => {
+        impl<V, const P: usize, $($g),+> Field<V, P, Ix<$k>> for ($($g,)+)
+        where
+            $s: Access<V, P, 0>,
+        {
+            #[inline]
+            fn get(&self) -> &V {
+                Access::<V, P, 0>::get(&self.$k)
+            }
+            #[inline]
+            fn get_mut(&mut self) -> &mut V {
+                Access::<V, P, 0>::get_mut(&mut self.$k)
+            }
+        }
+    };
+}
+dataflow_macros::get_tuples!(field_impl);
 impl<R: Fields<M, LO, HI>, M: Mapper, const LO: usize, const HI: usize> Empty for Blk<R, M, LO, HI>
 where
     <R as Fields<M, LO, HI>>::F: Empty,

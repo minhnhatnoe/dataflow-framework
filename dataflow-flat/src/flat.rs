@@ -278,12 +278,50 @@ pub(crate) const fn class(lo: usize, hi: usize) -> usize {
 
 /// Components per child of a node of width `w > 8`: 8, 64, 512, ... whichever
 /// is the least with `8 * cap >= w`.
-const fn cap(w: usize) -> usize {
+pub(crate) const fn cap(w: usize) -> usize {
     let mut c = ARITY;
     while c * ARITY < w {
         c *= ARITY;
     }
     c
+}
+
+/// The field of a block over `LO..HI` that holds position `P`: the block's
+/// shape is fixed by `(LO, HI)` (a leaf of `HI - LO <= 8` slots, or 8 children of
+/// `cap(HI - LO)` positions), so this is arithmetic, not a test of every child.
+#[doc(hidden)]
+pub struct FieldIdx<const LO: usize, const HI: usize, const P: usize>;
+/// Field index as a type. The constant is inside an impl of `(LO, HI, P)` only,
+/// so it is evaluated once per block position, not once per (storage, value).
+#[doc(hidden)]
+pub struct Ix<const K: usize>;
+#[doc(hidden)]
+pub trait FieldSel {
+    type Ix;
+}
+impl<const LO: usize, const HI: usize, const P: usize> FieldSel for FieldIdx<LO, HI, P>
+where
+    (): IxOf<{ field_idx(LO, HI, P) }>,
+{
+    type Ix = <() as IxOf<{ field_idx(LO, HI, P) }>>::Ix;
+}
+#[doc(hidden)]
+pub trait IxOf<const K: usize> {
+    type Ix;
+}
+impl<const K: usize> IxOf<K> for () {
+    type Ix = Ix<K>;
+}
+#[doc(hidden)]
+pub const fn field_idx(lo: usize, hi: usize, p: usize) -> usize {
+    if p < lo || p >= hi {
+        return usize::MAX; // not in this block: no `Field` impl, so a type error, not a const panic
+    }
+    if hi - lo <= ARITY {
+        p - lo
+    } else {
+        (p - lo) / cap(hi - lo)
+    }
 }
 
 pub(crate) const fn bound(lo: usize, hi: usize, k: usize) -> usize {
