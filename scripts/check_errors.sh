@@ -553,6 +553,56 @@ impl UpdateHandler<Src> for H { fn on_update(&mut self, buf: &mut u64, v: &u64) 
 fn main() {}"
 
 
+# --- subscription patterns (`Some(Btc(t)): Src`): sugar over selector chains ------------------------------
+# pat_case <name> <pattern> <regex of our message>; the pattern is a subscription of component `A`.
+pat_case() {
+    CMD[$1]=check
+    PATTERN[$1]="subscription pattern: $3"
+    BODY[$1]="
+#[derive(ComponentSubscription)]
+#[subscribe($2: Src)]
+pub struct A;
+fn main() {}"
+}
+pat_case pattern_struct 'Foo { x }' 'struct patterns are not supported'
+pat_case pattern_multi_field 'Some(Foo(a, b))' 'multi-field variants are not supported'
+pat_case pattern_range 'Foo(a..=b)' 'range patterns are not supported'
+pat_case pattern_range_literal 'Foo(1..=3)' 'literal patterns are not supported'
+pat_case pattern_guard 'Foo(x) if x > 1' 'guards are not supported'
+pat_case pattern_or 'Foo(x) | Bar(x)' 'or-patterns are not supported'
+pat_case pattern_literal 'Some(3)' 'literal patterns are not supported'
+pat_case pattern_wildcard 'Some(_)' 'a wildcard `_` is not a selector'
+pat_case pattern_wildcard_selector '_(x)' 'a wildcard `_` is not a selector'
+pat_case pattern_reference 'Some(&x)' 'references are not supported'
+pat_case pattern_unit_variant 'Some(Foo::Unit)' 'the innermost pattern must be a plain name to bind'
+
+# Accepted: `Enum::Variant`, Option and Result patterns, nested.
+CMD[pattern_ok]=check
+PATTERN[pattern_ok]=NOERROR
+read -r -d '' BODY[pattern_ok] <<'EOT'
+#[derive(Root, dataflow_flat::Demux)]
+pub enum E { X(u64), Y(u64) }
+#[derive(ComponentSubscription)]
+#[subscribe(E::X(x): E)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = Option<Result<u64, u64>>;
+    fn new((): (), _: Self::Init<'_>) -> (Self, Self::Output) { (A, None) }
+    fn update(&mut self, i: Self::Input<'_>) -> Self::Output { Some(Ok(*i.x)) }
+}
+#[derive(ComponentSubscription)]
+#[subscribe(Some(Ok(v)): A)]
+pub struct B;
+impl Component for B {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (B, 0) }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 { *i.v }
+}
+fn main() { let _ = Pipeline::<E, (B,)>::build(Configs::new()); }
+EOT
+
 ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        self_cycle
        too_many_components root_not_a_root sink_is_the_root
@@ -561,7 +611,9 @@ ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        keep_input_reference name_input_struct_outside unused_config
        non_exclusive_join exclusive_join_ok deep_non_exclusive_join deep_exclusive_join_ok demux_reader_not_implied selector_unreachable_component
        selector_wrong_input orphan_first on_not_keyed symbols_share_key
-       handler_missing_update handler_non_exclusive_join handler_exclusive_ok handler_selected_input handler_root_input)
+       handler_missing_update handler_non_exclusive_join handler_exclusive_ok handler_selected_input handler_root_input
+       pattern_struct pattern_multi_field pattern_range pattern_range_literal pattern_guard pattern_or pattern_literal
+       pattern_wildcard pattern_wildcard_selector pattern_reference pattern_unit_variant pattern_ok)
 
 run_case() {
     local name=$1 dir="$CASES_DIR/$1"

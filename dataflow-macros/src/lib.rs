@@ -282,6 +282,15 @@ fn parse_handles(input: ParseStream) -> syn::Result<Vec<Subscription>> {
 
 impl Parse for Subscription {
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        // `name: Source [=> selectors]` starts with an identifier and a single
+        // colon; anything else is a pattern `Sel(Sel(name)): Source`.
+        if !(input.peek(Ident) && input.peek2(Token![:]) && !input.peek2(Token![::])) {
+            let pat = parse_pat(input)?;
+            input.parse::<Token![:]>()?;
+            let ty: Type = input.parse()?;
+            let (name, chain) = pattern_chain(pat)?;
+            return Ok(Subscription { name: Some(name), ty, chain, handled: false });
+        }
         let name: Ident = input.parse()?;
         input.parse::<Token![:]>()?;
         let ty = input.parse()?;
@@ -298,7 +307,12 @@ impl Parse for Subscription {
                 let fork = input.fork();
                 fork.parse::<Token![,]>()?;
                 let next_is_subscription =
-                    fork.is_empty() || (fork.peek(Ident) && fork.peek2(Token![:]) && !fork.peek2(Token![::]));
+                    fork.is_empty()
+                        || (fork.peek(Ident) && fork.peek2(Token![:]) && !fork.peek2(Token![::]))
+                        || {
+                            let f = fork.fork();
+                            parse_pat(&f).is_ok() && f.peek(Token![:]) && !f.peek(Token![::])
+                        };
                 if next_is_subscription {
                     break;
                 }
@@ -309,8 +323,130 @@ impl Parse for Subscription {
     }
 }
 
-/// A bare `Some` / `None` in a chain means the library's selectors for `Option`
-/// (the prelude's names are variants, not types).
+/// A subscription pattern: selectors outermost first, the binding innermost.
+enum Pat {
+    Bind(Ident),
+    Variant(syn::Path, Box<Pat>),
+}
+
+fn pat_err<T>(at: impl quote::ToTokens, msg: &str) -> syn::Result<T> {
+    Err(syn::Error::new_spanned(at, format!("subscription pattern: {msg}")))
+}
+
+/// Parses `Sel(Sel(name))`. Only enum-variant style patterns with exactly one
+/// field are accepted; everything else is rejected with a message.
+fn parse_pat(input: ParseStream) -> syn::Result<Pat> {
+    if input.peek(Token![&]) || input.peek(Token![&&]) {
+        return pat_err(input.cursor().token_stream(), "references are not supported (a pattern matches the value, which is borrowed already)");
+    }
+    if input.peek(Token![_]) {
+        return pat_err(input.cursor().token_stream(), "a wildcard `_` is not a selector; name a selector at each level and bind the innermost value");
+    }
+    if input.peek(syn::Lit) || input.peek(Token![-]) {
+        return pat_err(input.cursor().token_stream(), "literal patterns are not supported; use a hand-written guard selector `S(x): Source`");
+    }
+    if input.peek(Token![ref]) || input.peek(Token![mut]) || input.peek(syn::token::Paren) || input.peek(syn::token::Bracket) {
+        return pat_err(input.cursor().token_stream(), "only `Selector(Selector(name))` patterns are supported (no `ref`, `mut`, tuples or slices)");
+    }
+    if input.peek(Token![..]) || input.peek(Token![..=]) {
+        return pat_err(input.cursor().token_stream(), "range or rest patterns are not supported");
+    }
+    let path = syn::Path::parse_mod_style(input)?;
+    let pat = if input.peek(syn::token::Paren) {
+        let content;
+        let paren = syn::parenthesized!(content in input);
+        if content.is_empty() {
+            return Err(syn::Error::new(paren.span.open(), "subscription pattern: a selector pattern needs exactly one field to bind, found none"));
+        }
+        let inner = parse_pat(&content)?;
+        if content.peek(Token![,]) {
+            return Err(syn::Error::new(paren.span.open(), "subscription pattern: multi-field variants are not supported (a selector selects exactly one field)"));
+        }
+        if !content.is_empty() {
+            reject_trailing(&content)?;
+        }
+        Pat::Variant(path, Box::new(inner))
+    } else if input.peek(syn::token::Brace) {
+        return pat_err(path, "struct patterns are not supported; only tuple-variant patterns `Selector(name)`");
+    } else if input.peek(Token![..]) || input.peek(Token![..=]) || input.peek(Token![...]) {
+        return pat_err(path, "range patterns are not supported");
+    } else if input.peek(Token![@]) {
+        return pat_err(path, "`name @ pattern` is not supported");
+    } else if path.leading_colon.is_none() && path.segments.len() == 1 && path.segments[0].arguments.is_empty() {
+        Pat::Bind(path.segments[0].ident.clone())
+    } else {
+        return pat_err(path, "the innermost pattern must be a plain name to bind (a unit variant has nothing to bind: use `name: Source => Selector`)");
+    };
+    reject_trailing_if_nested(input)?;
+    Ok(pat)
+}
+
+/// `|` and `if` right after a pattern (or-patterns and guards).
+fn reject_trailing_if_nested(input: ParseStream) -> syn::Result<()> {
+    if input.peek(Token![|]) {
+        return pat_err(input.cursor().token_stream(), "or-patterns are not supported; use a hand-written selector");
+    }
+    if input.peek(Token![if]) {
+        return pat_err(input.cursor().token_stream(), "guards are not supported; use a hand-written guard selector `S(x): Source`");
+    }
+    Ok(())
+}
+
+fn reject_trailing(input: ParseStream) -> syn::Result<()> {
+    reject_trailing_if_nested(input)?;
+    pat_err(input.cursor().token_stream(), "unexpected tokens in pattern")
+}
+
+/// `Sel1(Sel2(name))` as the name and the chain `[Sel1, Sel2]`.
+fn pattern_chain(mut pat: Pat) -> syn::Result<(Ident, Vec<Type>)> {
+    let mut chain = Vec::new();
+    loop {
+        match pat {
+            Pat::Bind(name) => {
+                if chain.is_empty() {
+                    return pat_err(name, "a bare name is not a pattern");
+                }
+                return Ok((name, chain));
+            }
+            Pat::Variant(path, inner) => {
+                chain.push(selector(pattern_selector(path)));
+                pat = *inner;
+            }
+        }
+    }
+}
+
+/// The selector type a pattern path stands for. One segment is a selector type
+/// in scope (`Btc`, a generic `S`, or a prelude `Some`/`None`/`Ok`/`Err`);
+/// `[path::]Enum::Variant` (the segment before the variant starts with an
+/// uppercase letter) is the marker the `Demux` derive generated,
+/// `[path::]enum_snake::Variant`; `Option::Some` / `Result::Ok` are the
+/// library's; any other path (`module::Marker`) is a type as written.
+fn pattern_selector(path: syn::Path) -> Type {
+    let n = path.segments.len();
+    if n >= 2 {
+        let pen = &path.segments[n - 2].ident;
+        let last = &path.segments[n - 1].ident;
+        if path.segments[n - 2].arguments.is_empty() {
+            if pen == "Option" && (last == "Some" || last == "None") {
+                return parse_quote!(::dataflow_flat::option::#last);
+            }
+            if pen == "Result" && (last == "Ok" || last == "Err") {
+                return parse_quote!(::dataflow_flat::result::#last);
+            }
+            if pen.to_string().starts_with(|c: char| c.is_uppercase()) {
+                let mut p = path.clone();
+                let m = Ident::new(&snake_case(&pen.to_string()), pen.span());
+                p.segments[n - 2].ident = m;
+                return Type::Path(syn::TypePath { qself: None, path: p });
+            }
+        }
+    }
+    Type::Path(syn::TypePath { qself: None, path })
+}
+
+/// A bare `Some` / `None` / `Ok` / `Err` in a chain means the library's selectors
+/// for `Option` / `Result` (the prelude's names are variants, not types).
 fn selector(ty: Type) -> Type {
     if let Type::Path(p) = &ty {
         if p.qself.is_none() && p.path.leading_colon.is_none() && p.path.segments.len() == 1 {
@@ -318,6 +454,10 @@ fn selector(ty: Type) -> Type {
             if seg.arguments.is_empty() && (seg.ident == "Some" || seg.ident == "None") {
                 let id = &seg.ident;
                 return parse_quote!(::dataflow_flat::option::#id);
+            }
+            if seg.arguments.is_empty() && (seg.ident == "Ok" || seg.ident == "Err") {
+                let id = &seg.ident;
+                return parse_quote!(::dataflow_flat::result::#id);
             }
         }
     }
@@ -823,6 +963,66 @@ fn expand_root(input: DeriveInput) -> syn::Result<TokenStream2> {
 mod tests {
     use super::*;
 
+    fn sub(src: &str) -> syn::Result<Subscription> {
+        syn::parse_str::<Subscription>(src)
+    }
+    fn chain_of(src: &str) -> (String, Vec<String>) {
+        let s = sub(src).unwrap();
+        (
+            s.name.unwrap().to_string(),
+            s.chain.iter().map(|t| quote!(#t).to_string().replace(' ', "")).collect(),
+        )
+    }
+
+    #[test]
+    fn pattern_maps_outermost_first() {
+        let (n, c) = chain_of("Some(Btc(t)): Ws");
+        assert_eq!(n, "t");
+        assert_eq!(c, ["::dataflow_flat::option::Some", "Btc"]);
+        // the same chain as the `=>` form
+        assert_eq!(chain_of("t: Ws => Some, Btc"), (n, c));
+    }
+
+    #[test]
+    fn pattern_variant_paths() {
+        assert_eq!(chain_of("Some(Packet::Depth(d)): Nic").1, ["::dataflow_flat::option::Some", "packet::Depth"]);
+        assert_eq!(chain_of("crate::foo::Packet::X(d): Nic").1, ["crate::foo::packet::X"]);
+        assert_eq!(chain_of("Packet::BookUpdate(d): Nic").1, ["packet::BookUpdate"]);
+        assert_eq!(chain_of("markets::Btc(d): Nic").1, ["markets::Btc"]);
+        assert_eq!(chain_of("Ok(Err(e)): R").1, ["::dataflow_flat::result::Ok", "::dataflow_flat::result::Err"]);
+        assert_eq!(chain_of("Option::Some(x): R").1, ["::dataflow_flat::option::Some"]);
+        assert_eq!(chain_of("S(t): <X as Exchange>::Ws").1, ["S"]);
+    }
+
+    #[test]
+    fn old_form_still_parses_in_lists() {
+        let p = syn::punctuated::Punctuated::<Subscription, Token![,]>::parse_terminated;
+        let l = syn::parse::Parser::parse_str(p, "a: A => Some, B, Some(B(c)): C, d: D").unwrap();
+        let names: Vec<_> = l.iter().map(|s| s.name.as_ref().unwrap().to_string()).collect();
+        assert_eq!(names, ["a", "c", "d"]);
+        assert_eq!(l[0].chain.len(), 2);
+    }
+
+    fn msg(src: &str) -> String {
+        sub(src).err().expect("must be rejected").to_string()
+    }
+
+    #[test]
+    fn rejected_forms() {
+        assert!(msg("Foo { x }: Ws").contains("struct patterns"));
+        assert!(msg("Foo(a, b): Ws").contains("multi-field"));
+        assert!(msg("Foo(1..=3): Ws").contains("literal"));
+        assert!(msg("Foo(a..=b): Ws").contains("range"));
+        assert!(msg("Foo(x) if x > 1: Ws").contains("guards"));
+        assert!(msg("Foo(x) | Bar(x): Ws").contains("or-patterns"));
+        assert!(msg("Foo(3): Ws").contains("literal"));
+        assert!(msg("Foo(_): Ws").contains("wildcard"));
+        assert!(msg("_(x): Ws").contains("wildcard"));
+        assert!(msg("Foo(&x): Ws").contains("references"));
+        assert!(msg("Foo(Bar::Unit): Ws").contains("plain name"));
+        assert!(msg("Foo(): Ws").contains("exactly one field"));
+    }
+
     fn flatten(s: &Shape, out: &mut Vec<usize>) {
         match s {
             Shape::Leaf(es) => out.extend(es),
@@ -899,7 +1099,7 @@ mod tests {
 /// Variants must be unit variants (the selected part is `()`) or tuple variants
 /// with exactly one field (the selected part is that field). The key of a
 /// selector is the index of its variant.
-#[proc_macro_derive(Demux)]
+#[proc_macro_derive(Demux, attributes(demux))]
 pub fn derive_demux(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     expand_demux(input).unwrap_or_else(|e| e.to_compile_error()).into()
@@ -934,6 +1134,34 @@ fn expand_demux(input: DeriveInput) -> syn::Result<TokenStream2> {
     }
     let vis = &input.vis;
     let module = Ident::new(&snake_case(&name.to_string()), name.span());
+    // `#[demux(markers = path)]`: use the existing types `path::Variant` as the selectors.
+    let mut markers: Option<syn::Path> = None;
+    for attr in input.attrs.iter().filter(|a| a.path().is_ident("demux")) {
+        attr.parse_nested_meta(|m| {
+            if m.path.is_ident("markers") {
+                markers = Some(m.value()?.parse::<syn::Path>()?);
+                Ok(())
+            } else {
+                Err(m.error("unknown demux option; expected `markers = path`"))
+            }
+        })?;
+    }
+    // The path of `markers` as seen from inside the generated module.
+    let reexport_base = match &markers {
+        Some(m) => {
+            let first = m.segments.first().map(|s| s.ident.to_string()).unwrap_or_default();
+            if m.leading_colon.is_some() || first == "crate" {
+                quote!(#m)
+            } else if first == "self" {
+                let rest = m.segments.iter().skip(1);
+                quote!(super #(:: #rest)*)
+            } else {
+                quote!(super::#m)
+            }
+        }
+        None => quote!(),
+    };
+    let mut reexports = Vec::new();
     let mut items = Vec::new();
     let mut structs = Vec::new();
     // `key_of`: the variant index of a value, for every selector of the enum.
@@ -966,9 +1194,14 @@ fn expand_demux(input: DeriveInput) -> syn::Result<TokenStream2> {
                 ))
             }
         };
+        let marker = match &markers {
+            Some(m) => quote!(#m::#vname),
+            None => quote!(#module::#vname),
+        };
         structs.push(quote!(pub struct #vname;));
+        reexports.push(quote!(#vis use #reexport_base::#vname;));
         items.push(quote! {
-            impl #krate::Select<#name> for #module::#vname {
+            impl #krate::Select<#name> for #marker {
                 type Out = #out_ty;
                 const KEY: u32 = #key;
                 #[inline(always)]
@@ -987,9 +1220,12 @@ fn expand_demux(input: DeriveInput) -> syn::Result<TokenStream2> {
     }
     // The impls are outside the module so that the variants' field types
     // resolve where the enum is written (a selector may share a name with a type).
+    // With `markers`, the module only re-exports them, so `Enum::Variant` in a
+    // pattern names the same (shared) type.
+    let module_body = if markers.is_some() { quote!(#(#reexports)*) } else { quote!(#(#structs)*) };
     Ok(quote! {
         #vis mod #module {
-            #(#structs)*
+            #module_body
         }
         impl #name {
             #[doc(hidden)]

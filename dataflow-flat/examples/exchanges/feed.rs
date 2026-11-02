@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use dataflow_flat::{option, Component, ComponentSubscription, Listener, Root};
+use dataflow_flat::{Component, ComponentSubscription, Listener, Root};
 
 use crate::market::*;
 
@@ -61,11 +61,11 @@ impl Component for Nic {
     }
 }
 
-/// Subscribes to `Nic`, then `Some`, then `packet::Binance`: it runs only for a
+/// Subscribes to `Some(Packet::Binance(m))` of `Nic` (`Some`, then `packet::Binance`): it runs only for a
 /// Binance packet. `#[listener]` tells the plan that this component wants to be
 /// told, at build, the keys that `On<_>` subscribers read from it.
 #[derive(ComponentSubscription)]
-#[subscribe(m: Nic => option::Some, packet::Binance)]
+#[subscribe(Some(Packet::Binance(m)): Nic)]
 #[listener]
 pub struct BinanceWs {
     wanted: BTreeSet<u32>,
@@ -92,7 +92,7 @@ impl Component for BinanceWs {
 
 /// The same for Coinbase, with its own framing.
 #[derive(ComponentSubscription)]
-#[subscribe(m: Nic => option::Some, packet::Coinbase)]
+#[subscribe(Some(Packet::Coinbase(m)): Nic)]
 #[listener]
 pub struct CoinbaseWs {
     wanted: BTreeSet<u32>,

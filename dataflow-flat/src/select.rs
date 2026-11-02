@@ -301,3 +301,50 @@ pub mod option {
         }
     }
 }
+
+/// Built-in selectors for `Result`.
+pub mod result {
+    use super::Select;
+
+    /// Matches `Ok(x)`; the part is `x`.
+    pub struct Ok;
+    /// Matches `Err(e)`; the part is `e`.
+    pub struct Err;
+
+    impl<T: 'static, E: 'static> Select<Result<T, E>> for Ok {
+        type Out = T;
+        const KEY: u32 = 0;
+        #[cfg_attr(not(debug_assertions), inline(always))]
+        #[cfg_attr(debug_assertions, inline)]
+        fn select(x: &Result<T, E>) -> Option<&T> {
+            x.as_ref().ok()
+        }
+        #[cfg_attr(not(debug_assertions), inline(always))]
+        #[cfg_attr(debug_assertions, inline)]
+        fn key_of(x: &Result<T, E>) -> u32 {
+            if x.is_ok() {
+                0
+            } else {
+                1
+            }
+        }
+    }
+    impl<T: 'static, E: 'static> Select<Result<T, E>> for Err {
+        type Out = E;
+        const KEY: u32 = 1;
+        #[cfg_attr(not(debug_assertions), inline(always))]
+        #[cfg_attr(debug_assertions, inline)]
+        fn select(x: &Result<T, E>) -> Option<&E> {
+            x.as_ref().err()
+        }
+        #[cfg_attr(not(debug_assertions), inline(always))]
+        #[cfg_attr(debug_assertions, inline)]
+        fn key_of(x: &Result<T, E>) -> u32 {
+            if x.is_ok() {
+                0
+            } else {
+                1
+            }
+        }
+    }
+}
