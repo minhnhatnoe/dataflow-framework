@@ -642,6 +642,15 @@ comp!(A, [K0(p): Poll]);
 handler!(H, [#[subscribe(for T in (A,) { x: T })]]);
 fn main() {}"
 
+# A selected entry in a `for` body is rejected with the reason.
+CMD[for_body_selected]=check
+PATTERN[for_body_selected]='a `for` body is one node type.*selected one \(`Some\(S\(_\)\): Ws`\) is not supported'
+BODY[for_body_selected]="$SELECTORS
+$HANDLERS
+comp!(A, [K0(p): Poll]);
+handler!(H, [#[subscribe(for S in (A,) { Some(S(_)): Ws })]]);
+fn main() {}"
+
 # A pair pattern needs exactly two parts.
 CMD[for_pattern_triple]=check
 PATTERN[for_pattern_triple]='a `for` pattern destructures a pair'
@@ -649,6 +658,27 @@ BODY[for_pattern_triple]="$SELECTORS
 $HANDLERS
 comp!(A, [K0(p): Poll]);
 handler!(H, [#[subscribe(for (X, Y, Z) in (A,) { X })]]);
+fn main() {}"
+
+# The element variable of a `for` needs the bounds of the node (`Q<S: Sym>` needs `S: Sym`): leaving them off is rustc's `S: Sym` error, located at the `for` entry (the `for S + Sym` help is rustc's own).
+CMD[for_missing_bound]=check
+PATTERN[for_missing_bound]='E0277.*the trait bound `S: Sym` is not satisfied.*subscribe\(for S in dataflow_flat::catalog!\[A\] \{ Q<S> \}\).*restricting type parameter `S`.*for S \+ Sym in'
+BODY[for_missing_bound]="$SELECTORS
+$HANDLERS
+pub trait Sym: 'static {}
+impl Sym for A {}
+comp!(A, [K0(p): Poll]);
+#[derive(ComponentSubscription)]
+#[subscribe(K0(p): Poll)]
+pub struct Q<S: Sym>(std::marker::PhantomData<S>);
+impl<S: Sym> Component for Q<S> {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (Q(std::marker::PhantomData), 0) }
+    fn update(&mut self, _: Self::Input<'_>) -> u64 { 0 }
+}
+handler!(H, [#[subscribe(for S in dataflow_flat::catalog![A] { Q<S> })]]);
+impl<S: Sym> UpdateHandler<Q<S>> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
 fn main() {}"
 
 # --- subscription patterns (`Some(Btc(t)): Src`): sugar over selector chains ------------------------------
@@ -819,7 +849,7 @@ ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        stored_payload_no_default stored_payload_no_clone unstored_payload_ok selector_unreachable_component
        selector_wrong_input orphan_first
        handler_missing_update handler_missing_update_note handler_non_exclusive_join handler_exclusive_ok handler_duplicate_marker handler_selected_missing_update handler_bare_wildcard
-       for_ok for_missing_update for_not_a_catalog for_zip_shapes for_body_named for_pattern_triple
+       for_ok for_missing_update for_not_a_catalog for_zip_shapes for_body_named for_body_selected for_pattern_triple for_missing_bound
        pattern_struct pattern_multi_field pattern_range pattern_range_literal pattern_guard pattern_or pattern_literal
        pattern_reference pattern_arrow unit_selector_unknown unit_selector_data_variant pattern_ok
        listener_missing_request listener_request_ok)

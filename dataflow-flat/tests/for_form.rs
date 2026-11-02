@@ -330,3 +330,81 @@ fn product_covers_every_pair_zip_the_diagonal() {
         assert_eq!(take(), [format!("ProdBig[{}]", v * 100 + c)]);
     }
 }
+
+// -- an enum is a catalog of its markers: `for S in mkt::All { .. }` -------------------------------
+
+use dataflow_flat::Demux;
+
+#[derive(Demux)]
+pub enum Mkt {
+    A(u64),
+    B(u64),
+    C(u64),
+}
+
+/// The frames: key 0, 1, 2 become `Mkt::A`, `B`, `C`; any other key is no frame.
+#[derive(ComponentSubscription)]
+#[subscribe(m: Msg)]
+pub struct MktWs;
+impl Component for MktWs {
+    type Config = ();
+    type Output = Option<Mkt>;
+    fn new((): (), _: Self::Init<'_>) -> (Self, Option<Mkt>) {
+        (MktWs, None)
+    }
+    fn update(&mut self, i: Self::Input<'_>) -> Option<Mkt> {
+        match i.m.key {
+            Some(0) => Some(Mkt::A(i.m.v)),
+            Some(1) => Some(Mkt::B(i.m.v)),
+            Some(2) => Some(Mkt::C(i.m.v)),
+            _ => None,
+        }
+    }
+}
+
+/// Reads one market's part of a frame: `S` is any marker that selects a `u64` out of a `Mkt`.
+#[derive(ComponentSubscription)]
+#[subscribe(Some(S(u)): MktWs)]
+pub struct Leg<S: Select<Mkt, Out = u64>>(PhantomData<S>);
+impl<S: Select<Mkt, Out = u64>> Component for Leg<S> {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) {
+        (Leg(PhantomData), 0)
+    }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 {
+        *i.u * 10
+    }
+}
+
+/// One `Leg` per variant of `Mkt`, with no `catalog![..]` written by hand.
+#[derive(ComponentSubscription)]
+#[subscribe(for S: Select<Mkt, Out = u64> in mkt::All { Leg<S> })]
+pub struct Fan;
+impl Component for Fan {
+    type Config = ();
+    type Output = ();
+    fn new((): (), _: Self::Init<'_>) -> (Self, ()) {
+        (Fan, ())
+    }
+    fn update(&mut self, _: Self::Input<'_>) {}
+}
+impl<S: Select<Mkt, Out = u64>> UpdateHandler<Leg<S>> for Fan {
+    fn on_update(&mut self, v: &u64) {
+        log(format!("key {} -> {}", S::KEY, v));
+    }
+}
+
+#[test]
+fn enum_is_a_catalog_of_its_markers() {
+    let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    assert_eq!(<mkt::All as dataflow_flat::Catalog>::LEN, 3);
+    let mut p = Pipeline::<Msg, (Fan,)>::build(Configs::new()).unwrap();
+    take();
+    for k in 0..3u32 {
+        p.push(Msg { key: Some(k), v: 4 });
+        assert_eq!(take(), [format!("key {k} -> 40")]);
+    }
+    p.push(Msg { key: Some(9), v: 4 });
+    assert_eq!(take(), Vec::<String>::new());
+}
