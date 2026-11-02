@@ -609,6 +609,18 @@ All on the author's 4-core machine, nightly-2026-10-30. They are copied from `ha
 
 **Run-time noise threshold:** under 5 ns per packet at 1,000 components is noise on this machine (a gap that size changes with layout, alignment and the VM). Don't act on smaller differences without callgrind instruction counts and several processes. The measurement protocol (`scripts/bench.sh`, `scripts/measure.py`): pinned core, warm-up, alternating framework/baseline rounds in several processes, median of per-process minimum.
 
+### PGO and compiler flags
+
+Profile-guided optimization on top of the full release profile gains about 4% (framework) and 3.5% (hand-written baseline) at typical, measured pinned to one core of a Ryzen 9 7900X with `bench/gen_app.py --size typical --mode enum` (ns per packet, min / median of 8 alternating processes):
+
+| Build | Framework | Baseline | Ratio |
+|---|---|---|---|
+| Full release profile | 108.1 / 109.3 | 102.6 / 103.3 | 1.054 |
+| PGO, trained on a different seed and key subset | 103.8 / 104.2 | 98.9 / 99.4 | 1.050 |
+| PGO, trained on the measured input (overstates) | 102.6 / 103.0 | 99.3 / 99.7 | 1.033 |
+
+With a different training seed: small 90.6 to 86.2 (-4.8%, baseline -2.4%), tiny 56.3 to 52.6 (-6.6%, baseline -5.2%). A PGO build costs the same as a release build (about 31 s and 1.4 GB at typical) plus one instrumented build and a training run. Nothing else helped (all within 1% at typical): `-Cllvm-args=-inline-threshold=1000|3000` (11 s slower to build), `-Zmir-opt-level=4` (framework 1% slower), `-Zinline-mir-threshold/-hint-threshold`, `-align-all-functions=6`, `-align-all-nofallthru-blocks=5`, `-Clink-arg=-fuse-ld=lld` (1% slower), `-Zmerge-functions=disabled`, `-unroll-threshold=600`. BOLT is not installed. Run `scripts/pgo.sh APP_DIR [TRAIN_SEED]` on a generated app; it builds the instrumented runner, trains with `--seed`, merges with the toolchain's `llvm-profdata` and writes `APP_DIR/target-pgo/release/runner`.
+
 ### What costs time
 
 * A body edit in the app crate re-runs no plan or trait query and recompiles 1 to 4 of about 80 codegen units. A body edit in the *library* crate re-runs many constant evaluations (about 2.9 s at typical).

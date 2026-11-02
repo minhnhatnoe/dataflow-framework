@@ -994,7 +994,7 @@ fn main() {{
     let reps = arg("--reps", 4);
     let rounds = arg("--rounds", 11);
     let with_all = std::env::args().any(|x| x == "--all");
-    let pk = feed_gen::packets(npk, COUNTS, 0x5EED);
+    let pk = feed_gen::packets(npk, COUNTS, arg("--seed", 0x5EED) as u64);
 {KINDF}
     // --keys N: keep only packets whose key is below N; --sort: order the packets by (exchange, key), stable,
     // so that dispatch is predictable (the sorted/unsorted experiment)

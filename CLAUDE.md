@@ -17,6 +17,7 @@ timeout 900 scripts/check_errors.sh                # all 56 cases; or pass case 
 timeout 120 cargo run -p dataflow-flat --example exchanges   # also basic, diamond, selbench
 python3 bench/gen_app.py --size typical --mode enum --out DIR # --mode is required: 1a | enum | req
 python3 scripts/measure.py --mode enum --sizes tiny,small --out DIR   # default --out is target/harness
+scripts/pgo.sh DIR [TRAIN_SEED]                    # PGO release build of a generated app (see README, Performance)
 python3 scripts/gen_selbench.py [E S K packets]                        # writes examples/selbench.rs
 python3 bench/gen_bench.py full 20 && scripts/bench.sh                 # old flat-graph benchmark; restores `full 20`
 ```
@@ -76,6 +77,7 @@ Changed since the earlier model: `run` returning the root's output (replaced by 
 | `bench/gen_bench.py`, `bench/src/main.rs`, `bench/Cargo.toml` | The old layered flat-graph benchmark; `main.rs` is generated (`full 20`) |
 | `bench/sfb/sfb.rs` | Standalone store-forwarding repro (no framework dependency) |
 | `scripts/check_errors.sh` | 56 error cases, each a tiny crate under `target/error-cases/` |
+| `scripts/pgo.sh` | Profile-guided release build of a generated app (instrument, train on another seed, `-Cprofile-use`) |
 | `scripts/measure.py`, `scripts/bench.sh`, `scripts/gen_selbench.py` | Measurement harness for generated apps; pinned flat-graph benchmark; selector benchmark generator |
 | `handoff/tools/` | `memset-shim/` (`LD_PRELOAD` shim that found the incremental page-fault cost; hard-coded paths of a removed worktree), `profile-reader/` (self-profile aggregators), `excl-group-differential.py` and `excl-group-counters.diff` (old-vs-new differential for `excl_group`), `probes-scratch.diff`, `pv.sh` (hard-coded old path) |
 | `handoff/agent-env/` | `cap.sh` and `rules.md` for a container without systemd (hard-coded scratchpad path) |
