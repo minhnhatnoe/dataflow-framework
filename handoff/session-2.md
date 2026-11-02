@@ -232,22 +232,30 @@ With `impl<S> UpdateHandler<Quoter<S>>` plus plain `Component::update`, the buff
 
 **12,412 components.** Pre-`Blk` `cargo check` 923 s, 6.1 GB. On `Blk` it did not finish within 1500 s (exit 124, no errors in the log). Release at that size is untested.
 
-**Cold `cargo check`, same apps and command** (`cargo check -p app --offline`, target dir removed, 4 jobs; generated sources identical on both sides):
+**Cold `cargo check`, same command** (`cargo check -p app --offline`, target dir removed, 4 jobs, two runs each). `bench/gen_app.py` defaults to `--mode 1a`, which has no selectors. Pass `--mode on` or `--mode enum` for anything meant to resemble a real app.
 
-| Library | 2,044 | 4,079 |
-|---|---|---|
-| Pre-`Blk` master `0ad5cdf` | 8.8 s, 0.93 GB | 18.2–18.4 s, 1.75 GB |
-| `Blk` master `86c7c97` | 12.4–13.0 s, 1.05 GB | 28.4–30.0 s, 2.02 GB |
-| `Blk` + `Field` (branch `check-descent`, f8a0af3) | 10.6–12.4 s, 0.72 GB | 52.2–55.7 s, 1.28 GB |
+| Library | `1a`, 2,044 | `1a`, 4,079 | `on`, 2,044 | `on`, 4,079 |
+|---|---|---|---|---|
+| Pre-`Blk` master `0ad5cdf` | 8.8 s, 0.93 GB | 18.2–18.4 s, 1.75 GB | 18.5–18.7 s, 1.16 GB | 50.1–51.4 s, 1.89 GB |
+| `Blk` master `86c7c97` | 12.4–13.0 s, 1.05 GB | 28.4–30.0 s, 2.02 GB | 23.6–23.8 s, 1.31 GB | 79.4–79.7 s, 2.24 GB |
+| ARITY 16 master `64b2d0f` | | | 22.0–22.5 s, 1.22 GB | 61.6–64.8 s, 2.15 GB |
+| `Blk` + `Field` (branch `check-descent`, f8a0af3) | 10.6–12.4 s, 0.72 GB | 52.2–55.7 s, 1.28 GB | | |
 
-- `Blk` is 1.4–1.65x slower here. Pre-`Blk` grows about linearly in this range; `Blk` less so.
-- Removing `-Zshare-generics=n` changes nothing: 8.9/18.5 s and 13.2/31.3 s.
-- Seven commits from `bf316c8` to `0ad5cdf` all cost 17.8–18.8 s at 4,079, so the 26 commits between them are not a cause.
-- Unexplained: older figures for pre-`Blk` of 18.5 s at 2,044 and 51.8 s at 4,079. They used other runs of the same sizes. The self-profile claim that `Blk` is 1.5x faster compared against those, so it is wrong.
+- With selectors, `Blk` is 1.3x slower at 2,044 and 1.6x at 4,079. ARITY 16 brings that to 1.2x and 1.2x.
+- Selectors cost more than `Blk`: `on` is 2–2.8x `1a` on the pre-`Blk` library. From 2,044 to 4,079, `1a` pre-`Blk` grows 2.1x; `on` grows 2.7x pre-`Blk`, 3.4x on `Blk`, 2.8x on ARITY 16.
+- The older figures (18.5 s at 2,044, about 52 s at 4,079) match `on` mode, which explains that conflict. The self-profile claim that `Blk` is 1.5x faster compared `on` figures to a `1a` run, so it is wrong.
+- `1a` only: removing `-Zshare-generics=n` changes nothing (8.9/18.5 s and 13.2/31.3 s), and seven commits from `bf316c8` to `0ad5cdf` all cost 17.8–18.8 s at 4,079.
+- `perps` (12,412) was generated with `--mode on`.
 
-**`Blk` profile (query-keys at 415, 823, about 1,370).** `Planned::PLAN` is linear (0.47, 0.75, 1.16 s) and not the cause. `check_well_formed` is nearly all `app::build` (1.49, 3.39, 6.33 s). `resolve_instance_raw` of `store::SelP::POS`: about 105 calls per component, 4.9 to 8.8 µs per call.
+**ARITY 16 (merged, `64b2d0f`).** Typical, ARITY 8/16/32: mono items 69,563/58,427/48,355, release app 13.9/12.8/12.1 s, first dev build 11.3/10.4/10.0 s, run time 108.0/107.2/108.7 ns with identical instruction counts. 4,079 release: 216 s, 6.16 GB / 198 s, 5.94 GB / 201 s, 6.31 GB. 32 costs more at 2,044 and 4,079 and in `dataflow-flat` (5.3 s vs 2.1 s release). `perps` is untested on 16.
 
-**`Field` (direct child index, `check-descent`, not merged).** Valid, and `cargo test` passes. `SelP::POS` work falls about 30x at both sizes (`resolve_instance_raw` at 4,079: 440k calls, 10.2 s → 49k calls, 0.31 s), but `check_well_formed` of `app::build` rises from 30.8 to 55.7 s. Cause unknown. Memory falls 31–37%. `check_errors.sh`, run time and release were not run on it. A variant with the index as an associated const on a struct gave the same time. Scripts and apps: `.claude/worktrees/agent-ad73c0142f3b83542/target/w/`.
+**`Demux` fix (merged, `257c668`).** One shared key function per enum, so output is linear in variants. Enum check at 827: 18.4 → 12.6 s; at 2,214: 124.5 s, 9.39 GB → 67.9 s, 3.02 GB (`Frame` 75.0 s, 2.98 GB). Release at 2,214 times out at 1200 s on both enum and `Frame`, so the limit is the framework. 827 symbols releases in about 80 s against about 14 s for the 823-component typical app; a wide dispatch may be costly (guess).
+
+**Enum slowdown on typical (`on` vs `enum`, branch `enum-typical`).** Random keys 607.7 vs 624.4 cycles, sorted +4; 16 of the 17 are framework-side. Same instructions and mispredicts, 62 more frontend-starved slots. It sits mostly in Binance's 60-way dispatch. Size varies with layout: +1.2% at 58 Binance markets, +3.5% at 60, +3.0% at 61; always positive. No mitigation found. Tried: scalar copy, matching `On`'s layout to the enum's, `repr(u8)`/`repr(u32)`, padding, alignment flags, no jump tables, range check in `key_of`. PGO is untested because `llvm-tools` isn't installed.
+
+**`Blk` profile, `1a` mode, so not representative of selector apps (query-keys at 415, 823, about 1,370).** `Planned::PLAN` is linear (0.47, 0.75, 1.16 s) and not the cause. `check_well_formed` is nearly all `app::build` (1.49, 3.39, 6.33 s). `resolve_instance_raw` of `store::SelP::POS`: about 105 calls per component, 4.9 to 8.8 µs per call.
+
+**`Field` (direct child index, `check-descent`, not merged; `1a` mode only).** Valid, and `cargo test` passes. `SelP::POS` work falls about 30x at both sizes (`resolve_instance_raw` at 4,079: 440k calls, 10.2 s → 49k calls, 0.31 s), but `check_well_formed` of `app::build` rises from 30.8 to 55.7 s. Cause unknown. Memory falls 31–37%. `check_errors.sh`, run time and release were not run on it. A variant with the index as an associated const on a struct gave the same time. Scripts and apps: `.claude/worktrees/agent-ad73c0142f3b83542/target/w/`.
 
 **Enum vs `Frame`, second test (branch `enum-keys`, 827 symbols, 5 rounds).** Cycles per packet:
 
