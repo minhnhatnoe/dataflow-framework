@@ -141,8 +141,8 @@ dataflow_macros::get_tuples!(pick_edge_impl);
 pub struct Way<R, const A: usize, const J: usize>(std::marker::PhantomData<R>);
 impl<R: Planned, const A: usize, const J: usize> Way<R, A, J> {
     pub const MID: usize = R::PLAN.mid(A, J);
-    pub const K1: u8 = R::PLAN.kind(A, Self::MID);
-    pub const K2: u8 = R::PLAN.kind(Self::MID, J);
+    /// Both kinds of the halves in one constant: `3 * K1 + K2`.
+    pub const KK: u8 = 3 * R::PLAN.kind(A, Self::MID) + R::PLAN.kind(Self::MID, J);
 }
 /// The position of the entry that first reached `J`, as a constant of a type.
 #[doc(hidden)]
@@ -175,52 +175,81 @@ impl KindOf<2> for () {
     type Ty = Far;
 }
 
-/// The kinds of the two halves of a long way, as types.
 #[doc(hidden)]
-pub trait Route {
-    type K1;
-    type K2;
+pub trait CutAt<R, const A: usize, const J: usize, const M: usize> {
+    type Both: Pair;
 }
-impl<R: Planned, const A: usize, const J: usize> Route for Way<R, A, J>
+impl<R, const A: usize, const J: usize, const M: usize> CutAt<R, A, J, M> for () {
+    type Both = (Way<R, A, M>, Way<R, M, J>);
+}
+#[doc(hidden)]
+pub trait Pair {
+    type First;
+    type Second;
+}
+impl<X, Y> Pair for (X, Y) {
+    type First = X;
+    type Second = Y;
+}
+
+/// The two halves of a long way, as types: the ways to and from the middle
+/// node, and the kinds of both. One impl, so one place for the constants.
+#[doc(hidden)]
+pub trait Split {
+    type Both: Pair;
+    type Ks: Pair;
+}
+impl<R: Planned, const A: usize, const J: usize> Split for Way<R, A, J>
 where
-    (): KindOf<{ Way::<R, A, J>::K1 }> + KindOf<{ Way::<R, A, J>::K2 }>,
+    (): KindsOf<{ Way::<R, A, J>::KK }>,
+    (): CutAt<R, A, J, { Way::<R, A, J>::MID }>,
 {
-    type K1 = <() as KindOf<{ Way::<R, A, J>::K1 }>>::Ty;
-    type K2 = <() as KindOf<{ Way::<R, A, J>::K2 }>>::Ty;
+    type Both = <() as CutAt<R, A, J, { Way::<R, A, J>::MID }>>::Both;
+    type Ks = <() as KindsOf<{ Way::<R, A, J>::KK }>>::Both;
+}
+/// The kinds of both halves as a pair of types, from `3 * K1 + K2`.
+#[doc(hidden)]
+pub trait KindsOf<const N: u8> {
+    type Both: Pair;
+}
+macro_rules! kinds_of {
+    ($($n:literal $a:ident $b:ident)*) => { $(impl KindsOf<$n> for () { type Both = ($a, $b); })* };
+}
+kinds_of!(0 Same Same 1 Same Child 2 Same Far 3 Child Same 4 Child Child 5 Child Far 6 Far Same 7 Far Child 8 Far Far);
+
+/// The node type at the end of a way `W`, by kind.
+#[doc(hidden)]
+pub trait DownW<W, Kd>: Node {
+    type T: Node;
+}
+impl<C: Node, W> DownW<W, Same> for C {
+    type T = C;
+}
+impl<R: Planned, C: Node, const A: usize, const J: usize> DownW<Way<R, A, J>, Child> for C
+where
+    C::Subs: PosSelect<Way<R, A, J>> + Pick<Way<R, A, J>, { <C::Subs as PosSelect<Way<R, A, J>>>::POS }>,
+{
+    type T = <C::Subs as Pick<Way<R, A, J>, { <C::Subs as PosSelect<Way<R, A, J>>>::POS }>>::T;
+}
+impl<R: Planned, C: Node, const A: usize, const J: usize> DownW<Way<R, A, J>, Far> for C
+where
+    Way<R, A, J>: Split,
+    C: DownW<<<Way<R, A, J> as Split>::Both as Pair>::First, <<Way<R, A, J> as Split>::Ks as Pair>::First>,
+    <C as DownW<<<Way<R, A, J> as Split>::Both as Pair>::First, <<Way<R, A, J> as Split>::Ks as Pair>::First>>::T:
+        DownW<<<Way<R, A, J> as Split>::Both as Pair>::Second, <<Way<R, A, J> as Split>::Ks as Pair>::Second>,
+{
+    type T = <<C as DownW<<<Way<R, A, J> as Split>::Both as Pair>::First, <<Way<R, A, J> as Split>::Ks as Pair>::First>>::T as DownW<
+        <<Way<R, A, J> as Split>::Both as Pair>::Second,
+        <<Way<R, A, J> as Split>::Ks as Pair>::Second,
+    >>::T;
 }
 
 #[doc(hidden)]
 pub trait Down<R: Planned, const A: usize, const J: usize, Kd>: Node {
     type T: Node;
 }
-impl<R: Planned, C: Node, const A: usize, const J: usize> Down<R, A, J, Same> for C {
-    type T = C;
-}
-impl<R: Planned, C: Node, const A: usize, const J: usize> Down<R, A, J, Child> for C
-where
-    C::Subs: PosSelect<Way<R, A, J>> + Pick<Way<R, A, J>, { <C::Subs as PosSelect<Way<R, A, J>>>::POS }>,
-{
-    type T = <C::Subs as Pick<Way<R, A, J>, { <C::Subs as PosSelect<Way<R, A, J>>>::POS }>>::T;
-}
-/// The first half of a long way.
-#[doc(hidden)]
-pub trait Step1<R: Planned, const A: usize, const J: usize>: Node {
-    type X: Node;
-}
-impl<R: Planned, C: Node, const A: usize, const J: usize> Step1<R, A, J> for C
-where
-    Way<R, A, J>: Route,
-    C: Down<R, A, { Way::<R, A, J>::MID }, <Way<R, A, J> as Route>::K1>,
-{
-    type X = <C as Down<R, A, { Way::<R, A, J>::MID }, <Way<R, A, J> as Route>::K1>>::T;
-}
-impl<R: Planned, C: Node, const A: usize, const J: usize> Down<R, A, J, Far> for C
-where
-    Way<R, A, J>: Route,
-    C: Step1<R, A, J>,
-    <C as Step1<R, A, J>>::X: Down<R, { Way::<R, A, J>::MID }, J, <Way<R, A, J> as Route>::K2>,
-{
-    type T = <<C as Step1<R, A, J>>::X as Down<R, { Way::<R, A, J>::MID }, J, <Way<R, A, J> as Route>::K2>>::T;
+impl<R: Planned, C: Node + DownW<Way<R, A, J>, Kd>, const A: usize, const J: usize, Kd> Down<R, A, J, Kd> for C {
+    type T = <C as DownW<Way<R, A, J>, Kd>>::T;
 }
 
 /// Where component position `P` is: its plan index and the way from the
