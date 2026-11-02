@@ -1811,7 +1811,7 @@ impl Plan {
     /// out-of-line node (`PG_TAIL`) that every branch calls. The code of a joined cone then exists
     /// once per switch instead of once per branch (the leaves of a market's depth and trade
     /// updates share it). Order is kept: the shared runs are the last of every branch.
-    const fn share_tail(&mut self, _m: usize, ch: usize, nk: usize) {
+    const fn share_tail(&mut self, ch: usize, nk: usize) {
         if nk < 2 || TAIL_MIN == 0 {
             return;
         }
@@ -1846,8 +1846,7 @@ impl Plan {
             return;
         }
         // the shared node: the last `l` runs of the first branch
-        let (s0, len0, seq0) = self.items_of(self.kpool[ch]);
-        let _ = seq0;
+        let (_, len0, _) = self.items_of(self.kpool[ch]);
         if self.ch_len + l > MAX_PCH {
             self.fail("the push program is too large: ", "raise dataflow_flat's child pool", "");
             return;
@@ -1858,7 +1857,6 @@ impl Plan {
             self.ch_node[tfirst + i] = self.item_at(self.kpool[ch], len0 - l + i);
             i += 1;
         }
-        let _ = s0;
         self.ch_len = tfirst + l;
         let t = self.new_node(PG_TAIL, tfirst as u32, l as u32);
         if self.failed {
@@ -2134,7 +2132,7 @@ impl Plan {
         if self.failed {
             return 0;
         }
-        self.share_tail(m + 0, ch, nk);
+        self.share_tail(ch, nk);
         if self.failed {
             return 0;
         }
