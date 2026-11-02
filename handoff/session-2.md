@@ -266,3 +266,23 @@ With `impl<S> UpdateHandler<Quoter<S>>` plus plain `Component::update`, the buff
 | Identical bodies, random | 21.6 | 64.9 | 58.4 |
 
 `Frame`'s lead with identical bodies comes from LLVM sinking its 827 identical arms into one block, which also fails with `-C codegen-units=1`. The enum misses it because three address calculations were hoisted out of the last switch group's 52 arms. Whether real apps get that merge is untested; check the typical app before committing to the enum syntax. Raw data: `.claude/worktrees/agent-a4e0d2d85fdaec8bc/target/enumwork2/`.
+
+## Cold check at `perps`: the cost is incremental compilation (2026-11-02)
+
+**`excl_group` fix (merged, `9fa5fc8`).** Split on the root-most unused place. The verdict is independent of the place: every pair is checked once either way (reasoned), and an old-vs-new scratch differential found no mismatch across tests, error cases and generated apps. `.text` and `.data` byte-identical at typical. Cold check, `on`: typical 8.3 → 7.6 s, 2,044 21.8 → 17.3 s, 4,079 59 → 43–51 s.
+
+**Cause of the growth.** At large sizes most time is kernel page faults from `memset` in rustc's `ReadsRecorder::seed` (`rustc_middle::dep_graph::edges`). It resizes and zeroes a `Vec<u8>` sized to the dep graph per query task (reading of the disassembly), so tasks × graph size is quadratic: 80 GB zeroed at 2,044, 319 GB at 4,079. Largest source at 4,079: 61k `resolve_instance_raw` calls from `const_eval_resolve`, about 15 per component (39% of bytes). Also present on `nightly-2026-10-01`, so not a recent regression. Found with an `LD_PRELOAD` memset shim: `.claude/worktrees/agent-ab026fb31d6a1c588/target/ms/`.
+
+| Cold `cargo check`, `on` | Incremental on | `CARGO_INCREMENTAL=0` |
+|---|---|---|
+| 4,079 | 46.5 s, 8.07M faults | 25.1 s, 0.89M faults |
+| `perps` (12,412) | 2004 s, 7.5 GB, with self-profile | 81.8 s, 6.73 GB, 2.69M faults |
+
+With incremental off, 4,079 to 12,412 is about linear.
+
+| Dev build | Typical on | Typical off | 4,079 on | 4,079 off |
+|---|---|---|---|---|
+| First build | 9.8 s | 8.7 s | 72.2 s | 46.2 s |
+| Edit | 0.7 s | 8.5 s | 3.6 s | 46 s |
+
+**`perps` release:** OOM-killed at the 18 GB cap, reaching `Compiling app`, about 2:40 CPU. Which phase hit the cap is unknown.
