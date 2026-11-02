@@ -603,6 +603,80 @@ impl Component for B {
 fn main() { let _ = Pipeline::<E, (B,)>::build(Configs::new()); }
 EOT
 
+# --- listener requests (Request<S>) --------------------------------------------------------------------
+
+# A selector read downstream of a listener whose `Requests` has no `Request<S>` impl for it.
+CMD[listener_missing_request]=check
+PATTERN[listener_missing_request]='E0277.*cannot take the request of the selector'
+read -r -d '' BODY[listener_missing_request] <<'EOF2'
+use dataflow_flat::{Demux, Listener, Request};
+pub mod m { pub struct Btc; pub struct Eth; }
+#[derive(Clone, Copy, Demux)]
+#[demux(markers = m)]
+pub enum F { Btc(u64), Eth(u64) }
+#[derive(Default)]
+pub struct Reqs(Vec<u32>);
+impl Request<m::Btc> for Reqs { fn add(&mut self) { self.0.push(0); } }
+
+#[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
+#[listener]
+pub struct L;
+impl Listener for L { type Requests = Reqs; }
+impl Component for L {
+    type Config = ();
+    type Output = Option<F>;
+    fn new((): (), i: Self::Init<'_>) -> (Self, Option<F>) { let _ = i.requests.0; (L, None) }
+    fn update(&mut self, _: Self::Input<'_>) -> Option<F> { None }
+}
+#[derive(ComponentSubscription)]
+#[subscribe(Some(m::Eth(t)): L)]
+pub struct R;
+impl Component for R {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (R, 0) }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 { *i.t }
+}
+fn main() { let _ = Pipeline::<Poll, (R,)>::build(Configs::new()); }
+EOF2
+
+# The same with the impl present for the selector that is read (and none for the unread one).
+CMD[listener_request_ok]=check
+PATTERN[listener_request_ok]=NOERROR
+read -r -d '' BODY[listener_request_ok] <<'EOF2'
+use dataflow_flat::{Demux, Listener, Request};
+pub mod m { pub struct Btc; pub struct Eth; }
+#[derive(Clone, Copy, Demux)]
+#[demux(markers = m)]
+pub enum F { Btc(u64), Eth(u64) }
+#[derive(Default)]
+pub struct Reqs(Vec<u32>);
+impl Request<m::Btc> for Reqs { fn add(&mut self) { self.0.push(0); } }
+
+#[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
+#[listener]
+pub struct L;
+impl Listener for L { type Requests = Reqs; }
+impl Component for L {
+    type Config = ();
+    type Output = Option<F>;
+    fn new((): (), i: Self::Init<'_>) -> (Self, Option<F>) { let _ = i.requests.0; (L, None) }
+    fn update(&mut self, _: Self::Input<'_>) -> Option<F> { None }
+}
+#[derive(ComponentSubscription)]
+#[subscribe(Some(m::Btc(t)): L)]
+pub struct R;
+impl Component for R {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (R, 0) }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 { *i.t }
+}
+fn main() { let _ = Pipeline::<Poll, (R,)>::build(Configs::new()); }
+EOF2
+
 ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        self_cycle
        too_many_components root_not_a_root sink_is_the_root
@@ -613,7 +687,8 @@ ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        selector_wrong_input orphan_first on_not_keyed symbols_share_key
        handler_missing_update handler_non_exclusive_join handler_exclusive_ok handler_selected_input handler_root_input
        pattern_struct pattern_multi_field pattern_range pattern_range_literal pattern_guard pattern_or pattern_literal
-       pattern_wildcard pattern_wildcard_selector pattern_reference pattern_unit_variant pattern_ok)
+       pattern_wildcard pattern_wildcard_selector pattern_reference pattern_unit_variant pattern_ok
+       listener_missing_request listener_request_ok)
 
 run_case() {
     local name=$1 dir="$CASES_DIR/$1"

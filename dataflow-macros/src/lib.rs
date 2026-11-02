@@ -473,7 +473,7 @@ fn chain_ty(chain: &[Type]) -> TokenStream2 {
     t
 }
 
-#[proc_macro_derive(ComponentSubscription, attributes(subscribe, listener))]
+#[proc_macro_derive(ComponentSubscription, attributes(subscribe, listener, key_listener))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let loc = input.ident.span();
@@ -726,12 +726,13 @@ fn expand(input: DeriveInput, handler: bool) -> syn::Result<TokenStream2> {
 
 
     // `Node` for a component. Its bounds are the component's own.
+    let key_listener = !handler && input.attrs.iter().any(|a| a.path().is_ident("key_listener"));
     let listener = !handler && input.attrs.iter().any(|a| a.path().is_ident("listener"));
-    let mut node_items = if listener {
+    let mut node_items = if key_listener {
         quote! {
             const LISTENER: bool = true;
             fn __subscribe(this: &mut Self, keys: &[u32]) {
-                <Self as #krate::Listener>::subscribe(this, keys)
+                <Self as #krate::KeyListener>::subscribe(this, keys)
             }
         }
     } else {
@@ -740,6 +741,30 @@ fn expand(input: DeriveInput, handler: bool) -> syn::Result<TokenStream2> {
     if handler {
         node_items = quote!(const HANDLER: bool = true;);
     }
+    let requests_ty = if listener {
+        quote!(<#name #ty_generics as #krate::Listener>::Requests)
+    } else {
+        quote!(#krate::request::NoRequests)
+    };
+    if listener {
+        node_items = quote!(#node_items const LISTENS: bool = true;);
+    }
+    // A `#[listener]`'s `new` also gets `init.requests`.
+    let (init_requests_field, init_requests_default, fill_requests) = if listener {
+        (
+            quote!(pub requests: <#name #ty_generics as #krate::Listener>::Requests,),
+            quote!(requests: ::core::default::Default::default(),),
+            quote! {
+                #[doc(hidden)]
+                fn __fill_requests(init: &mut Self::Init<'_>, pass: &mut #krate::ConstructPass) {
+                    init.requests = pass.take_requests::<Self, <#name #ty_generics as #krate::Listener>::Requests>();
+                }
+            },
+        )
+    } else {
+        (quote!(), quote!(), quote!())
+    };
+
     let (nimpl_generics, nty_generics, _) = generics.split_for_impl();
     let mut node_generics = generics.clone();
     node_generics.make_where_clause().predicates.push(parse_quote!(#name #ty_generics: #krate::Component));
@@ -752,6 +777,7 @@ fn expand(input: DeriveInput, handler: bool) -> syn::Result<TokenStream2> {
             type Output = <#name #nty_generics as #krate::Component>::Output;
             type Subs = <#name #nty_generics as #krate::ComponentSubscription>::Deps;
             type Kind = #krate::CompKind;
+            type Requests = #requests_ty;
             const KIND: u8 = #krate::KIND_COMPONENT;
             #node_items
         }
@@ -897,6 +923,7 @@ fn expand(input: DeriveInput, handler: bool) -> syn::Result<TokenStream2> {
         #[allow(non_camel_case_types)]
         pub struct #init_name #input_decl_generics #input_where {
             #( pub #field_names: #init_types, )*
+            #init_requests_field
             #[doc(hidden)]
             pub __marker: #marker_ty,
         }
@@ -915,8 +942,9 @@ fn expand(input: DeriveInput, handler: bool) -> syn::Result<TokenStream2> {
             #[inline]
             fn init<'a>(raw: <Self::Deps as #krate::DepList>::Inits<'a>) -> Self::Init<'a> {
                 let #deps_pat = raw;
-                #init_name { #( #field_names: #field_vars, )* __marker: ::core::marker::PhantomData }
+                #init_name { #( #field_names: #field_vars, )* #init_requests_default __marker: ::core::marker::PhantomData }
             }
+            #fill_requests
         }
 
         #node_impls
@@ -953,6 +981,7 @@ fn expand_root(input: DeriveInput) -> syn::Result<TokenStream2> {
             type Output = Self;
             type Subs = ();
             type Kind = #krate::RootKind;
+            type Requests = #krate::request::NoRequests;
             const KIND: u8 = #krate::KIND_ROOT;
         }
         impl #impl_generics #krate::Root for #name #ty_generics #where_clause {}
@@ -1204,6 +1233,7 @@ fn expand_demux(input: DeriveInput) -> syn::Result<TokenStream2> {
             impl #krate::Select<#name> for #marker {
                 type Out = #out_ty;
                 const KEY: u32 = #key;
+                const REQUEST: bool = true;
                 #[inline(always)]
                 fn select(__x: &#name) -> ::core::option::Option<&#out_ty> {
                     match __x {

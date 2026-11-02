@@ -1,6 +1,6 @@
 //! The vocabulary: wire packets, the exchange enum, symbols and the keyed frame.
 
-use dataflow_flat::{Demux, Keyed, Node, Symbol};
+use dataflow_flat::{Demux, Node, Select};
 
 /// What one exchange sends for one market: raw integer ticks, as on a wire.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -38,37 +38,77 @@ pub struct Tob {
     pub seq: u64,
 }
 
-/// What a listener publishes: a `Tob` tagged with its symbol key. `Keyed` is
-/// what `On<S>` selects from.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Frame {
-    pub key: Option<u32>,
-    pub tob: Tob,
+/// The markets, as types. One marker per market, shared by every exchange's
+/// frame enum: `Btc` selects the Btc variant of `BinanceFrame` and of
+/// `CoinbaseFrame`. Doge is on the wire but nobody reads it.
+pub mod markets {
+    pub struct Btc;
+    pub struct Eth;
+    pub struct Sol;
+    pub struct Doge;
 }
-impl Keyed for Frame {
-    type Item = Tob;
-    fn key(&self) -> Option<u32> {
-        self.key
-    }
-    fn item(&self) -> &Tob {
-        &self.tob
-    }
+
+/// What the Binance listener publishes: the top of book of one market, as the
+/// variant of that market. The variants are the selectors (`markets::Btc`, ...).
+#[derive(Clone, Copy, Debug, PartialEq, Demux)]
+#[demux(markers = markets)]
+pub enum BinanceFrame {
+    Btc(Tob),
+    Eth(Tob),
+    Sol(Tob),
+    Doge(Tob),
 }
+
+/// The same for Coinbase, with the same markers.
+#[derive(Clone, Copy, Debug, PartialEq, Demux)]
+#[demux(markers = markets)]
+pub enum CoinbaseFrame {
+    Btc(Tob),
+    Eth(Tob),
+    Sol(Tob),
+    Doge(Tob),
+}
+
+/// A market's name, for reports.
+pub trait Market: 'static {
+    const NAME: &'static str;
+}
+/// The Binance stream of a market.
+pub trait BinanceStream {
+    const STREAM: &'static str;
+}
+/// The Coinbase product of a market.
+pub trait CoinbaseProduct {
+    const PRODUCT: &'static str;
+}
+
+/// A market that both exchanges frame: what the books and the joins are generic over.
+pub trait Sym: Market + Select<BinanceFrame, Out = Tob> + Select<CoinbaseFrame, Out = Tob> {}
+impl<S: Market + Select<BinanceFrame, Out = Tob> + Select<CoinbaseFrame, Out = Tob>> Sym for S {}
 
 /// An exchange: the listener component that frames its packets.
 pub trait Exchange: 'static {
     const NAME: &'static str;
-    type Ws: Node<Output = Frame>;
+    type Frame: 'static;
+    type Ws: Node<Output = Option<Self::Frame>>;
 }
 
-macro_rules! symbols {
-    ($($name:ident = $key:expr),*) => {$(
-        pub struct $name;
-        impl Symbol for $name {
-            const KEY: u32 = $key;
+macro_rules! markets {
+    ($($name:ident = $bin:expr, $cb:expr;)*) => {$(
+        impl Market for markets::$name {
             const NAME: &'static str = stringify!($name);
+        }
+        impl BinanceStream for markets::$name {
+            const STREAM: &'static str = $bin;
+        }
+        impl CoinbaseProduct for markets::$name {
+            const PRODUCT: &'static str = $cb;
         }
     )*};
 }
-// Dense keys, the same on both exchanges. Doge (3) is on the wire but nobody reads it.
-symbols!(Btc = 0, Eth = 1, Sol = 2, Doge = 3);
+markets! {
+    Btc = "btcusdt@bookTicker", "BTC-USD";
+    Eth = "ethusdt@bookTicker", "ETH-USD";
+    Sol = "solusdt@bookTicker", "SOL-USD";
+    Doge = "dogeusdt@bookTicker", "DOGE-USD";
+}

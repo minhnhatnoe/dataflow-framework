@@ -9,7 +9,7 @@ Writes four crates under OUTDIR (each its own workspace, path dependency on data
   e  variant E: the listener outputs `enum FrameN { S0(Tob), .. }`; one marker per symbol (`markets::S0`) with a
      hand-written `impl Select<FrameN>` whose `key_of` is ONE shared function; `Book<S: Select<FrameN, Out = Tob>>`
      reads `Ws => S`
-  k  variant E plus `const KEYED: bool = true` in every impl and `#[listener]` on Ws\n  d  variant E with `#[derive(Demux)]` on the enum as it stands (compile time only; selectors are `framen::S0`)
+  k  variant E plus `const KEYED: bool = true` in every impl and `#[key_listener]` on Ws\n  d  variant E with `#[derive(Demux)]` on the enum as it stands (compile time only; selectors are `framen::S0`)
   h  hand-written baseline: a `match` on the symbol with the books in an array
 
 Every side has the same 827 `Book<S>` bodies, the same handler sink `Oms` + `Probe`, and the same pre-computed packet
@@ -203,9 +203,9 @@ impl Keyed for Frame {{
 
 #[derive(ComponentSubscription)]
 #[subscribe(p: Packet)]
-#[listener]
+#[key_listener]
 pub struct Ws;
-impl Listener for Ws {{ fn subscribe(&mut self, keys: &[u32]) {{ REQUESTED.fetch_add(keys.len() as u64, Ordering::Relaxed); }} }}
+impl KeyListener for Ws {{ fn subscribe(&mut self, keys: &[u32]) {{ REQUESTED.fetch_add(keys.len() as u64, Ordering::Relaxed); }} }}
 impl Component for Ws {{
     type Config = ();
     type Output = Frame;
@@ -311,9 +311,9 @@ import re
 e2_body = re.sub(r"\(key_of\(x\) == (\d+) \)", r"(key_of(x) == \1)", e2_body)
 write("e2", e2_body)
 
-# ---- K: E plus `KEYED = true` (and a #[listener] on Ws), so the plan treats the selectors as keyed like `On<S>` ----
+# ---- K: E plus `KEYED = true` (and a #[key_listener] on Ws), so the plan treats the selectors as keyed like `On<S>` ----
 k_body = e_body.replace("    const KEY: u32 =", "    const KEYED: bool = true;\n    const KEY: u32 =")
-k_body = k_body.replace("#[subscribe(p: Packet)]\npub struct Ws;", "#[subscribe(p: Packet)]\n#[listener]\npub struct Ws;\nimpl Listener for Ws { fn subscribe(&mut self, keys: &[u32]) { REQUESTED.fetch_add(keys.len() as u64, Ordering::Relaxed); } }")
+k_body = k_body.replace("#[subscribe(p: Packet)]\npub struct Ws;", "#[subscribe(p: Packet)]\n#[key_listener]\npub struct Ws;\nimpl KeyListener for Ws { fn subscribe(&mut self, keys: &[u32]) { REQUESTED.fetch_add(keys.len() as u64, Ordering::Relaxed); } }")
 write("k", k_body)
 
 d_body = COMMON.replace("%HANDLES%", handles(f"{MOD}::")).replace("%UPDATE_HANDLER%", UH_E) + f"""

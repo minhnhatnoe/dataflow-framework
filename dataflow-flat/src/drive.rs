@@ -165,7 +165,9 @@ where
         let config = ctx.pass.take_config::<C<A, P>>();
         let (state, out) = {
             let raw = <<C<A, P> as ComponentSubscription>::Deps as GatherInit<A>>::gather(&*ctx.outs);
-            <C<A, P> as crate::component::Component>::new(config, <C<A, P> as ComponentSubscription>::init(raw))
+            let mut init = <C<A, P> as ComponentSubscription>::init(raw);
+            <C<A, P> as ComponentSubscription>::__fill_requests(&mut init, &mut *ctx.pass);
+            <C<A, P> as crate::component::Component>::new(config, init)
         };
         *<A::StatesOpt as AtPos<Option<C<A, P>>, P>>::at_mut(&mut *ctx.states) = Some(state);
         *<A::OutsOpt as AtPos<Option<<C<A, P> as Node>::Output>, P>>::at_mut(&mut *ctx.outs) = Some(out);

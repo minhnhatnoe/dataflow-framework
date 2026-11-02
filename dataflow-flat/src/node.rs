@@ -46,10 +46,16 @@ pub trait Node: __private::Sealed + Sized + 'static {
     /// handled edges differently (see `handler`).
     #[doc(hidden)]
     const HANDLER: bool = false;
-    /// Is this a [`Listener`](crate::Listener) (`#[listener]` on the derive)?
+    /// Is this a [`KeyListener`](crate::KeyListener) (`#[key_listener]` on the derive)?
     #[doc(hidden)]
     const LISTENER: bool = false;
-    /// `Listener::subscribe`, for a listener; nothing otherwise.
+    /// Is this a [`Listener`](crate::Listener) (`#[listener]`)?
+    #[doc(hidden)]
+    const LISTENS: bool = false;
+    /// The listener's `Requests` (`NoRequests` for other nodes).
+    #[doc(hidden)]
+    type Requests: 'static;
+    /// `KeyListener::subscribe`, for a key listener; nothing otherwise.
     #[doc(hidden)]
     fn __subscribe(_this: &mut Self, _keys: &[u32]) {}
 }

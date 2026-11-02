@@ -1,11 +1,11 @@
 //! Keyed selectors (`On<S>`) and listener requests: exclusivity of different
-//! symbols, the keys a `#[listener]` is asked for (deduplicated, sorted, only
+//! symbols, the keys a `#[key_listener]` is asked for (deduplicated, sorted, only
 //! the symbols somebody reads), and that `subscribe` runs once, after
 //! construction and before the first push. No `#![feature]` here.
 
 use std::sync::Mutex;
 
-use dataflow_flat::{Component, ComponentSubscription, Configs, Keyed, Listener, On, Pipeline, Root, Symbol};
+use dataflow_flat::{Component, ComponentSubscription, Configs, Keyed, KeyListener, On, Pipeline, Root, Symbol};
 
 static LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
 // Tests in one binary run in parallel; each holds this and clears the log.
@@ -57,9 +57,9 @@ impl Keyed for Frame {
 /// A listener whose output is an `Option<Frame>`, read through `Some, On<_>`.
 #[derive(ComponentSubscription)]
 #[subscribe(m: Msg)]
-#[listener]
+#[key_listener]
 pub struct Ws;
-impl Listener for Ws {
+impl KeyListener for Ws {
     fn subscribe(&mut self, keys: &[u32]) {
         log(format!("Ws.subscribe{keys:?}"));
     }
@@ -80,9 +80,9 @@ impl Component for Ws {
 /// A listener read with `On<_>` directly (output is the `Keyed` value).
 #[derive(ComponentSubscription)]
 #[subscribe(m: Msg)]
-#[listener]
+#[key_listener]
 pub struct Ws2;
-impl Listener for Ws2 {
+impl KeyListener for Ws2 {
     fn subscribe(&mut self, keys: &[u32]) {
         log(format!("Ws2.subscribe{keys:?}"));
     }
@@ -102,9 +102,9 @@ impl Component for Ws2 {
 /// A listener nobody reads through `On`.
 #[derive(ComponentSubscription)]
 #[subscribe(m: Msg)]
-#[listener]
+#[key_listener]
 pub struct Ws3;
-impl Listener for Ws3 {
+impl KeyListener for Ws3 {
     fn subscribe(&mut self, keys: &[u32]) {
         log(format!("Ws3.subscribe{keys:?}"));
     }

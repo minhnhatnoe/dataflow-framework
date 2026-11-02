@@ -5,10 +5,11 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
-use dataflow_flat::{Collect, Component, ComponentSubscription, Handler, Symbol, UpdateHandler};
+use dataflow_flat::{Collect, Component, ComponentSubscription, Handler, UpdateHandler};
 
 use crate::book::Book;
 use crate::feed::{Binance, Coinbase};
+use crate::market::markets::{Btc, Eth, Sol};
 use crate::market::*;
 
 /// Best bid/ask over both exchanges. It reads two books that can never update in
@@ -17,8 +18,8 @@ use crate::market::*;
 /// its stored (older) value.
 #[derive(ComponentSubscription)]
 #[subscribe(b: Book<Binance, S>, c: Book<Coinbase, S>)]
-pub struct BestBid<S: Symbol>(PhantomData<S>);
-impl<S: Symbol> Component for BestBid<S> {
+pub struct BestBid<S: Sym>(PhantomData<S>);
+impl<S: Sym> Component for BestBid<S> {
     type Config = ();
     type Output = Tob;
     fn new((): (), _: Self::Init<'_>) -> (Self, Tob) {
@@ -51,16 +52,16 @@ thread_local! {
 /// Quotes one tick inside the best bid when the market is not crossed.
 #[derive(ComponentSubscription)]
 #[subscribe(best: BestBid<S>)]
-pub struct Quoter<S: Symbol>(PhantomData<S>);
-impl<S: Symbol> Component for Quoter<S> {
+pub struct Quoter<S: Sym>(PhantomData<S>);
+impl<S: Sym> Component for Quoter<S> {
     type Config = ();
     type Output = Order;
     fn new((): (), _: Self::Init<'_>) -> (Self, Order) {
         (Quoter(PhantomData), Order::default())
     }
     fn update(&mut self, i: Self::Input<'_>) -> Order {
-        QUOTER_RUNS.with(|m| *m.borrow_mut().entry(S::NAME).or_default() += 1);
-        Order { symbol: S::NAME, buy: i.best.ask - i.best.bid > 3, px: i.best.bid + 1, seq: i.best.seq }
+        QUOTER_RUNS.with(|m| *m.borrow_mut().entry(<S as Market>::NAME).or_default() += 1);
+        Order { symbol: <S as Market>::NAME, buy: i.best.ask - i.best.bid > 3, px: i.best.bid + 1, seq: i.best.seq }
     }
 }
 
@@ -99,10 +100,10 @@ impl Collect for OrderSender {
         }
     }
 }
-impl<S: Symbol> UpdateHandler<Quoter<S>> for OrderSender {
+impl<S: Sym> UpdateHandler<Quoter<S>> for OrderSender {
     fn on_update(&mut self, buf: &mut Vec<Order>, o: &Order) {
         if o.seq != 0 {
-            SENDER_UPDATES.with(|m| *m.borrow_mut().entry(S::NAME).or_default() += 1);
+            SENDER_UPDATES.with(|m| *m.borrow_mut().entry(<S as Market>::NAME).or_default() += 1);
             buf.push(*o);
         }
     }

@@ -490,7 +490,7 @@ impl Component for {ws} {{
         listen = ""
         if ON:
             listen = f"""
-impl dataflow_flat::Listener for {ws} {{
+impl dataflow_flat::KeyListener for {ws} {{
     /// Records the keys the graph reads from this exchange (a real listener opens one combined subscription).
     fn subscribe(&mut self, keys: &[u32]) {{
         self.keys = keys.to_vec();
@@ -500,7 +500,7 @@ impl dataflow_flat::Listener for {ws} {{
 }}
 """
         comp.append(f"""#[derive(ComponentSubscription)]
-#[subscribe({lsub(var)})]{"" if not ON else chr(10) + "#[listener]"}
+#[subscribe({lsub(var)})]{"" if not ON else chr(10) + "#[key_listener]"}
 pub struct {ws} {{ last: Frame{", keys: Vec<u32>" if ON else ""} }}{listen}
 impl Component for {ws} {{
     type Config = ();

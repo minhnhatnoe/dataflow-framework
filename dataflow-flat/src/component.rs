@@ -21,6 +21,10 @@ pub trait ComponentSubscription: 'static {
     fn input<'a>(raw: <Self::Deps as DepList>::Inputs<'a>) -> Self::Input<'a>;
     /// Name the construction pass's nested tuple.
     fn init<'a>(raw: <Self::Deps as DepList>::Inits<'a>) -> Self::Init<'a>;
+    /// For a `#[listener]`: put the requests collected by the first pass into
+    /// `init.requests`. Nothing for other components.
+    #[doc(hidden)]
+    fn __fill_requests(_: &mut Self::Init<'_>, _: &mut crate::build::ConstructPass) {}
 }
 
 /// A stateful node of the dataflow graph.

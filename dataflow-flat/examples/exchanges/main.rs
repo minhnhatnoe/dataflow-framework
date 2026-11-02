@@ -3,17 +3,18 @@
 //! One NIC, two exchanges, three symbols, merged listeners:
 //!
 //! ```text
-//! Poll (root) -> Nic -> Some -> packet::Binance   -> BinanceWs  -> On<S> -> Book<Binance, S>  -+
-//!                    \-> Some -> packet::Coinbase -> CoinbaseWs -> On<S> -> Book<Coinbase, S> -+-> BestBid<S> -> Quoter<S> -> OrderSender
+//! Poll (root) -> Nic -> Some -> packet::Binance   -> BinanceWs  -> Some -> S -> Book<Binance, S>  -+
+//!                    \-> Some -> packet::Coinbase -> CoinbaseWs -> Some -> S -> Book<Coinbase, S> -+-> BestBid<S> -> Quoter<S> -> OrderSender
 //! ```
 //!
 //! * Demuxing is on the edges (selectors), not nodes: `Some`, then the enum
-//!   variant, then the symbol key (`On<S>`). A packet is from one exchange and
+//!   variant, then the market (`S`, a variant of the listener's frame enum). A packet is from one exchange and
 //!   has one symbol, so only that cone runs; everything else keeps its stored
 //!   output.
-//! * The plan knows which keys are read from each `#[listener]`; at build it
-//!   calls `subscribe` once with exactly those. Doge is on the wire but nobody
-//!   reads it, so it is never subscribed.
+//! * Before anything is constructed, build collects the selectors read from
+//!   each `#[listener]` and calls `Request<S>::add` once per distinct one; the
+//!   listener's `new` gets them as `init.requests`. Doge is on the wire (and a
+//!   variant of the frame enums) but nobody reads it, so it is never requested.
 //! * `OrderSender` is a handler component (`#[derive(Handler)]`): it handles the
 //!   three quoters and its `on_update` is called only for the one that changed.
 //! * `BestBid<S>` and `OrderSender` join branches that are mutually exclusive
@@ -30,7 +31,7 @@ use std::collections::BTreeMap;
 use dataflow_flat::{Configs, Pipeline};
 
 use book::BOOK_RUNS;
-use feed::{Nic, Poll, Wire};
+use feed::{Nic, Poll, Wire, REQUESTED};
 use market::Packet;
 use strategy::{OrderSender, QUOTER_RUNS, SENDER_UPDATES};
 
@@ -46,6 +47,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (i, n) in pipeline.order().iter().enumerate() {
         println!("  {i:2}. {}", n.replace("exchanges::", ""));
     }
+
+    // Exactly the markets that are read, in the order of their first reader.
+    let got = REQUESTED.with(|r| r.borrow().clone());
+    let bin = ["btcusdt@bookTicker", "ethusdt@bookTicker", "solusdt@bookTicker"];
+    let cb = ["BTC-USD", "ETH-USD", "SOL-USD"];
+    assert_eq!(got["Binance"], bin, "Binance streams: read markets only, Doge unread");
+    assert_eq!(got["Coinbase"], cb, "Coinbase channels: read markets only, Doge unread");
 
     println!("\nrunning {POLLS} polls");
     for n in 1..=POLLS {

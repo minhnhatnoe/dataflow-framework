@@ -38,11 +38,16 @@ pub trait Select<In>: 'static {
     /// means "a condition that may hold together with anything".
     const KEY: u32;
     /// Is this a keyed selector ([`On`])? The plan collects the keys of keyed
-    /// decisions as the requests of a [`Listener`](crate::Listener), and two
+    /// decisions as the requests of a [`KeyListener`](crate::KeyListener), and two
     /// keyed selectors with the same `KEY` at one place are an error.
     const KEYED: bool = false;
     /// The name used in messages about a keyed selector (the symbol's name).
     const LABEL: &'static str = "";
+    /// Is this selector *requested* of a [`Listener`](crate::Listener)? True for
+    /// the selectors of `#[derive(Demux)]`: reading one downstream of a
+    /// listener calls `Request<Self>::add` on its requests, and that impl must
+    /// exist. `Some`, `Ok`, guards and hand-written selectors are not requests.
+    const REQUEST: bool = false;
     /// `Some(part)` if the pattern matches.
     fn select(x: &In) -> Option<&Self::Out>;
     /// The key of the alternative `x` is: for a selector with a `KEY` other
@@ -210,7 +215,7 @@ pub trait Keyed {
 /// The keyed selector: matches iff the parent's value has key `S::KEY`; the
 /// part is the item. Two `On`s with different symbols at one place are
 /// mutually exclusive, and the keys of the `On`s that read a
-/// [`Listener`](crate::Listener) are its requests.
+/// [`KeyListener`](crate::KeyListener) are its requests.
 ///
 /// ```ignore
 /// #[subscribe(u: Ws => Some, On<Btc>)]
@@ -247,7 +252,7 @@ impl<In: Keyed, S: Symbol> Select<In> for On<S> {
 /// constructed and before it returns, `subscribe` is called once with the
 /// sorted, deduplicated keys of every [`On`] that reads this component's
 /// output (directly or after other selectors).
-pub trait Listener {
+pub trait KeyListener {
     fn subscribe(&mut self, keys: &[u32]);
 }
 

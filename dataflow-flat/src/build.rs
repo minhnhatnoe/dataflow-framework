@@ -46,9 +46,23 @@ impl Configs {
 pub struct ConstructPass {
     pub(crate) configs: HashMap<TypeId, ConfigEntry>,
     pub(crate) order: Vec<&'static str>,
+    /// Listener requests collected by the first pass, by listener `TypeId`.
+    pub(crate) requests: HashMap<TypeId, Box<dyn Any>>,
+    /// (listener, selector) pairs already requested.
+    pub(crate) seen: std::collections::HashSet<(TypeId, TypeId)>,
 }
 
 impl ConstructPass {
+    pub(crate) fn new(configs: HashMap<TypeId, ConfigEntry>) -> Self {
+        ConstructPass { configs, order: Vec::new(), requests: HashMap::new(), seen: Default::default() }
+    }
+    /// The requests collected for listener `C` (empty if nobody reads it).
+    pub fn take_requests<C: 'static, R: Default + 'static>(&mut self) -> R {
+        match self.requests.remove(&TypeId::of::<C>()) {
+            None => R::default(),
+            Some(b) => *b.downcast::<R>().expect("keyed by listener"),
+        }
+    }
     pub(crate) fn take_config<C: Component>(&mut self) -> C::Config {
         match self.configs.remove(&TypeId::of::<C>()) {
             None => C::Config::default(),

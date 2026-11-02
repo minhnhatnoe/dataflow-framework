@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
-use dataflow_flat::{Component, ComponentSubscription, On, Symbol};
+use dataflow_flat::{Component, ComponentSubscription, Select};
 
 use crate::market::*;
 
@@ -32,19 +32,19 @@ thread_local! {
 
 /// Runs only for packets of exchange `X` with symbol `S`.
 #[derive(ComponentSubscription)]
-#[subscribe(t: <X as Exchange>::Ws => On<S>)]
-pub struct Book<X: Exchange, S: Symbol> {
+#[subscribe(Some(S(t)): <X as Exchange>::Ws)]
+pub struct Book<X: Exchange, S: Market + Select<X::Frame, Out = Tob>> {
     core: BookCore,
     _p: PhantomData<(X, S)>,
 }
-impl<X: Exchange, S: Symbol> Component for Book<X, S> {
+impl<X: Exchange, S: Market + Select<X::Frame, Out = Tob>> Component for Book<X, S> {
     type Config = ();
     type Output = Tob;
     fn new((): (), _: Self::Init<'_>) -> (Self, Tob) {
         (Book { core: BookCore::default(), _p: PhantomData }, Tob::default())
     }
     fn update(&mut self, i: Self::Input<'_>) -> Tob {
-        BOOK_RUNS.with(|m| *m.borrow_mut().entry((X::NAME, S::NAME)).or_default() += 1);
+        BOOK_RUNS.with(|m| *m.borrow_mut().entry((X::NAME, <S as Market>::NAME)).or_default() += 1);
         self.core.apply(i.t)
     }
 }

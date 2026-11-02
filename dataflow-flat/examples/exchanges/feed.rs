@@ -1,8 +1,9 @@
 //! The input side: the NIC component and one listener per exchange.
 
-use std::collections::BTreeSet;
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 
-use dataflow_flat::{Component, ComponentSubscription, Listener, Root};
+use dataflow_flat::{Component, ComponentSubscription, Listener, Request, Root};
 
 use crate::market::*;
 
@@ -61,32 +62,62 @@ impl Component for Nic {
     }
 }
 
+thread_local! {
+    /// What each listener was asked for (exchange name -> requests, in `add` order).
+    pub static REQUESTED: RefCell<BTreeMap<&'static str, Vec<&'static str>>> = RefCell::new(BTreeMap::new());
+}
+
+/// The Binance requests: one stream per market a subscriber reads.
+#[derive(Default)]
+pub struct Streams(pub Vec<&'static str>);
+impl<S: BinanceStream> Request<S> for Streams {
+    fn add(&mut self) {
+        self.0.push(S::STREAM);
+    }
+}
+
 /// Subscribes to `Some(Packet::Binance(m))` of `Nic` (`Some`, then `packet::Binance`): it runs only for a
 /// Binance packet. `#[listener]` tells the plan that this component wants to be
-/// told, at build, the keys that `On<_>` subscribers read from it.
+/// told, at build and before `new`, the markets its subscribers read from it.
 #[derive(ComponentSubscription)]
 #[subscribe(Some(Packet::Binance(m)): Nic)]
 #[listener]
+#[allow(dead_code)] // kept: a real listener owns its connection
 pub struct BinanceWs {
-    wanted: BTreeSet<u32>,
+    streams: Vec<&'static str>,
 }
 impl Listener for BinanceWs {
-    fn subscribe(&mut self, keys: &[u32]) {
-        // A real listener would open one websocket with a combined stream for
-        // exactly these symbols.
-        self.wanted = keys.iter().copied().collect();
-        println!("BinanceWs.subscribe: one connection, streams {}", names(keys));
-    }
+    type Requests = Streams;
 }
 impl Component for BinanceWs {
     type Config = ();
-    type Output = Frame;
-    fn new((): (), _: Self::Init<'_>) -> (Self, Frame) {
-        (BinanceWs { wanted: BTreeSet::new() }, Frame::default())
+    type Output = Option<BinanceFrame>;
+    fn new((): (), init: Self::Init<'_>) -> (Self, Option<BinanceFrame>) {
+        // A real listener would open one websocket with a combined stream for
+        // exactly these markets.
+        let streams = init.requests.0;
+        println!("BinanceWs: one connection, streams {streams:?}");
+        REQUESTED.with(|r| r.borrow_mut().insert("Binance", streams.clone()));
+        (BinanceWs { streams }, None)
     }
-    fn update(&mut self, i: Self::Input<'_>) -> Frame {
+    fn update(&mut self, i: Self::Input<'_>) -> Option<BinanceFrame> {
         let m = i.m;
-        Frame { key: Some(m.symbol), tob: Tob { bid: m.bid, ask: m.ask, seq: m.seq } }
+        let t = Tob { bid: m.bid, ask: m.ask, seq: m.seq };
+        Some(match m.symbol {
+            0 => BinanceFrame::Btc(t),
+            1 => BinanceFrame::Eth(t),
+            2 => BinanceFrame::Sol(t),
+            _ => BinanceFrame::Doge(t),
+        })
+    }
+}
+
+/// The Coinbase requests: one product per market.
+#[derive(Default)]
+pub struct Products(pub Vec<&'static str>);
+impl<S: CoinbaseProduct> Request<S> for Products {
+    fn add(&mut self) {
+        self.0.push(S::PRODUCT);
     }
 }
 
@@ -94,51 +125,43 @@ impl Component for BinanceWs {
 #[derive(ComponentSubscription)]
 #[subscribe(Some(Packet::Coinbase(m)): Nic)]
 #[listener]
+#[allow(dead_code)]
 pub struct CoinbaseWs {
-    wanted: BTreeSet<u32>,
+    products: Vec<&'static str>,
 }
 impl Listener for CoinbaseWs {
-    fn subscribe(&mut self, keys: &[u32]) {
-        self.wanted = keys.iter().copied().collect();
-        println!("CoinbaseWs.subscribe: one connection, channels {}", names(keys));
-    }
+    type Requests = Products;
 }
 impl Component for CoinbaseWs {
     type Config = ();
-    type Output = Frame;
-    fn new((): (), _: Self::Init<'_>) -> (Self, Frame) {
-        (CoinbaseWs { wanted: BTreeSet::new() }, Frame::default())
+    type Output = Option<CoinbaseFrame>;
+    fn new((): (), init: Self::Init<'_>) -> (Self, Option<CoinbaseFrame>) {
+        let products = init.requests.0;
+        println!("CoinbaseWs: one connection, channels {products:?}");
+        REQUESTED.with(|r| r.borrow_mut().insert("Coinbase", products.clone()));
+        (CoinbaseWs { products }, None)
     }
-    fn update(&mut self, i: Self::Input<'_>) -> Frame {
+    fn update(&mut self, i: Self::Input<'_>) -> Option<CoinbaseFrame> {
         let m = i.m;
-        Frame {
-            key: Some(m.product),
-            tob: Tob { bid: m.mid - m.half_spread, ask: m.mid + m.half_spread, seq: m.seq },
-        }
-    }
-}
-
-fn names(keys: &[u32]) -> String {
-    let n: Vec<_> = keys
-        .iter()
-        .map(|k| match *k {
-            0 => "BTC",
-            1 => "ETH",
-            2 => "SOL",
-            3 => "DOGE",
-            _ => "?",
+        let t = Tob { bid: m.mid - m.half_spread, ask: m.mid + m.half_spread, seq: m.seq };
+        Some(match m.product {
+            0 => CoinbaseFrame::Btc(t),
+            1 => CoinbaseFrame::Eth(t),
+            2 => CoinbaseFrame::Sol(t),
+            _ => CoinbaseFrame::Doge(t),
         })
-        .collect();
-    format!("{n:?}")
+    }
 }
 
 pub struct Binance;
 impl Exchange for Binance {
     const NAME: &'static str = "Binance";
+    type Frame = BinanceFrame;
     type Ws = BinanceWs;
 }
 pub struct Coinbase;
 impl Exchange for Coinbase {
     const NAME: &'static str = "Coinbase";
+    type Frame = CoinbaseFrame;
     type Ws = CoinbaseWs;
 }

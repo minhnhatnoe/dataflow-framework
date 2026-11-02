@@ -110,6 +110,8 @@ mod gather;
 mod handler;
 mod identity;
 mod listen;
+#[doc(hidden)]
+pub mod request;
 mod node;
 mod pipeline;
 mod plan;
@@ -119,11 +121,14 @@ mod store;
 mod table;
 
 pub use build::{BuildError, Configs};
+#[doc(hidden)]
+pub use build::ConstructPass;
 pub use component::{Component, ComponentSubscription, DepList, Sub};
 pub use node::{InitOf, Node, Root};
 pub use pipeline::Pipeline;
 pub use plan::{MAX_COMPONENTS, MAX_DECISIONS, MAX_EDGES, MAX_TERMS};
-pub use select::{option, result, Keyed, Listener, On, Select, Symbol, GUARD};
+pub use request::{Listener, Request};
+pub use select::{option, result, Keyed, KeyListener, On, Select, Symbol, GUARD};
 #[doc(hidden)]
 pub use select::ChainKey;
 #[doc(hidden)]
