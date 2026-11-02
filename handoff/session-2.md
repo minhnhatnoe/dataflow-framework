@@ -309,3 +309,21 @@ Release memory, full profile, `enum`, without the setting: 823 0.87 GB 16 s; 2,0
 Caching, `enum`, typical, dev: component body 0.9-1.0 s, 1 of 93 units; big + 3 small 0.95 s; line length or inserted line 0.9 s; subscription list, add or remove component, or sink order 8-9 s (the whole plan re-evaluates); library edit 2.5-3.3 s even for a comment (about 123k queries, 1 unit), 5.9 s right after app-only edits. A second app over the same library reuses nothing. `-Zincremental-ignore-spans` makes a library comment edit 0.95 s and doesn't help real library edits. Default `-Zshare-generics` did not reproduce the 4.9 s regression in the config comment (0.98 vs 0.91 s). Cold dev build at 2,044 was killed at a 3 GB cap, so edit times at 2,044 and 4,079 are unmeasured.
 
 Chain depth: 85 components 2 s, 90 14 s, 95 killed at 2 GB (docs agent). `for` form works but repeats bounds, gives a nonsense rustc suggestion when they're missing, and its body can only be a single node type.
+
+## Run-time gap, depth, allocator, edits, PGO (2026-11-02)
+
+Measure on a cpu with an idle SMT sibling (siblings differ by 12; cpu 10/22 was clean) and compare the min of alternating runs. A busy sibling adds about 17%; that was the "two cycle modes".
+
+Run-time gap, typical, `enum`, full profile: fusing a `Run` with the `Switch` on its output (`PG_RUNSW`) gives about 13 cycles (611.6 to 598.0 min), baseline 568.9. Remaining gap about 25 to 30 cycles, 5.5 ns (108.14 vs 102.60 ns) or 4.5 ns depending on the run. Ruled out: `Big`'s 42-pointer input array (inlining gives the same cycles), stored selector slots (typical has none), the frontend (fewer op-cache misses and stall slots than baseline), store-forward failures (21 vs 0.5 per packet, but inlining `Big` cuts them to 6.4 with no gain), any single load-stall site over 10 cycles. Cause not found.
+
+PGO, trained on a different seed: framework 108.14 to 103.84 ns, baseline 102.60 to 98.90; small -4.8%, tiny -6.6%. `scripts/pgo.sh`. Flags with no gain: see README.
+
+Chain depth is not exponential. Default `recursion_limit` 128: 88 layers 4 s; 89 builds with an overflow warning, 7 s, 0.83 GB; 90 and deeper fail after an error cascade (15 s, 2.1 GB at 90). `#![recursion_limit = "4096"]`: 500 layers 11.7 s, 2.1 GB.
+
+Allocator: keep `-1/-1`. `muzzy_decay_ms:-1` alone is fine up to 4,079 (32.3 s, 0.79M faults) but failed at `perps` (500 s timeout, 256M faults at 460 s; `-1/-1` 119 s, 5.28 GB, 1.68M faults). Release override `dirty_decay_ms:10000,muzzy_decay_ms:0`: typical 0.88 GB vs 1.34 GB, same time.
+
+`perps` release was killed at 12 GB and at 13 GB (183 s, compiling `app`), so the linear estimates of 11.7 GB and of 28 GB for `full` are low.
+
+Dev edits, medians of 3, `enum`. Check at 2,044 / 4,079: body 0.37 / 0.61 s, subscription 0.44 / 0.91 s, add 15.4 / 33.7 s, library 7.8 / 23.3 s. Build at 4,079: first 50.5 s, 7.5 GB; body 3.3 s; subscription 14.9 s (first run 40.2 s); library 19.8 s; add killed at 8 GB. Build at 2,044: first 24.2 s, 3.7 GB; add 20.8 s, 4.4 GB. The check library edit grows 3.1x; `memset` goes from about 1.0 s to about 6.9 s and accounts for about 78% of the excess (callers not recorded).
+
+rustc: page-fault regression bisected to rust-lang/rust#159115 (`c7d7da342`, parent 730k faults, it 2.43M on the reproducer). Not filed; draft is with the user. Reproducer generator: `target/probe-ex/rr/repro.py` (scratch).
