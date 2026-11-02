@@ -290,3 +290,12 @@ With incremental off, 4,079 to 12,412 is about linear.
 **Worktree cleanup (2026-11-02).** Finished worktrees were removed; branches were kept. Raw data under the `.claude/worktrees/agent-*/target/` paths named in these notes is gone, except `agent-ae262aab3ddfbb8d8` and `agent-adba54fa14ed56a76`. Small tools were saved to `handoff/tools/`: the `LD_PRELOAD` memset shim (`memset-shim/`), the self-profile aggregators (`profile-reader/`: `agg`, `keys`, `selfw`), the bound probes (`pv.sh`, `probes-scratch.diff`), and the `excl_group` differential and counters. Not saved: the reader's plain `src/main.rs`.
 
 **`perps` release memory (2026-11-02).** Stopped: it can't fit on this machine as used. RSS was 6.9 GB after analysis, 14.4 GB after `monomorphization_collector_graph_walk` (+7.5 GB, 49.7 s), about 15 GB at `find_cgu_reuse`, and 17.5 GB when killed machine-wide, about 2.5 minutes in. Next step when this is resumed: mono collector memory. Not measured: flags (fewer jobs, codegen units), run time at this size, and a clean incremental check at `perps`.
+
+## Syntax work (2026-11-02)
+
+Optimization paused by the user's agreement; the parked list is in `MEMORY`'s scale target and the sections above.
+
+- **Patterns (`b3f0804`), listeners (`35619c9`), unit selectors and `=>` removal (`1c00bbc`) are merged.** `.text` is byte-identical at typical for patterns and for `=>` removal. Listeners: +0.13% `.text` in enum mode, run time 108.3–108.8 → 108.8–109.5 ns (probably layout, unproven), release memory 1.31 → 1.46 GB.
+- **`On`, `KeyListener`, `Keyed` remain** only for `bench/gen_app.py --mode on`, the run-time comparison for the enum gap.
+- **Unknown limits:** one component can't read two variants of one listener (existing plan rule). `Data: E` on a data variant compiles and ignores the payload.
+- `handoff/README.md` and `handoff/event-spec.md` still show `=>` examples.
