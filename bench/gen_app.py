@@ -487,7 +487,7 @@ use crate::wire::*;
             lattr = "\n#[listener]" if REQ else ""
             limpl = f"impl dataflow_flat::Listener for {ws} {{ type Requests = crate::stats::Reqs; }}\n" if REQ else ""
             newbody = (f"{{ crate::stats::SUBS[{e}].store(i.requests.n, std::sync::atomic::Ordering::Relaxed); crate::stats::SUBKEYS[{e}].store(i.requests.digest, std::sync::atomic::Ordering::Relaxed); ({ws}, {evt}::default()) }}"
-                       if REQ else f"({ws}, {evt}::default())")
+                       if REQ else f"{{ ({ws}, {evt}::default()) }}")
             comp.append(f"""#[derive(ComponentSubscription)]
 #[subscribe({lsub(var)})]{lattr}
 pub struct {ws};
