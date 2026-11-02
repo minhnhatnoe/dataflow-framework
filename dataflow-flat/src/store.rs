@@ -136,11 +136,13 @@ pub trait Access<V, const P: usize, const S: usize> {
     fn get_mut(&mut self) -> &mut V;
 }
 impl<const Q: usize, const P: usize, V> Access<V, P, 0> for Slot<Q, V> {
-    #[inline]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn get(&self) -> &V {
         &self.0
     }
-    #[inline]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn get_mut(&mut self) -> &mut V {
         &mut self.0
     }
@@ -151,11 +153,13 @@ macro_rules! access_impl {
         where
             $s: SelP<P> + Access<V, P, { <$s as SelP<P>>::POS }>,
         {
-            #[inline]
+            #[cfg_attr(not(debug_assertions), inline(always))]
+            #[cfg_attr(debug_assertions, inline)]
             fn get(&self) -> &V {
                 Access::<V, P, { <$s as SelP<P>>::POS }>::get(&self.$k)
             }
-            #[inline]
+            #[cfg_attr(not(debug_assertions), inline(always))]
+            #[cfg_attr(debug_assertions, inline)]
             fn get_mut(&mut self) -> &mut V {
                 Access::<V, P, { <$s as SelP<P>>::POS }>::get_mut(&mut self.$k)
             }
@@ -175,11 +179,13 @@ impl<V, const P: usize, T> AtPos<V, P> for T
 where
     T: Access<V, P, 0>,
 {
-    #[inline]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn at(&self) -> &V {
         Access::<V, P, 0>::get(self)
     }
-    #[inline]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn at_mut(&mut self) -> &mut V {
         Access::<V, P, 0>::get_mut(self)
     }
@@ -256,11 +262,13 @@ where
     FieldIdx<LO, HI, P>: FieldSel,
     <R as Fields<M, LO, HI>>::F: Field<V, P, <FieldIdx<LO, HI, P> as FieldSel>::Ix>,
 {
-    #[inline]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn get(&self) -> &V {
         Field::<V, P, <FieldIdx<LO, HI, P> as FieldSel>::Ix>::get(&self.0)
     }
-    #[inline]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn get_mut(&mut self) -> &mut V {
         Field::<V, P, <FieldIdx<LO, HI, P> as FieldSel>::Ix>::get_mut(&mut self.0)
     }
@@ -280,11 +288,13 @@ macro_rules! field_impl {
         where
             $s: Access<V, P, 0>,
         {
-            #[inline]
+            #[cfg_attr(not(debug_assertions), inline(always))]
+            #[cfg_attr(debug_assertions, inline)]
             fn get(&self) -> &V {
                 Access::<V, P, 0>::get(&self.$k)
             }
-            #[inline]
+            #[cfg_attr(not(debug_assertions), inline(always))]
+            #[cfg_attr(debug_assertions, inline)]
             fn get_mut(&mut self) -> &mut V {
                 Access::<V, P, 0>::get_mut(&mut self.$k)
             }

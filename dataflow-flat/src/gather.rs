@@ -62,11 +62,13 @@ impl<N: Node<Kind = RootKind>, A: Layout> SourceKind<N, A> for RootKind
 where
     A::Root: Is<N::Output>,
 {
-    #[inline]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn fetch<'a>(root: &'a A::Root, _: &'a A::Outs) -> &'a N::Output {
         root.conv()
     }
-    #[inline]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn seed<'a>(_: &'a A::OutsOpt) {}
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
@@ -80,11 +82,13 @@ where
     A::Outs: AtPos<N::Output, { PosOf::<A, N>::P }>,
     A::OutsOpt: AtPos<Option<N::Output>, { PosOf::<A, N>::P }>,
 {
-    #[inline]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn fetch<'a>(_: &'a A::Root, outs: &'a A::Outs) -> &'a N::Output {
         <A::Outs as AtPos<N::Output, { PosOf::<A, N>::P }>>::at(outs)
     }
-    #[inline]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn seed<'a>(outs: &'a A::OutsOpt) -> &'a N::Output {
         <A::OutsOpt as AtPos<Option<N::Output>, { PosOf::<A, N>::P }>>::at(outs)
             .as_ref()
@@ -115,11 +119,13 @@ impl<A: Layout, N: Node> Source<A> for N
 where
     N::Kind: SourceKind<N, A>,
 {
-    #[inline]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn fetch<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a N::Output {
         <N::Kind as SourceKind<N, A>>::fetch(root, outs)
     }
-    #[inline]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn seed<'a>(outs: &'a A::OutsOpt) -> crate::node::InitOf<'a, N> {
         <N::Kind as SourceKind<N, A>>::seed(outs)
     }
@@ -170,7 +176,8 @@ pub trait GatherInit<A: Layout, const P: usize>: DepList {
 macro_rules! gather_init_leaf {
     ([$($E:ident $C:ident $I:ident)*]) => {
         impl<A: Layout, const P: usize, $($E: Source<A>, $C: ChainSeed<$E, A, P, $I>, const $I: usize,)*> GatherInit<A, P> for ($(Sub<$E, $C, $I>,)*) {
-            #[inline]
+            #[cfg_attr(not(debug_assertions), inline(always))]
+            #[cfg_attr(debug_assertions, inline)]
             #[allow(unused_variables)]
             fn gather<'a>(outs: &'a A::OutsOpt) -> Self::Inits<'a> {
                 ($(<$C as ChainSeed<$E, A, P, $I>>::seed(outs),)*)
@@ -182,7 +189,8 @@ dataflow_macros::leaf_shapes!(gather_init_leaf);
 macro_rules! gather_init_inner {
     ([$($K:ident)*]) => {
         impl<A: Layout, const P: usize, $($K: GatherInit<A, P>,)*> GatherInit<A, P> for ($($K,)*) {
-            #[inline]
+            #[cfg_attr(not(debug_assertions), inline(always))]
+            #[cfg_attr(debug_assertions, inline)]
             fn gather<'a>(outs: &'a A::OutsOpt) -> Self::Inits<'a> {
                 ($(<$K as GatherInit<A, P>>::gather(outs),)*)
             }
@@ -200,7 +208,8 @@ pub trait ChainSeed<N: Node, A: Layout, const P: usize, const I: usize>: SelectC
     fn seed<'a>(outs: &'a A::OutsOpt) -> <Self as SelectChain<N::Output>>::Init<'a, N>;
 }
 impl<N: Source<A>, A: Layout, const P: usize, const I: usize> ChainSeed<N, A, P, I> for () {
-    #[inline]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn seed<'a>(outs: &'a A::OutsOpt) -> crate::node::InitOf<'a, N> {
         <N as Source<A>>::seed(outs)
     }
@@ -210,7 +219,8 @@ where
     SlotAt<A, P, I>: ModeTy,
     (S, T): SeedVia<N, A, <SlotAt<A, P, I> as ModeTy>::Mode, { SlotAt::<A, P, I>::POS }>,
 {
-    #[inline]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn seed<'a>(outs: &'a A::OutsOpt) -> <Self as SelectChain<N::Output>>::Init<'a, N> {
         <(S, T) as SeedVia<N, A, <SlotAt<A, P, I> as ModeTy>::Mode, { SlotAt::<A, P, I>::POS }>>::seed_via(outs)
     }
@@ -256,7 +266,8 @@ pub trait SeedVia<N: Node, A: Layout, Mode, const POS: usize>: SelectChain<N::Ou
     fn seed_via<'a>(outs: &'a A::OutsOpt) -> <Self as SelectChain<N::Output>>::Init<'a, N>;
 }
 impl<N: Node, A: Layout, S: Select<N::Output>, T: SelectChain<S::Out>, const POS: usize> SeedVia<N, A, Direct, POS> for (S, T) {
-    #[inline]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn seed_via<'a>(_: &'a A::OutsOpt) -> SelInit<'a, T::Out> {
         SelInit::empty()
     }
@@ -265,7 +276,8 @@ impl<N: Node, A: Layout, S: Select<N::Output>, T: SelectChain<S::Out>, const POS
 where
     A::OutsOpt: AtPos<Option<T::Out>, POS>,
 {
-    #[inline]
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
     fn seed_via<'a>(outs: &'a A::OutsOpt) -> SelInit<'a, T::Out> {
         SelInit::slot(
             <A::OutsOpt as AtPos<Option<T::Out>, POS>>::at(outs)
