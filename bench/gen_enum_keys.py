@@ -27,6 +27,7 @@ FN = f"Frame{n}"
 MOD = f"frame{n}"
 
 COMMON = f"""#![allow(dead_code, unused_imports, non_snake_case)]
+{"#![allow(long_running_const_eval)]" if n >= 1000 else ""}
 use std::hint::black_box;
 use std::sync::atomic::{{AtomicU64, Ordering}};
 use std::time::Instant;

@@ -951,9 +951,7 @@ fn expand_demux(input: DeriveInput) -> syn::Result<TokenStream2> {
                 }
                 #[inline(always)]
                 fn key_of(__x: &#name) -> u32 {
-                    match __x {
-                        #(#key_arms,)*
-                    }
+                    #name::__demux_key(__x)
                 }
             }
         });
@@ -963,6 +961,15 @@ fn expand_demux(input: DeriveInput) -> syn::Result<TokenStream2> {
     Ok(quote! {
         #vis mod #module {
             #(#structs)*
+        }
+        impl #name {
+            #[doc(hidden)]
+            #[inline(always)]
+            fn __demux_key(__x: &#name) -> u32 {
+                match __x {
+                    #(#key_arms,)*
+                }
+            }
         }
         #(#items)*
     })
