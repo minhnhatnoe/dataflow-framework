@@ -23,8 +23,9 @@
 //! exclusive (the variants of one enum), unless one is a guard.
 
 use std::any::TypeId;
+use std::marker::PhantomData;
 
-use crate::node::Vertex;
+use crate::node::{Edge, Vertex};
 use crate::plan::Plan;
 
 /// The `KEY` of a guard: it is exclusive with nothing.
@@ -205,18 +206,18 @@ pub mod probe {
             Probe(PhantomData)
         }
     }
-    pub trait ViaInitial<C: SelectedChain<In>, In: 'static> {
+    pub trait ViaInitial<C: SelectChain<In>, In: 'static> {
         fn fill<'a, N: Vertex<Stored = In>>(
             &self,
-            raw: &C::Init<'a, N>,
+            raw: C::Init<'a, N>,
             component: &'static str,
             input: &'static str,
         ) -> C::Init<'a, N>;
     }
-    impl<C: SelectedChain<In> + ChainInitial<In>, In: 'static> ViaInitial<C, In> for Probe<C, In> {
+    impl<C: SelectedChain<In> + ChainInitial<In> + ByValueChain, In: 'static> ViaInitial<C, In> for Probe<C, In> {
         #[inline]
-        fn fill<'a, N: Vertex<Stored = In>>(&self, raw: &C::Init<'a, N>, _: &'static str, _: &'static str) -> C::Init<'a, N> {
-            let s = C::view::<N>(raw);
+        fn fill<'a, N: Vertex<Stored = In>>(&self, raw: C::Init<'a, N>, _: &'static str, _: &'static str) -> C::Init<'a, N> {
+            let s = C::view::<N>(&raw);
             C::wrap::<N>(match s.0 {
                 SelInner::Empty => SelInit(SelInner::Owned(C::initial())),
                 SelInner::Slot(x) => SelInit(SelInner::Slot(x)),
@@ -224,18 +225,18 @@ pub mod probe {
             })
         }
     }
-    pub trait ViaNothing<C: SelectedChain<In>, In: 'static> {
+    pub trait ViaNothing<C: SelectChain<In>, In: 'static> {
         fn fill<'a, N: Vertex<Stored = In>>(
             &self,
-            raw: &C::Init<'a, N>,
+            raw: C::Init<'a, N>,
             component: &'static str,
             input: &'static str,
         ) -> C::Init<'a, N>;
     }
     impl<C: SelectedChain<In>, In: 'static> ViaNothing<C, In> for &Probe<C, In> {
         #[inline]
-        fn fill<'a, N: Vertex<Stored = In>>(&self, raw: &C::Init<'a, N>, component: &'static str, input: &'static str) -> C::Init<'a, N> {
-            let s = C::view::<N>(raw);
+        fn fill<'a, N: Vertex<Stored = In>>(&self, raw: C::Init<'a, N>, component: &'static str, input: &'static str) -> C::Init<'a, N> {
+            let s = C::view::<N>(&raw);
             C::wrap::<N>(match s.0 {
                 SelInner::Empty => SelInit(SelInner::Missing {
                     component,
@@ -247,6 +248,24 @@ pub mod probe {
             })
         }
     }
+    /// A selected entry of a handle component: `new` gets `Option` of the selected view, nothing to
+    /// fill in (there is no initial value and no stored slot). The raw value is kept as it is.
+    impl<E: Vertex, C: ViewChain<E>> ViaInitial<ViewC<E, C>, E::Stored> for Probe<ViewC<E, C>, E::Stored> {
+        #[inline(always)]
+        fn fill<'a, N: Vertex<Stored = E::Stored>>(
+            &self,
+            raw: <ViewC<E, C> as SelectChain<E::Stored>>::Init<'a, N>,
+            _: &'static str,
+            _: &'static str,
+        ) -> <ViewC<E, C> as SelectChain<E::Stored>>::Init<'a, N> {
+            raw
+        }
+    }
+    /// A by-value selector chain (a sealed marker without parameters, so that the impl above and
+    /// the one for a handle source's chain are provably disjoint).
+    pub trait ByValueChain {}
+    impl<S, T> ByValueChain for (S, T) {}
+
     /// A non-empty chain, whose `Init` is a [`SelInit`] (the compiler cannot
     /// always see that through the associated type in generic code).
     pub trait SelectedChain<In: 'static>: SelectChain<In> {
@@ -395,6 +414,212 @@ const impl<In: 'static, S: Select<In>, T: [const] ChainWalk<S::Out>> ChainWalk<I
     }
 }
 
+// ---------------------------------------------------------------------------
+// Selectors on views (the source is a `#[handle]` component)
+// ---------------------------------------------------------------------------
+
+/// A pattern test on a *view*: a value of type `In` (a handle component's
+/// [`View<'a>`](crate::HandleComponent::View), or the part a selector before this one in the
+/// chain matched), taken by value. `In` includes its lifetime, so the selected part can borrow
+/// from the same place: `impl<'a> SelectView<FrameView<'a>> for frame_view::Book { type Out = &'a Book; .. }`.
+/// `#[derive(Demux)]` on an enum with a lifetime parameter (`enum FrameView<'a> { Book(&'a Book), .. }`)
+/// writes these impls; `option::Some` and the other library selectors have one for the views that
+/// are `Option`, `Result`.
+///
+/// A view selector is the view-side twin of [`Select`]: the same decision (`KEY`, `key_of`), but the
+/// input is the view, not a reference to a stored output, and the selected part is a view too (a
+/// reference, a copy, a struct that borrows), never stored: a subscriber reads it as it is
+/// computed, each time it runs.
+#[diagnostic::on_unimplemented(
+    message = "the selector `{Self}` cannot be applied to the view `{In}`",
+    label = "`{Self}` must implement `SelectView<{In}>` to select from this view",
+    note = "a selector on a `#[handle]` component selects from its `View<'a>`: put `#[derive(Demux)]` on the view's enum (`enum V<'a> {{ A(&'a X), .. }}`), or implement `SelectView<V<'a>>` by hand; a by-value selector (`Select<T>`) cannot be applied to a view"
+)]
+pub trait SelectView<In>: 'static {
+    /// The matched part (may borrow: it has the lifetime of `In`).
+    type Out;
+    /// As [`Select::KEY`].
+    const KEY: u32;
+    /// `Some(part)` if the pattern matches.
+    fn select(x: In) -> Option<Self::Out>;
+    /// As [`Select::key_of`].
+    fn key_of(x: &In) -> u32;
+}
+
+/// A chain of view selectors `(S1, (S2, ... ()))` applied to a view of type `In`.
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "the selector chain `{Self}` cannot be applied to the view `{In}`",
+    label = "each selector must implement `SelectView<_>` for the view (or the part) before it",
+    note = "a selector on a `#[handle]` component selects from its `View<'a>`: put `#[derive(Demux)]` on the view's enum (`enum V<'a> {{ A(&'a X), .. }}`), or implement `SelectView<V<'a>>` by hand; `Some`/`Ok`/.. work when the view is an `Option`/`Result`; a by-value selector (`Select<T>` for a stored output) cannot be applied to a view"
+)]
+pub trait ViewChainOn<In>: 'static {
+    /// The part at the end of the chain.
+    type Out;
+    /// Does the chain match?
+    fn matches(x: In) -> bool;
+    /// The part at the end; panics if the chain does not match (the plan has checked that it does
+    /// whenever this is called).
+    fn get(x: In) -> Self::Out;
+    /// The part at the end if the chain matches.
+    fn try_get(x: In) -> Option<Self::Out>;
+    /// The key of the alternative at depth `J` (as [`ChainKey`]).
+    fn key(x: In, j: usize) -> u32;
+}
+impl<In> ViewChainOn<In> for () {
+    type Out = In;
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn matches(_: In) -> bool {
+        true
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn get(x: In) -> In {
+        x
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn try_get(x: In) -> Option<In> {
+        Some(x)
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn key(_: In, _: usize) -> u32 {
+        GUARD
+    }
+}
+impl<In, S: SelectView<In>, T: ViewChainOn<S::Out>> ViewChainOn<In> for (S, T) {
+    type Out = T::Out;
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn matches(x: In) -> bool {
+        match S::select(x) {
+            Some(y) => T::matches(y),
+            None => false,
+        }
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn get(x: In) -> T::Out {
+        match S::select(x) {
+            Some(y) => T::get(y),
+            None => selector_mismatch(),
+        }
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn try_get(x: In) -> Option<T::Out> {
+        match S::select(x) {
+            Some(y) => T::try_get(y),
+            None => None,
+        }
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn key(x: In, j: usize) -> u32 {
+        if j == 0 {
+            S::key_of(&x)
+        } else {
+            match S::select(x) {
+                Some(y) => T::key(y, j - 1),
+                None => GUARD,
+            }
+        }
+    }
+}
+
+/// A chain of view selectors applied to the view of the node `E` (`E::Read<'a>`, for every `'a`).
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "the selector chain `{Self}` cannot be applied to the view of `{E}`",
+    label = "`{E}` is a `#[handle]` component: its selectors must implement `SelectView<{E}'s View>`",
+    note = "use selectors made for the view: `#[derive(Demux)]` on the view's enum (with a lifetime parameter), `Some`/`Ok`/.. when the view is an `Option`/`Result`, or a hand-written `SelectView`; a `Select<T>` for a stored output (a by-value selector) does not apply to a view"
+)]
+pub trait ViewChain<E: Vertex>: 'static {
+    /// The part at the end of the chain, as a subscriber's field.
+    type Out<'a>;
+    fn matches<'a>(x: <E as Edge>::Read<'a>) -> bool;
+    fn get<'a>(x: <E as Edge>::Read<'a>) -> Self::Out<'a>;
+    fn try_get<'a>(x: <E as Edge>::Read<'a>) -> Option<Self::Out<'a>>;
+    fn key<'a, const J: usize>(x: <E as Edge>::Read<'a>) -> u32;
+}
+impl<E: Vertex, C> ViewChain<E> for C
+where
+    for<'a> C: ViewChainOn<<E as Edge>::Read<'a>>,
+{
+    type Out<'a> = <C as ViewChainOn<<E as Edge>::Read<'a>>>::Out;
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn matches<'a>(x: <E as Edge>::Read<'a>) -> bool {
+        <C as ViewChainOn<<E as Edge>::Read<'a>>>::matches(x)
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn get<'a>(x: <E as Edge>::Read<'a>) -> Self::Out<'a> {
+        <C as ViewChainOn<<E as Edge>::Read<'a>>>::get(x)
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn try_get<'a>(x: <E as Edge>::Read<'a>) -> Option<Self::Out<'a>> {
+        <C as ViewChainOn<<E as Edge>::Read<'a>>>::try_get(x)
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn key<'a, const J: usize>(x: <E as Edge>::Read<'a>) -> u32 {
+        <C as ViewChainOn<<E as Edge>::Read<'a>>>::key(x, J)
+    }
+}
+
+/// The selector chain `C` as the plan and the drivers see it when the source `E` is a `#[handle]`
+/// component (`NodeKind::Chain`). It is a `SelectChain<E::Stored>` so that everything that
+/// carries a chain (the subscription tree, the derive's types) is unchanged, but its `Read` is the
+/// selected view and its `Init` is `Option` of it; the operations that need the source's state
+/// (matching, the switch key, reading) are the `ChainTest`, `ChainKeyAt`, `ChainReadCx` and
+/// `ChainSeed` impls in `gather.rs`. A selected value from a handle is never stored (the plan
+/// rejects an entry that would need it).
+#[doc(hidden)]
+pub struct ViewC<E, C>(PhantomData<fn() -> (E, C)>);
+impl<E: Vertex, C: ViewChain<E>> SelectChain<E::Stored> for ViewC<E, C> {
+    type Out = ();
+    type Init<'a, N: Vertex<Stored = E::Stored>> = Option<<C as ViewChain<E>>::Out<'a>>;
+    type Read<'a, N: Vertex> = <C as ViewChain<E>>::Out<'a>;
+    const PLAIN: bool = false;
+    fn matches(_: &E::Stored) -> bool {
+        view_without_state()
+    }
+    fn get(_: &E::Stored) -> &() {
+        view_without_state()
+    }
+}
+#[cold]
+#[inline(never)]
+fn view_without_state() -> ! {
+    panic!("a selector on a handle component was applied without its state (this is a bug in dataflow-flat)")
+}
+
+/// The plan's walk of a chain of view selectors on a view of type `In`: as [`ChainWalk`].
+#[doc(hidden)]
+pub const trait ViewWalk<In> {
+    fn walk(plan: &mut Plan, parent: u32, dn: u32) -> u32;
+}
+const impl<In> ViewWalk<In> for () {
+    fn walk(_: &mut Plan, _: u32, dn: u32) -> u32 {
+        dn
+    }
+}
+const impl<In, S: SelectView<In>, T: [const] ViewWalk<S::Out>> ViewWalk<In> for (S, T) {
+    fn walk(plan: &mut Plan, parent: u32, dn: u32) -> u32 {
+        let d = plan.decision(parent, dn, TypeId::of::<S>(), <S as SelectView<In>>::KEY);
+        T::walk(plan, parent, d)
+    }
+}
+const impl<E: Vertex, C: [const] ViewWalk<<E as Edge>::Read<'static>>> ChainWalk<E::Stored> for ViewC<E, C> {
+    fn walk(plan: &mut Plan, parent: u32, dn: u32) -> u32 {
+        C::walk(plan, parent, dn)
+    }
+}
+
 /// Built-in selectors for `Option`.
 pub mod option {
     use super::Select;
@@ -411,6 +636,46 @@ pub mod option {
         #[cfg_attr(debug_assertions, inline)]
         fn select(x: &Option<T>) -> Option<&T> {
             x.as_ref()
+        }
+        #[cfg_attr(not(debug_assertions), inline(always))]
+        #[cfg_attr(debug_assertions, inline)]
+        fn key_of(x: &Option<T>) -> u32 {
+            if x.is_some() {
+                0
+            } else {
+                1
+            }
+        }
+    }
+    impl<T> super::SelectView<Option<T>> for Some {
+        type Out = T;
+        const KEY: u32 = 0;
+        #[cfg_attr(not(debug_assertions), inline(always))]
+        #[cfg_attr(debug_assertions, inline)]
+        fn select(x: Option<T>) -> Option<T> {
+            x
+        }
+        #[cfg_attr(not(debug_assertions), inline(always))]
+        #[cfg_attr(debug_assertions, inline)]
+        fn key_of(x: &Option<T>) -> u32 {
+            if x.is_some() {
+                0
+            } else {
+                1
+            }
+        }
+    }
+    impl<T> super::SelectView<Option<T>> for None {
+        type Out = ();
+        const KEY: u32 = 1;
+        #[cfg_attr(not(debug_assertions), inline(always))]
+        #[cfg_attr(debug_assertions, inline)]
+        fn select(x: Option<T>) -> Option<()> {
+            if x.is_none() {
+                Option::Some(())
+            } else {
+                Option::None
+            }
         }
         #[cfg_attr(not(debug_assertions), inline(always))]
         #[cfg_attr(debug_assertions, inline)]
@@ -470,6 +735,42 @@ pub mod result {
         #[cfg_attr(debug_assertions, inline)]
         fn select(x: &Result<T, E>) -> Option<&T> {
             x.as_ref().ok()
+        }
+        #[cfg_attr(not(debug_assertions), inline(always))]
+        #[cfg_attr(debug_assertions, inline)]
+        fn key_of(x: &Result<T, E>) -> u32 {
+            if x.is_ok() {
+                0
+            } else {
+                1
+            }
+        }
+    }
+    impl<T, E> super::SelectView<Result<T, E>> for Ok {
+        type Out = T;
+        const KEY: u32 = 0;
+        #[cfg_attr(not(debug_assertions), inline(always))]
+        #[cfg_attr(debug_assertions, inline)]
+        fn select(x: Result<T, E>) -> Option<T> {
+            x.ok()
+        }
+        #[cfg_attr(not(debug_assertions), inline(always))]
+        #[cfg_attr(debug_assertions, inline)]
+        fn key_of(x: &Result<T, E>) -> u32 {
+            if x.is_ok() {
+                0
+            } else {
+                1
+            }
+        }
+    }
+    impl<T, E> super::SelectView<Result<T, E>> for Err {
+        type Out = E;
+        const KEY: u32 = 1;
+        #[cfg_attr(not(debug_assertions), inline(always))]
+        #[cfg_attr(debug_assertions, inline)]
+        fn select(x: Result<T, E>) -> Option<E> {
+            x.err()
         }
         #[cfg_attr(not(debug_assertions), inline(always))]
         #[cfg_attr(debug_assertions, inline)]

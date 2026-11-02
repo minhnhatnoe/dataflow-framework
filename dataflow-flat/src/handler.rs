@@ -49,7 +49,7 @@ use std::marker::PhantomData;
 use crate::component::ComponentSubscription;
 use crate::drive::{CondAt, Ch, Drive, EntryOf, ExecK, FiredOf, FiredOps, HRunK, Pn, PnC, PushCtx, PushPh, Rg, RgCl, SlotWriteBy, SrcSlots};
 use crate::flat::{EntryPos, Inner, Leaf, NthT, PickEdge, PosSelect};
-use crate::gather::{ChainRead, ChainReadCx, ChainSeed, CtxOf, GatherCx, GatherIn, Layout, Ready, Source};
+use crate::gather::{ChainKeyAt, ChainRead, ChainReadCx, ChainSeed, ChainTest, ChainTestCx, CtxOf, GatherCx, GatherIn, Layout, Ready, Source};
 use crate::component::Component;
 use crate::node::{Comp, Edge, Vertex};
 use crate::split::SplitAt;
@@ -173,6 +173,31 @@ impl<E: Source<A>, A: Layout, Em: 'static, C: SelectChain<E::Stored>, const P: u
     }
 }
 
+impl<E: Source<A>, A: Layout, Em: 'static, C: ChainTest<E, A>> ChainTest<E, A> for Hd<Em, C> {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn test(root: &A::Root, states: &A::States, outs: &A::Outs) -> bool {
+        C::test(root, states, outs)
+    }
+}
+impl<E: Source<A>, A: Layout, Em: 'static, C: ChainTestCx<E, A, P>, const P: usize> ChainTestCx<E, A, P> for Hd<Em, C> {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn test_cx<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, cx: &'c CtxOf<'x, A, P>) -> bool
+    where
+        A::States: SplitAt<P>,
+    {
+        C::test_cx(root, outs, cx)
+    }
+}
+impl<E: Source<A>, A: Layout, Em: 'static, C: ChainKeyAt<E, A, J>, const J: usize> ChainKeyAt<E, A, J> for Hd<Em, C> {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn key_at(root: &A::Root, states: &A::States, outs: &A::Outs) -> u32 {
+        C::key_at(root, states, outs)
+    }
+}
+
 const impl<In, Em, C: [const] ChainWalk<In>> ChainWalk<In> for Hd<Em, C> {
     fn walk(plan: &mut crate::plan::Plan, parent: u32, dn: u32) -> u32 {
         plan.mark_handled();
@@ -261,6 +286,20 @@ where
         A::States: SplitAt<P>,
     {
         <(S, T) as ChainReadCx<E, A, P, I>>::read_cx(root, outs, cx)
+    }
+}
+impl<E: Source<A>, A: Layout, C, const P: usize, const I: usize> EdgeRdCx<E, A, P, I> for crate::select::ViewC<E, C>
+where
+    crate::select::ViewC<E, C>: ChainReadCx<E, A, P, I>,
+{
+    type V<'a> = <crate::select::ViewC<E, C> as SelectChain<E::Stored>>::Read<'a, E>;
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn read_vx<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, cx: &'c CtxOf<'x, A, P>) -> Self::V<'c>
+    where
+        A::States: SplitAt<P>,
+    {
+        <crate::select::ViewC<E, C> as ChainReadCx<E, A, P, I>>::read_cx(root, outs, cx)
     }
 }
 impl<E: Source<A>, A: Layout, Em: 'static, C, const P: usize, const I: usize> EdgeRdCx<E, A, P, I> for Hd<Em, C>
@@ -355,7 +394,7 @@ where
     A: HookOf<PushPh<A>, P, I>,
     <A as HookOf<PushPh<A>, P, I>>::X: HookEm,
     EOf<A, P, I>: Source<A>,
-    COf<A, P, I>: EdgeRdCx<EOf<A, P, I>, A, P, I>,
+    COf<A, P, I>: EdgeRdCx<EOf<A, P, I>, A, P, I> + ChainTestCx<EOf<A, P, I>, A, P>,
     H: UpdateHandler<EmOf<A, P, I>>,
     for<'a> EmOf<A, P, I>: HandledEdge<Arg<'a> = <COf<A, P, I> as EdgeRdCx<EOf<A, P, I>, A, P, I>>::V<'a>>,
     <H as ComponentSubscription>::Deps: GatherCx<A, P>,
@@ -366,8 +405,7 @@ where
     fn item(root: &A::Root, outs: &A::Outs, fired: &FiredOf<A>, me: &mut H, cx: &'c CtxOf<'x, A, P>) {
         let mode = M;
         if (mode & 1 == 0 || <EOf<A, P, I> as Source<A>>::fires(fired))
-            && (mode & 2 == 0
-                || <COf<A, P, I> as SelectChain<<EOf<A, P, I> as Vertex>::Stored>>::matches(<EOf<A, P, I> as Source<A>>::fetch(root, outs)))
+            && (mode & 2 == 0 || <COf<A, P, I> as ChainTestCx<EOf<A, P, I>, A, P>>::test_cx(root, outs, cx))
         {
             let inputs = <<H as ComponentSubscription>::Deps as GatherCx<A, P>>::gather(root, outs, cx);
             <H as UpdateHandler<EmOf<A, P, I>>>::on_update(
@@ -521,7 +559,7 @@ where
     SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
 {
     if A::PLAN.hr_guarded(N)
-        && !<<H as ComponentSubscription>::Deps as Ready<A>>::ready(ctx.root, &*ctx.outs, &ctx.fired)
+        && !<<H as ComponentSubscription>::Deps as Ready<A>>::ready(ctx.root, &*ctx.states, &*ctx.outs, &ctx.fired)
     {
         return;
     }

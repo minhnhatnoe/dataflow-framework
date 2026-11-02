@@ -40,7 +40,7 @@ use std::any::{type_name, TypeId};
 
 use crate::component::Sub;
 use crate::identity::{Hashed, BLANK};
-use crate::node::{Vertex, KIND_ANCHOR, KIND_COMPONENT, KIND_ROOT};
+use crate::node::{NodeKind, Vertex, KIND_ANCHOR, KIND_COMPONENT, KIND_ROOT};
 use crate::handler::Hook;
 use crate::select::ChainWalk;
 use crate::table::Table;
@@ -135,6 +135,23 @@ const MSG: usize = 512;
 
 /// Assemble the parts into a byte buffer (`panic!` can't format in a `const
 /// fn`). Returns the buffer and the length used.
+/// The `k`-th comma-separated name of `names` (empty if there is none).
+const fn nth_name(names: &str, k: usize) -> &[u8] {
+    let b = names.as_bytes();
+    let (mut start, mut seen, mut i) = (0usize, 0usize, 0usize);
+    while i <= b.len() {
+        if i == b.len() || b[i] == b',' {
+            if seen == k {
+                return b.split_at(i).0.split_at(start).1;
+            }
+            seen += 1;
+            start = i + 1;
+        }
+        i += 1;
+    }
+    &[]
+}
+
 const fn message(parts: &[&[u8]]) -> ([u8; MSG], usize) {
     let mut buf = [0u8; MSG];
     let mut n = 0;
@@ -192,6 +209,7 @@ const fn enter<N: Vertex, C: [const] ChainWalk<N::Stored>, X: Hook>(plan: &mut P
         plan.table.put(slot, i);
         plan.ids[i] = id;
         plan.kind[i] = N::KIND;
+        plan.hnd[i] = <N::Kind as NodeKind>::IS_HANDLE;
         plan.first_parent[i] = parent;
         plan.first_pos[i] = pos;
         plan.len = i + 1;
@@ -256,7 +274,7 @@ const fn leave<N: Vertex>(plan: &mut Plan, i: u32) {
         plan.root_idx = i as u32;
         plan.cond_root(i);
     } else if N::KIND == KIND_COMPONENT {
-        plan.cond_comp(i, type_name::<N>());
+        plan.cond_comp(i, type_name::<N>(), N::INPUTS);
     }
     // The node that entered this one now has a reachable subscription.
     let fp = plan.first_parent[i];
@@ -428,6 +446,8 @@ pub struct Plan {
     handler: [bool; MAX_COMPONENTS],
     /// Does the node subscribe to a handle component?
     view: [bool; MAX_COMPONENTS],
+    /// Is the node a handle component (its subscribers read a view of its state)?
+    hnd: [bool; MAX_COMPONENTS],
     edge_h: [bool; MAX_EDGES],
     /// Is edge `e` handled (its owner's `UpdateHandler` impl for it is `ACTIVE`)?
     edge_a: [bool; MAX_EDGES],
@@ -587,6 +607,7 @@ impl Plan {
             sc_used: [false; MAX_DECISIONS],
             handler: [false; MAX_COMPONENTS],
             view: [false; MAX_COMPONENTS],
+            hnd: [false; MAX_COMPONENTS],
             edge_h: [false; MAX_EDGES],
             edge_a: [false; MAX_EDGES],
             edge_pos: [0; MAX_EDGES],
@@ -1115,7 +1136,7 @@ impl Plan {
 
     /// Compute the condition of component `i` from its edges, check rule 4
     /// (exclusive joins), and find its stored edges (rule 5, see `edge_need`).
-    const fn cond_comp(&mut self, i: usize, name: &str) {
+    const fn cond_comp(&mut self, i: usize, name: &str, inputs: &str) {
         if self.failed {
             return;
         }
@@ -1177,6 +1198,17 @@ impl Plan {
                         k += 1;
                     }
                     if !ok {
+                        if self.hnd[u] {
+                            // A selected view is not stored: it would have to be kept across steps.
+                            let nm = nth_name(inputs, self.edge_pos[e as usize] as usize);
+                            self.fail_msg(message(&[
+                                name.as_bytes(),
+                                b": the input `",
+                                nm,
+                                b"` selects from a handle component and is read in steps where its selectors do not match, so its value would have to be stored, and a view is not stored. Make the source a by-value component (`Component`), or move this subscriber below a component that keeps the value, or make the subscriber's other conditions imply the match",
+                            ]));
+                            return;
+                        }
                         self.edge_need[e as usize] = true;
                         let du = d as usize;
                         self.dn_need[du] = true;
@@ -1786,7 +1818,7 @@ impl Plan {
             let n = self.emit_switch(k, j, x, prev);
             let fuse = prev == NONE && self.ib_len > mark && !self.failed && {
                 let last = self.ib[self.ib_len - 1] as usize;
-                self.pg_kind[last] == PG_RUN && self.by_cpos[self.pg_a[last] as usize] == x
+                self.pg_kind[last] == PG_RUN && self.by_cpos[self.pg_a[last] as usize] == x && !self.hnd[x as usize]
             };
             if fuse {
                 let last = self.ib[self.ib_len - 1] as usize;

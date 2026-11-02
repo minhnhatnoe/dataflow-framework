@@ -25,7 +25,7 @@ use std::marker::PhantomData;
 use crate::build::ConstructPass;
 use crate::component::{Component, ComponentSubscription, DepList};
 use crate::flat::{bound, class, ClassOf, EntryPos, Inner, Leaf, Loc, NthS, NthT, PickEdge, PosSelect, Whole};
-use crate::gather::{GatherCx, GatherIn, GatherInit, Layout, Ready, Source};
+use crate::gather::{ChainKeyAt, GatherCx, GatherIn, GatherInit, Layout, Ready, Source};
 use crate::split::SplitAt;
 use crate::select::{ChainInitial, ChainKey, Keep, SelectChain};
 use crate::node::{Comp, SlotNode, Vertex};
@@ -444,7 +444,7 @@ where
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
     fn run_if(ctx: &mut PushCtx<'_, A>) {
-        if <<<A as NthT<P>>::T as ComponentSubscription>::Deps as Ready<A>>::ready(ctx.root, &*ctx.outs, &ctx.fired) {
+        if <<<A as NthT<P>>::T as ComponentSubscription>::Deps as Ready<A>>::ready(ctx.root, &*ctx.states, &*ctx.outs, &ctx.fired) {
             if WIDE_RUN::<A, P>() {
                 run_wide::<A, P>(ctx);
             } else {
@@ -471,7 +471,7 @@ where
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
     fn run_if_view(ctx: &mut PushCtx<'_, A>) {
-        if <<<A as NthT<P>>::T as ComponentSubscription>::Deps as Ready<A>>::ready(ctx.root, &*ctx.outs, &ctx.fired) {
+        if <<<A as NthT<P>>::T as ComponentSubscription>::Deps as Ready<A>>::ready(ctx.root, &*ctx.states, &*ctx.outs, &ctx.fired) {
             if WIDE_RUN::<A, P>() {
                 run_wide_view::<A, P>(ctx);
             } else {
@@ -773,7 +773,7 @@ where
 /// The key the value at a switch has.
 #[doc(hidden)]
 pub trait SwitchKey<A: Layout, Ph> {
-    fn key(root: &A::Root, outs: &A::Outs) -> u32;
+    fn key(root: &A::Root, states: &A::States, outs: &A::Outs) -> u32;
 }
 #[doc(hidden)]
 pub trait SwInfo<A: Layout, Ph> {
@@ -791,14 +791,12 @@ impl<A: Layout, Ph, const N: usize> SwitchKey<A, Ph> for Pn<A, N>
 where
     Pn<A, N>: SwInfo<A, Ph>,
     <Pn<A, N> as SwInfo<A, Ph>>::E: Source<A>,
-    <Pn<A, N> as SwInfo<A, Ph>>::Ch: ChainKey<<<Pn<A, N> as SwInfo<A, Ph>>::E as Vertex>::Stored, { PnC::<A, N>::SJ }>,
+    <Pn<A, N> as SwInfo<A, Ph>>::Ch: ChainKeyAt<<Pn<A, N> as SwInfo<A, Ph>>::E, A, { PnC::<A, N>::SJ }>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn key(root: &A::Root, outs: &A::Outs) -> u32 {
-        <<Pn<A, N> as SwInfo<A, Ph>>::Ch as ChainKey<<<Pn<A, N> as SwInfo<A, Ph>>::E as Vertex>::Stored, { PnC::<A, N>::SJ }>>::key(
-            <<Pn<A, N> as SwInfo<A, Ph>>::E as Source<A>>::fetch(root, outs),
-        )
+    fn key(root: &A::Root, states: &A::States, outs: &A::Outs) -> u32 {
+        <<Pn<A, N> as SwInfo<A, Ph>>::Ch as ChainKeyAt<<Pn<A, N> as SwInfo<A, Ph>>::E, A, { PnC::<A, N>::SJ }>>::key_at(root, states, outs)
     }
 }
 
@@ -876,7 +874,7 @@ where
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
     fn exec_k(ctx: &mut PushCtx<'_, A>) {
-        let key = <Pn<A, N> as SwitchKey<A, Ph>>::key(ctx.root, &*ctx.outs);
+        let key = <Pn<A, N> as SwitchKey<A, Ph>>::key(ctx.root, &*ctx.states, &*ctx.outs);
         <NodeRg<A, N> as BstExec<A, Ph, <NodeRg<A, N> as RgCl>::Cl>>::bst(ctx, key);
     }
 }

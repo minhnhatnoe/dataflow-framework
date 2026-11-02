@@ -115,6 +115,12 @@ impl<In: 'static, R: 'static, S: SelReq<In, R>, T: ChainReq<S::Out, R>> ChainReq
     }
 }
 
+/// A selected view of a handle component requests nothing (a handle component is not a listener's
+/// source of requests: `#[handle]` and `#[listener]` don't combine).
+impl<E: Vertex, R: 'static, C: crate::select::ViewChain<E>> ChainReq<E::Stored, R> for crate::select::ViewC<E, C> {
+    fn collect(_: &mut ConstructPass, _: TypeId) {}
+}
+
 /// A handled edge requests what its chain does.
 impl<In: 'static, R: 'static, Em: 'static, C: ChainReq<In, R>> ChainReq<In, R> for crate::handler::Hd<Em, C> {
     fn collect(pass: &mut ConstructPass, listener: TypeId) {

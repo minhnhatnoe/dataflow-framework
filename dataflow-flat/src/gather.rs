@@ -16,7 +16,7 @@ use crate::drive::{FiredOf, FiredOps};
 use crate::identity::At;
 use crate::node::{CompKind, Edge, HandleKind, Is, NodeKind, RootKind, Vertex};
 use crate::plan::{Planned, NO_FLAG};
-use crate::select::{SelInit, Select, SelectChain};
+use crate::select::{ChainKey, SelInit, Select, SelectChain, ViewC, ViewChain};
 use crate::split::{SplitAt, StateAt};
 use crate::store::AtPos;
 
@@ -262,6 +262,16 @@ where
     }
 }
 
+/// `new` of the subscriber of a handle component through selectors gets the selected part of the
+/// view of the constructed parent (as of its first handle) if the chain matches it, else `None`.
+impl<N: crate::node::HandleView + Source<A>, A: Layout, C: ViewChain<N>, const P: usize, const I: usize> ChainSeed<N, A, P, I> for ViewC<N, C> {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn seed<'a>(states: &'a A::StatesOpt, outs: &'a A::OutsOpt) -> <Self as SelectChain<N::Stored>>::Init<'a, N> {
+        C::try_get(<N as Source<A>>::seed(states, outs))
+    }
+}
+
 /// How an entry with a selector chain reaches its value: directly through its
 /// source, or through a slot (see `SlotNode`). The plan decides, per entry.
 #[doc(hidden)]
@@ -488,6 +498,19 @@ where
     }
 }
 
+/// A selected entry whose source is a handle component: the chain applied to the view, which is
+/// read from the context like a plain handle entry. The selected part is never stored.
+impl<E: crate::node::HandleView + Source<A> + SourceCx<A, P>, A: Layout, C: ViewChain<E>, const P: usize, const I: usize> ChainReadCx<E, A, P, I> for ViewC<E, C> {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn read_cx<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, cx: &'c CtxOf<'x, A, P>) -> <Self as SelectChain<E::Stored>>::Read<'c, E>
+    where
+        A::States: SplitAt<P>,
+    {
+        C::get(<E as SourceCx<A, P>>::read_cx(root, outs, cx))
+    }
+}
+
 /// The inputs of a component with a handle parent, read from the pushed root, the stored outputs
 /// and the context of the split of the states.
 #[doc(hidden)]
@@ -542,23 +565,133 @@ impl<A: Planned, N: Vertex> FlagOf<A, N> {
     pub const FLAG: usize = A::PLAN.flag_idx(At::<A, N>::INDEX);
 }
 
+/// Does the selector chain of an entry match the current value of its source? From the pushed
+/// root and the stored outputs (a by-value source), or, for a handle source, from its state and
+/// stored handle (`test`); inside the split of the states, the state comes from the context
+/// (`ChainTestCx`).
+#[doc(hidden)]
+pub trait ChainTest<E: Source<A>, A: Layout>: SelectChain<E::Stored> {
+    fn test(root: &A::Root, states: &A::States, outs: &A::Outs) -> bool;
+}
+impl<E: Source<A>, A: Layout> ChainTest<E, A> for () {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn test(_: &A::Root, _: &A::States, _: &A::Outs) -> bool {
+        true
+    }
+}
+impl<E: Source<A>, A: Layout, S: Select<E::Stored>, T: SelectChain<S::Out>> ChainTest<E, A> for (S, T) {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn test(root: &A::Root, _: &A::States, outs: &A::Outs) -> bool {
+        <(S, T) as SelectChain<E::Stored>>::matches(<E as Source<A>>::fetch(root, outs))
+    }
+}
+impl<E: crate::node::HandleView + Source<A>, A: Layout, C: ViewChain<E>> ChainTest<E, A> for ViewC<E, C>
+where
+    A::States: AtPos<E, { PosOf::<A, E>::P }>,
+    A::Outs: AtPos<E::Stored, { PosOf::<A, E>::P }>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn test(_: &A::Root, states: &A::States, outs: &A::Outs) -> bool {
+        let state = <A::States as AtPos<E, { PosOf::<A, E>::P }>>::at(states);
+        let handle = <A::Outs as AtPos<E::Stored, { PosOf::<A, E>::P }>>::at(outs);
+        C::matches(E::__view(state, handle))
+    }
+}
+
+/// As [`ChainTest`], inside the split of the states at position `P` (a handle source's state is
+/// read from the context).
+#[doc(hidden)]
+pub trait ChainTestCx<E: Source<A>, A: Layout, const P: usize>: SelectChain<E::Stored> {
+    fn test_cx<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, cx: &'c CtxOf<'x, A, P>) -> bool
+    where
+        A::States: SplitAt<P>;
+}
+impl<E: Source<A>, A: Layout, const P: usize> ChainTestCx<E, A, P> for () {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn test_cx<'c, 'x>(_: &'c A::Root, _: &'c A::Outs, _: &'c CtxOf<'x, A, P>) -> bool
+    where
+        A::States: SplitAt<P>,
+    {
+        true
+    }
+}
+impl<E: Source<A>, A: Layout, S: Select<E::Stored>, T: SelectChain<S::Out>, const P: usize> ChainTestCx<E, A, P> for (S, T) {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn test_cx<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, _: &'c CtxOf<'x, A, P>) -> bool
+    where
+        A::States: SplitAt<P>,
+    {
+        <(S, T) as SelectChain<E::Stored>>::matches(<E as Source<A>>::fetch(root, outs))
+    }
+}
+impl<E: crate::node::HandleView + Source<A> + SourceCx<A, P>, A: Layout, C: ViewChain<E>, const P: usize> ChainTestCx<E, A, P> for ViewC<E, C> {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn test_cx<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, cx: &'c CtxOf<'x, A, P>) -> bool
+    where
+        A::States: SplitAt<P>,
+    {
+        C::matches(<E as SourceCx<A, P>>::read_cx(root, outs, cx))
+    }
+}
+
+/// The key of the alternative the chain is at depth `J`, for the switch on a source's value: from
+/// the pushed root or the stored output, or, for a handle source, from its view.
+#[doc(hidden)]
+pub trait ChainKeyAt<E: Source<A>, A: Layout, const J: usize>: SelectChain<E::Stored> {
+    fn key_at(root: &A::Root, states: &A::States, outs: &A::Outs) -> u32;
+}
+impl<E: Source<A>, A: Layout, const J: usize> ChainKeyAt<E, A, J> for () {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn key_at(_: &A::Root, _: &A::States, _: &A::Outs) -> u32 {
+        crate::select::GUARD
+    }
+}
+impl<E: Source<A>, A: Layout, S: Select<E::Stored>, T: SelectChain<S::Out>, const J: usize> ChainKeyAt<E, A, J> for (S, T)
+where
+    (S, T): ChainKey<E::Stored, J>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn key_at(root: &A::Root, _: &A::States, outs: &A::Outs) -> u32 {
+        <(S, T) as ChainKey<E::Stored, J>>::key(<E as Source<A>>::fetch(root, outs))
+    }
+}
+impl<E: crate::node::HandleView + Source<A>, A: Layout, C: ViewChain<E>, const J: usize> ChainKeyAt<E, A, J> for ViewC<E, C>
+where
+    A::States: AtPos<E, { PosOf::<A, E>::P }>,
+    A::Outs: AtPos<E::Stored, { PosOf::<A, E>::P }>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn key_at(_: &A::Root, states: &A::States, outs: &A::Outs) -> u32 {
+        let state = <A::States as AtPos<E, { PosOf::<A, E>::P }>>::at(states);
+        let handle = <A::Outs as AtPos<E::Stored, { PosOf::<A, E>::P }>>::at(outs);
+        C::key::<J>(E::__view(state, handle))
+    }
+}
+
 /// Has any edge of a subscription tree fired? An edge fires if its node fired
 /// and its selectors match the node's current value (the pushed root, or the
-/// stored output).
+/// stored output, or a handle component's view of its state).
 #[doc(hidden)]
 pub trait Ready<A: Layout>: DepList {
-    fn ready(root: &A::Root, outs: &A::Outs, fired: &FiredOf<A>) -> bool;
+    fn ready(root: &A::Root, states: &A::States, outs: &A::Outs, fired: &FiredOf<A>) -> bool;
 }
 macro_rules! ready_leaf {
     ([$($E:ident $C:ident $I:ident $X:ident)*]) => {
-        impl<A: Layout, $($E: Source<A>, $C: SelectChain<<$E as Vertex>::Stored>, const $I: usize, $X: 'static,)*> Ready<A> for ($(Sub<$E, $C, $I, $X>,)*) {
+        impl<A: Layout, $($E: Source<A>, $C: ChainTest<$E, A>, const $I: usize, $X: 'static,)*> Ready<A> for ($(Sub<$E, $C, $I, $X>,)*) {
             #[cfg_attr(not(debug_assertions), inline(always))]
             #[cfg_attr(debug_assertions, inline)]
             #[allow(unused_variables)]
-            fn ready(root: &A::Root, outs: &A::Outs, fired: &FiredOf<A>) -> bool {
-                false $(|| (<$E as Source<A>>::fires(fired)
-                    && (<$C as SelectChain<<$E as Vertex>::Stored>>::PLAIN
-                        || <$C as SelectChain<<$E as Vertex>::Stored>>::matches(<$E as Source<A>>::fetch(root, outs)))))*
+            fn ready(root: &A::Root, states: &A::States, outs: &A::Outs, fired: &FiredOf<A>) -> bool {
+                false $(|| (<$E as Source<A>>::fires(fired) && <$C as ChainTest<$E, A>>::test(root, states, outs)))*
             }
         }
     };
@@ -569,8 +702,8 @@ macro_rules! ready_inner {
         impl<A: Layout, $($K: Ready<A>,)*> Ready<A> for ($($K,)*) {
             #[cfg_attr(not(debug_assertions), inline(always))]
             #[cfg_attr(debug_assertions, inline)]
-            fn ready(root: &A::Root, outs: &A::Outs, fired: &FiredOf<A>) -> bool {
-                false $(|| <$K as Ready<A>>::ready(root, outs, fired))*
+            fn ready(root: &A::Root, states: &A::States, outs: &A::Outs, fired: &FiredOf<A>) -> bool {
+                false $(|| <$K as Ready<A>>::ready(root, states, outs, fired))*
             }
         }
     };

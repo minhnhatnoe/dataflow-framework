@@ -964,10 +964,56 @@ BODY[handle_with_listener]="$HANDLE_H
 pub struct L;
 fn main() {}"
 
-# A selector on a handle component is not supported yet: the message says why.
-CMD[handle_selector_rejected]=check
-PATTERN[handle_selector_rejected]='is not a by-value Node'
-BODY[handle_selector_rejected]="$HANDLE_H
+# A handle component whose view is an enum of borrowed and owned variants (selectors on it work).
+HANDLE_V='
+use dataflow_flat::HandleComponent;
+pub struct Big(u64);
+#[derive(dataflow_flat::Demux)]
+pub enum Vw<'"'"'a> { Big(&'"'"'a Big), Small(u64) }
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(p: Poll)]
+#[handle]
+pub struct HV(Big);
+impl HandleComponent for HV {
+    type Config = ();
+    type Handle = ();
+    type View<'"'"'a> = Vw<'"'"'a>;
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, ()) { (HV(Big(0)), ()) }
+    fn update(&mut self, _: Self::Input<'"'"'_>) {}
+    fn view<'"'"'a>(&'"'"'a self, (): &'"'"'a ()) -> Vw<'"'"'a> { Vw::Big(&self.0) }
+}
+'
+
+# A selector on a handle component: the field is exactly the variant's field type (`&Big`, `u64`),
+# and `new` gets an `Option` of it.
+CMD[handle_selector_ok]=build
+PATTERN[handle_selector_ok]='NOERROR'
+BODY[handle_selector_ok]="$HANDLE_V
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(Vw::Big(b): HV)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), i: Self::Init<'_>) -> (Self, u64) { let b: Option<&Big> = i.b; (A, 0) }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 { let b: &Big = i.b; b.0 }
+}
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(Vw::Small(n): HV)]
+pub struct B;
+impl Component for B {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), i: Self::Init<'_>) -> (Self, u64) { let n: Option<u64> = i.n; (B, 0) }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 { let n: u64 = i.n; n }
+}
+fn main() { let _ = Pipeline::<Poll, (A, B)>::build(Configs::new()); }"
+
+# A by-value selector (a `Demux` enum without a lifetime, `Select<E>`) on a handle source: the message
+# says that a view needs view selectors.
+CMD[handle_selector_by_value]=check
+PATTERN[handle_selector_by_value]='cannot be applied to the view'
+BODY[handle_selector_by_value]="$HANDLE_H
 #[derive(Clone, Copy, dataflow_flat::Demux)]
 pub enum E { X(u8), Y }
 #[derive(ComponentSubscription, UpdateHandler)]
@@ -980,6 +1026,54 @@ impl Component for A {
     fn update(&mut self, _: Self::Input<'_>) -> u64 { 0 }
 }
 fn main() {}"
+
+# Selectors of another view enum on a handle source: a type mismatch with a clear message.
+CMD[handle_selector_wrong_view]=check
+PATTERN[handle_selector_wrong_view]='cannot be applied to the view'
+BODY[handle_selector_wrong_view]="$HANDLE_V
+#[derive(dataflow_flat::Demux)]
+pub enum Other<'a> { Big(&'a Big), Tiny(u8) }
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(Other::Tiny(t): HV)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (A, 0) }
+    fn update(&mut self, _: Self::Input<'_>) -> u64 { 0 }
+}
+fn main() {}"
+
+# View selectors on a by-value source: the message says a stored output needs `Select`.
+CMD[handle_selector_view_on_by_value]=check
+PATTERN[handle_selector_view_on_by_value]='the selector chain .* cannot be applied to a value of type'
+BODY[handle_selector_view_on_by_value]="$HANDLE_V
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(Vw::Small(n): Src)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (A, 0) }
+    fn update(&mut self, _: Self::Input<'_>) -> u64 { 0 }
+}
+fn main() {}"
+
+# A selected input of a handle source that would have to be stored (the subscriber also runs when
+# the selectors do not match): a plan error naming the input and what to do instead.
+CMD[handle_selector_stored]=build
+PATTERN[handle_selector_stored]='the input .n. selects from a handle component.*a view is not stored.*by-value component'
+BODY[handle_selector_stored]="$HANDLE_V
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(Vw::Small(n): HV, s: Src)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (A, 0) }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 { i.n + *i.s }
+}
+fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }"
 
 # Generic code written for `Node<Output = u64>` does not accept a handle component.
 CMD[handle_generic_node_bound]=check
@@ -1025,7 +1119,7 @@ ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        pattern_struct pattern_multi_field pattern_range pattern_range_literal pattern_guard pattern_or pattern_literal
        pattern_reference pattern_arrow unit_selector_unknown unit_selector_data_variant pattern_ok
        listener_missing_request listener_request_ok
-       handle_ok handle_handler_ok handle_missing_impl handle_with_listener handle_selector_rejected handle_generic_node_bound handle_field_is_the_view)
+       handle_ok handle_handler_ok handle_missing_impl handle_with_listener handle_selector_ok handle_selector_by_value handle_selector_wrong_view handle_selector_view_on_by_value handle_selector_stored handle_generic_node_bound handle_field_is_the_view)
 
 run_case() {
     local name=$1 dir="$CASES_DIR/$1"

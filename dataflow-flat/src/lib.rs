@@ -144,17 +144,17 @@ pub use build::ConstructPass;
 pub use component::{Component, ComponentSubscription, DepList, HandleComponent, Sub};
 pub use node::{Edge, InitOf, Node, Root};
 #[doc(hidden)]
-pub use node::{Comp, HandleKind, HandleView, Vertex};
+pub use node::{ChainWrap, Comp, HandleKind, HandleView, NodeKind, ValueKind, Vertex};
 pub use pipeline::Pipeline;
 pub use plan::{MAX_COMPONENTS, MAX_DECISIONS, MAX_EDGES, MAX_TERMS};
 pub use request::{Listener, Request};
-pub use select::{option, result, Initial, SelInit, Select, GUARD};
+pub use select::{option, result, Initial, SelInit, Select, SelectView, GUARD};
 #[doc(hidden)]
 pub use select::{probe, ChainInitial, Identity, Keep};
 #[doc(hidden)]
 pub use select::ChainKey;
 #[doc(hidden)]
-pub use select::SelectChain;
+pub use select::{SelectChain, ViewC, ViewChain, ViewChainOn, ViewWalk};
 pub use sinks::{SinkList, Sinks};
 pub use handler::{HandledEdge, UpdateHandler};
 pub use catalog::{Catalog, Concat, Product, Zip, M};

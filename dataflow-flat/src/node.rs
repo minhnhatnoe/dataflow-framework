@@ -54,6 +54,9 @@ pub trait Vertex: __private::Sealed + Edge + Sized + 'static {
     /// Root, component or anchor.
     type Kind: NodeKind;
     const KIND: u8;
+    /// The names of the inputs of a component, comma-separated in the order of its unique entries
+    /// (the plan names an input in an error message).
+    const INPUTS: &'static str = "";
     /// Is this a handle component? Its subscribers read a view of its state, so the plan gives
     /// them the `PG_RUN_VIEW` kinds (by-value components keep `PG_RUN`/`PG_RUN_IF`).
     const VIEW: bool = false;
@@ -70,9 +73,9 @@ pub trait Vertex: __private::Sealed + Edge + Sized + 'static {
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a by-value Node: its subscribers read a view, not `&Output`",
     label = "`{Self}` is a `#[handle]` component (or not a node)",
-    note = "selectors, handled entries and `Node<Output = ..>` bounds don't support `#[handle]` components yet"
+    note = "a `Node<Output = ..>` bound means \"subscribers read `&Output`\", which a `#[handle]` component does not give (its subscribers read a view)"
 )]
-pub trait Node: Vertex
+pub trait Node: Vertex<Kind: ValueKind>
 where
     for<'a> Self: Edge<Read<'a> = &'a <Self as Node>::Output>,
     Self: Vertex<Stored = <Self as Node>::Output>,
@@ -86,10 +89,38 @@ where
 #[doc(hidden)]
 pub trait NodeKind: 'static {
     type Init<'a, N: Vertex>;
+    /// Is the node a handle component (its stored value is a handle, and its subscribers read a
+    /// view of its state)?
+    const IS_HANDLE: bool = false;
 }
 
 #[doc(hidden)]
 pub type ReadOf<'a, N> = <N as Edge>::Read<'a>;
+
+/// The kinds of the nodes whose subscribers read `&Output` (the root and components): `Node` pins
+/// its `Kind` to these, so that generic code written for `X: Node<Output = T>` sees a plain
+/// selector chain (`ChainWrap` below).
+#[doc(hidden)]
+pub trait ValueKind: NodeKind {}
+impl ValueKind for RootKind {}
+impl ValueKind for CompKind {}
+
+/// The selector chain `C` of an entry whose source is a node `N`, as the plan and the drivers
+/// see it: `C` itself for a by-value node (the chain selects from the stored output), a
+/// [`ViewC`](crate::select::ViewC) for a handle component (the chain selects from the view). The
+/// derive wraps every non-empty chain in `<N::Kind as ChainWrap<N, C>>::Out`. The by-value impl is
+/// a blanket over `ValueKind` (so a generic `X: Node` normalizes it without knowing the kind), and
+/// the handle impl is for `HandleKind`, which is not a `ValueKind`.
+#[doc(hidden)]
+pub trait ChainWrap<N: Vertex, C: 'static> {
+    type Out: 'static;
+}
+impl<K: ValueKind, N: Vertex, C: 'static> ChainWrap<N, C> for K {
+    type Out = C;
+}
+impl<N: Vertex, C: 'static> ChainWrap<N, C> for HandleKind {
+    type Out = crate::select::ViewC<N, C>;
+}
 
 /// The root: nothing is known about it before the first push.
 #[doc(hidden)]
@@ -109,6 +140,7 @@ impl NodeKind for CompKind {
 pub struct HandleKind;
 impl NodeKind for HandleKind {
     type Init<'a, N: Vertex> = <N as Edge>::Read<'a>;
+    const IS_HANDLE: bool = true;
 }
 /// The anchor. Never subscribed to.
 #[doc(hidden)]

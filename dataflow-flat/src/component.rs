@@ -78,7 +78,7 @@ pub trait Component: ComponentSubscription + Sized {
 ///
 /// `Handle` needs no `Copy`: the framework only stores it and lends it to `view`.
 ///
-/// Not supported yet: selectors on a handle component (`Some(X(v)): Parent`), `#[listener]`.
+/// Selectors on a handle component select from the view (`SelectView`, see `#[derive(Demux)]` on an enum with a lifetime); a selected value is never stored. Not supported: `#[listener]`.
 pub trait HandleComponent: ComponentSubscription + Sized {
     /// Owned configuration passed to `new`, as for [`Component::Config`].
     type Config: Default + 'static;

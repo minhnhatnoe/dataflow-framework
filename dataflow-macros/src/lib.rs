@@ -738,6 +738,18 @@ fn chain_ty(chain: &[Type]) -> TokenStream2 {
     t
 }
 
+/// The chain of an entry as the library sees it: `()` for a plain entry; for a selected one, the
+/// selectors wrapped by the kind of the source (`NodeKind::Chain`): the chain itself for a by-value
+/// source, a `ViewC` (the chain selects from the view) for a `#[handle]` component.
+fn wrapped_chain(krate: &TokenStream2, s: &Subscription) -> TokenStream2 {
+    let raw = chain_ty(&s.chain);
+    if s.chain.is_empty() {
+        return raw;
+    }
+    let ty = &s.ty;
+    quote!(<<#ty as #krate::Vertex>::Kind as #krate::ChainWrap<#ty, #raw>>::Out)
+}
+
 /// `#[derive(ComponentSubscription)]` with `#[subscribe(..)]`. Every entry needs an
 /// `UpdateHandler<Entry>` impl: `#[derive(UpdateHandler)]` next to this derive gives all of them
 /// (inactive), or write them by hand. An entry with no `:` (`Average`), or a pattern with `_` as
@@ -876,21 +888,16 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         for s in &subs {
             let ty = &s.ty;
             let chain = if s.handled {
-                let c = chain_ty(&s.chain);
+                let c = wrapped_chain(&krate, s);
                 let m = marker_of(s);
                 quote!(#krate::Hd<#m, #c>)
             } else {
-                chain_ty(&s.chain)
+                wrapped_chain(&krate, s)
             };
             wc.predicates.push(parse_quote!(#ty: #krate::Vertex));
             // A plain subscription needs no predicate (and an extra obligation per
             // subscription measurably slows type checking).
             if !s.chain.is_empty() || s.handled {
-                // Selectors need a node whose subscribers read `&Output` (not a `#[handle]`
-                // component yet): `Node` carries the error message.
-                if !s.chain.is_empty() {
-                    wc.predicates.push(parse_quote!(#ty: #krate::Node));
-                }
                 wc.predicates
                     .push(parse_quote!(#chain: #krate::SelectChain<<#ty as #krate::Vertex>::Stored>));
             }
@@ -911,7 +918,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     let field_chains: Vec<TokenStream2> = subs
         .iter()
         .map(|s| {
-            let c = chain_ty(&s.chain);
+            let c = wrapped_chain(&krate, s);
             if s.handled {
                 let m = marker_of(s);
                 quote!(#krate::Hd<#m, #c>)
@@ -961,8 +968,14 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     let mut hooks: Vec<TokenStream2> = Vec::new();
     let mut slot_of: Vec<usize> = Vec::new();
     // The marker of a handled unique entry.
-    for ((t, c), s) in field_types.iter().zip(&field_chains).zip(&subs) {
-        let key = format!("{} => {}", quote!(#t), c);
+    for (n, ((t, c), s)) in field_types.iter().zip(&field_chains).zip(&subs).enumerate() {
+        // A selected field is its own entry: `new` gets its value by move (a selected view is not
+        // `Clone`), so two fields spelled alike are two entries (the plan reads them as one condition).
+        let key = if !s.chain.is_empty() && !s.handled {
+            format!("{} => {} #{}", quote!(#t), c, n)
+        } else {
+            format!("{} => {}", quote!(#t), c)
+        };
         let i = match unique.iter().position(|(k, _, _)| *k == key) {
             Some(i) => i,
             None => {
@@ -1136,7 +1149,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
             let input = s.name.as_ref().expect("a plain subscription is named").to_string();
             quote!({
                 use #krate::probe::{ViaInitial as _, ViaNothing as _};
-                (&#krate::probe::Probe::<#c, <#t as #krate::Vertex>::Stored>::new()).fill::<#t>(&#v, #comp, #input)
+                (&#krate::probe::Probe::<#c, <#t as #krate::Vertex>::Stored>::new()).fill::<#t>(#v, #comp, #input)
             })
         })
         .collect();
@@ -1219,6 +1232,19 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     }
     let (_, _, light_where) = light_generics.split_for_impl();
 
+    // The names of the inputs (per unique entry), for the plan's error about a selected input that
+    // would have to be stored; only a component with a selected entry can have one.
+    let inputs_const = if subs.iter().any(|s| !s.chain.is_empty()) && fors.is_empty() {
+        let mut names: Vec<Vec<String>> = vec![Vec::new(); unique.len()];
+        for (k, s) in subs.iter().enumerate() {
+            let n = s.name.as_ref().map(|n| n.to_string()).unwrap_or_else(|| "_".to_string());
+            names[slot_of[k]].push(n);
+        }
+        let joined = names.iter().map(|v| v.join("/")).collect::<Vec<_>>().join(",");
+        quote!(const INPUTS: &'static str = #joined;)
+    } else {
+        quote!()
+    };
     let node_impls = if handle {
         quote! {
             impl #nimpl_generics #krate::__private::Sealed for #name #nty_generics #light_where {}
@@ -1233,6 +1259,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
                 type Requests = #requests_ty;
                 const KIND: u8 = #krate::KIND_COMPONENT;
                 const VIEW: bool = true;
+                #inputs_const
             }
             impl #nimpl_generics #krate::HandleView for #name #nty_generics #node_where {
                 #[cfg_attr(not(debug_assertions), inline(always))]
@@ -1273,6 +1300,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
                 type Requests = #requests_ty;
                 const KIND: u8 = #krate::KIND_COMPONENT;
                 #node_items
+                #inputs_const
             }
         }
     };
@@ -1301,14 +1329,14 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     for s in subs.iter().filter(|s| s.marker.is_some()) {
         let m = format_ident!("{}", s.marker.as_ref().unwrap());
         let ty = &s.ty;
-        let chain = chain_ty(&s.chain);
+        let chain = wrapped_chain(&krate, s);
         let full = marker_of(s);
         marker_defs.push(quote! {
             pub struct #m<#(#decl_params),*>(::core::marker::PhantomData<fn() -> (#(#type_params,)*)>);
         });
         marker_items.push(quote! {
             impl #impl_generics #krate::HandledEdge for #full #where_clause {
-                type Arg<'a> = &'a <#chain as #krate::SelectChain<<#ty as #krate::Vertex>::Stored>>::Out;
+                type Arg<'a> = <#chain as #krate::SelectChain<<#ty as #krate::Vertex>::Stored>>::Read<'a, #ty>;
             }
         });
     }
@@ -1654,9 +1682,15 @@ fn expand_demux(input: DeriveInput) -> syn::Result<TokenStream2> {
     let syn::Data::Enum(data) = &input.data else {
         return Err(syn::Error::new_spanned(&input.ident, "Demux can only be derived for enums"));
     };
-    if !input.generics.params.is_empty() {
-        return Err(syn::Error::new_spanned(&input.generics, "Demux does not support generic enums"));
+    // An enum with lifetime parameters only (`enum FrameView<'a> { Book(&'a Book), .. }`) is a view:
+    // its selectors implement `SelectView<FrameView<'a>>` (they take the view by value and return
+    // the variant's field, which may borrow from `'a`), for a `#[handle]` component whose
+    // `View<'a>` it is. Any other generic parameter is not supported.
+    if input.generics.params.iter().any(|p| !matches!(p, GenericParam::Lifetime(_))) {
+        return Err(syn::Error::new_spanned(&input.generics, "Demux does not support generic enums (only lifetime parameters, for a view)"));
     }
+    let is_view = !input.generics.params.is_empty();
+    let (view_impl_generics, view_ty_generics, _) = input.generics.split_for_impl();
     let vis = &input.vis;
     let module = Ident::new(&snake_case(&name.to_string()), name.span());
     // `#[demux(markers = path)]`: use the existing types `path::Variant` as the selectors.
@@ -1719,12 +1753,38 @@ fn expand_demux(input: DeriveInput) -> syn::Result<TokenStream2> {
                 ))
             }
         };
+        let (pat_val, val_val) = match &v.fields {
+            syn::Fields::Unit => (quote!(#name::#vname), quote!(())),
+            _ => (quote!(#name::#vname(__m)), quote!(__m)),
+        };
         let marker = match &markers {
             Some(m) => quote!(#m::#vname),
             None => quote!(#module::#vname),
         };
         structs.push(quote!(pub struct #vname;));
         reexports.push(quote!(#vis use #reexport_base::#vname;));
+        if is_view {
+            items.push(quote! {
+                impl #view_impl_generics #krate::SelectView<#name #view_ty_generics> for #marker {
+                    type Out = #out_ty;
+                    const KEY: u32 = #key;
+                    #[cfg_attr(not(debug_assertions), inline(always))]
+                    #[cfg_attr(debug_assertions, inline)]
+                    fn select(__x: #name #view_ty_generics) -> ::core::option::Option<#out_ty> {
+                        match __x {
+                            #pat_val => ::core::option::Option::Some(#val_val),
+                            _ => ::core::option::Option::None,
+                        }
+                    }
+                    #[cfg_attr(not(debug_assertions), inline(always))]
+                    #[cfg_attr(debug_assertions, inline)]
+                    fn key_of(__x: &#name #view_ty_generics) -> u32 {
+                        #name::__demux_key(__x)
+                    }
+                }
+            });
+            continue;
+        }
         items.push(quote! {
             impl #krate::Select<#name> for #marker {
                 type Out = #out_ty;
@@ -1775,10 +1835,10 @@ fn expand_demux(input: DeriveInput) -> syn::Result<TokenStream2> {
             #module_body
             #all
         }
-        impl #name {
+        impl #view_impl_generics #name #view_ty_generics {
             #[doc(hidden)]
             #[inline(always)]
-            fn __demux_key(__x: &#name) -> u32 {
+            fn __demux_key(__x: &#name #view_ty_generics) -> u32 {
                 match __x {
                     #(#key_arms,)*
                 }
