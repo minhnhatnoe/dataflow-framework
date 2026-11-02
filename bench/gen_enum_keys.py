@@ -44,18 +44,15 @@ pub struct Tob {{ pub bid: i64, pub ask: i64, pub seq: u64 }}
 
 //@@SINK
 /// The same sink on every side: a handler component folding every fired book into a pair, and a probe.
-#[derive(Handler)]
-#[handles(%HANDLES%)]
-pub struct Oms;
-impl Collect for Oms {{
+#[derive(ComponentSubscription)]
+#[subscribe(%HANDLES%)]
+pub struct Oms {{ acc: (u64, u64) }}
+impl Component for Oms {{
     type Config = ();
     type Output = (u64, u64);
-    type Buf = (u64, u64);
-    fn new((): ()) -> Self {{ Oms }}
+    fn new((): (), _: Self::Init<'_>) -> (Self, (u64, u64)) {{ (Oms {{ acc: (0, 0) }}, (0, 0)) }}
     #[inline(always)]
-    fn begin(&mut self) -> (u64, u64) {{ (0, 0) }}
-    #[inline(always)]
-    fn finish(&mut self, buf: (u64, u64), _: Self::Input<'_>) -> (u64, u64) {{ buf }}
+    fn update(&mut self, _: Self::Input<'_>) -> (u64, u64) {{ std::mem::take(&mut self.acc) }}
 }}
 %UPDATE_HANDLER%
 #[derive(ComponentSubscription)]
@@ -186,7 +183,7 @@ def write(name, main):
 syms = "\n".join(f"    pub struct S{i}; impl Symbol for S{i} {{ const KEY: u32 = {i}; const NAME: &'static str = \"S{i}\"; }}" for i in range(n))
 f_body = COMMON.replace("%HANDLES%", handles("markets::")).replace("%UPDATE_HANDLER%", """impl<S: Symbol> UpdateHandler<Book<S>> for Oms {
     #[inline(always)]
-    fn on_update(&mut self, buf: &mut (u64, u64), t: &Tob) { fold(buf, t) }
+    fn on_update(&mut self, t: &Tob) { fold(&mut self.acc, t) }
 }""") + f"""
 pub mod markets {{
     use dataflow_flat::Symbol;
@@ -262,7 +259,7 @@ impl<S: Select<{FN}, Out = Tob>> Component for Book<S> {{
 
 UH_E = f"""impl<S: Select<{FN}, Out = Tob>> UpdateHandler<Book<S>> for Oms {{
     #[inline(always)]
-    fn on_update(&mut self, buf: &mut (u64, u64), t: &Tob) {{ fold(buf, t) }}
+    fn on_update(&mut self, t: &Tob) {{ fold(&mut self.acc, t) }}
 }}"""
 
 key_arms = "\n".join(f"        {FN}::S{i}(..) => {i}," for i in range(n))

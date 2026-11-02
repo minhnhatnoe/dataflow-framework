@@ -27,6 +27,8 @@ fn respan(ts: TokenStream2, loc: Span) -> TokenStream2 {
     use proc_macro2::{Group, TokenTree};
     ts.into_iter()
         .map(|tt| match tt {
+            // A selector path keeps the span the user wrote it at (see `chain_ty`).
+            TokenTree::Group(g) if g.delimiter() == proc_macro2::Delimiter::None => TokenTree::Group(g),
             TokenTree::Group(g) => {
                 let mut n = Group::new(g.delimiter(), respan(g.stream(), loc));
                 n.set_span(loc);
@@ -47,7 +49,7 @@ fn finish(r: syn::Result<TokenStream2>, loc: Span) -> TokenStream {
     }
 }
 use proc_macro2::{Span, TokenStream as TokenStream2};
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, quote_spanned};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{
@@ -244,13 +246,16 @@ impl Shape {
 }
 
 struct Subscription {
-    /// Required for `#[subscribe]`; a `#[handles]` entry may be unnamed.
+    /// A named input (also the generated name of a unit selector and the
+    /// marker name of a selected handled entry); `None` for a bare handled type.
     name: Option<Ident>,
     ty: Type,
     /// Selectors applied to the node's output, outermost first (`A(B(name))`).
     chain: Vec<Type>,
-    /// A handled edge (`#[handles]` of a `Handler`).
+    /// A handled entry: a bare type, or a pattern with `_` as the leaf.
     handled: bool,
+    /// The first token of the entry: errors about the entry point at it.
+    span: Span,
     /// A unit selector `Sel: Source`: the edge has a hidden name, assigned from its index.
     unit: bool,
 }
@@ -259,26 +264,6 @@ impl Subscription {
     fn name_str(&self) -> String {
         self.name.as_ref().map(|n| n.to_string()).unwrap_or_default()
     }
-}
-
-/// The entries of one `#[handles(..)]`: `Type` (a plain edge keyed by its node
-/// type) or a subscription `name: Type` / `Sel(name): Type` (keyed by a marker the derive generates).
-fn parse_handles(input: ParseStream) -> syn::Result<Vec<Subscription>> {
-    let mut out = Vec::new();
-    while !input.is_empty() {
-        if peek_named(input) || peek_pattern_sub(input) {
-            let mut s: Subscription = input.parse()?;
-            s.handled = true;
-            out.push(s);
-        } else {
-            let ty: Type = input.parse()?;
-            out.push(Subscription { name: None, ty, chain: Vec::new(), handled: true, unit: false });
-        }
-        if input.peek(Token![,]) {
-            input.parse::<Token![,]>()?;
-        }
-    }
-    Ok(out)
 }
 
 /// A lowercase (or `_`-led) identifier followed by a single colon: a named input.
@@ -302,16 +287,30 @@ fn peek_pattern_sub(input: ParseStream) -> bool {
 
 impl Parse for Subscription {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let (name, chain, unit) = if peek_named(input) {
+        let span = input.span();
+        let bare = !peek_named(input) && !peek_pattern_sub(input) && {
+            let f = input.fork();
+            f.parse::<Type>().is_ok() && (f.is_empty() || f.peek(Token![,]))
+        };
+        if bare {
+            // No `:`: a handled entry keyed by the node type.
+            let ty: Type = input.parse()?;
+            return Ok(Subscription { name: None, ty, chain: Vec::new(), handled: true, unit: false, span });
+        }
+        let (name, chain, unit, handled) = if peek_named(input) {
             let name: Ident = input.parse()?;
             input.parse::<Token![:]>()?;
-            (name, Vec::new(), false)
+            (name, Vec::new(), false, false)
         } else {
             let pat = parse_pat(input)?;
             input.parse::<Token![:]>()?;
             match pattern_chain(pat)? {
-                (Some(name), chain) => (name, chain, false),
-                (None, chain) => (Ident::new("__unit_sel", proc_macro2::Span::call_site()), chain, true),
+                (Leaf::Name(name), chain) => (name, chain, false, false),
+                (Leaf::Unit, chain) => (Ident::new("__unit_sel", span), chain, true, false),
+                (Leaf::Wild, chain) => {
+                    let name = marker_ident(chain.last().expect("a wildcard leaf has a selector"), span);
+                    (name, chain, false, true)
+                }
             }
         };
         let ty: Type = input.parse()?;
@@ -326,13 +325,35 @@ impl Parse for Subscription {
                 ),
             ));
         }
-        Ok(Subscription { name: Some(name), ty, chain, handled: false, unit })
+        Ok(Subscription { name: Some(name), ty, chain, handled, unit, span })
     }
+}
+
+/// The marker name of a selected handled entry: the innermost selector's name,
+/// or, for a generic selector such as `On::<Btc>`, its one type argument's.
+fn marker_ident(sel: &Type, span: Span) -> Ident {
+    if let Type::Path(p) = sel {
+        if let Some(seg) = p.path.segments.last() {
+            if let syn::PathArguments::AngleBracketed(a) = &seg.arguments {
+                if a.args.len() == 1 {
+                    if let syn::GenericArgument::Type(Type::Path(t)) = &a.args[0] {
+                        if let Some(l) = t.path.segments.last() {
+                            return Ident::new(&l.ident.to_string(), span);
+                        }
+                    }
+                }
+            }
+            return Ident::new(&seg.ident.to_string(), span);
+        }
+    }
+    Ident::new("Edge", span)
 }
 
 /// A subscription pattern: selectors outermost first, the binding innermost.
 enum Pat {
     Bind(Ident),
+    /// `_`: the leaf of a handled entry.
+    Wild,
     /// A selector path (with an optional `<T as Trait>::` prefix); `None` inside is a unit selector.
     Variant(Option<syn::QSelf>, syn::Path, Option<Box<Pat>>),
 }
@@ -348,7 +369,8 @@ fn parse_pat(input: ParseStream) -> syn::Result<Pat> {
         return pat_err(input.cursor().token_stream(), "references are not supported (a pattern matches the value, which is borrowed already)");
     }
     if input.peek(Token![_]) {
-        return pat_err(input.cursor().token_stream(), "a wildcard `_` is not a selector; name a selector at each level and bind the innermost value");
+        input.parse::<Token![_]>()?;
+        return Ok(Pat::Wild);
     }
     if input.peek(syn::Lit) || input.peek(Token![-]) {
         return pat_err(input.cursor().token_stream(), "literal patterns are not supported; use a hand-written guard selector `S(x): Source`");
@@ -413,7 +435,13 @@ fn reject_trailing(input: ParseStream) -> syn::Result<()> {
 
 /// `Sel1(Sel2(name))` as the name and the chain `[Sel1, Sel2]`; a unit selector
 /// (`Sel1(Sel2)`) has no name.
-fn pattern_chain(mut pat: Pat) -> syn::Result<(Option<Ident>, Vec<Type>)> {
+enum Leaf {
+    Name(Ident),
+    Unit,
+    Wild,
+}
+
+fn pattern_chain(mut pat: Pat) -> syn::Result<(Leaf, Vec<Type>)> {
     let mut chain = Vec::new();
     loop {
         match pat {
@@ -421,13 +449,19 @@ fn pattern_chain(mut pat: Pat) -> syn::Result<(Option<Ident>, Vec<Type>)> {
                 if chain.is_empty() {
                     return pat_err(name, "a bare name is not a pattern");
                 }
-                return Ok((Some(name), chain));
+                return Ok((Leaf::Name(name), chain));
+            }
+            Pat::Wild => {
+                if chain.is_empty() {
+                    return Err(syn::Error::new(Span::call_site(), "subscription pattern: a bare `_` is not a pattern; a handled entry is a type (`Average`) or `Selector(_): Source`"));
+                }
+                return Ok((Leaf::Wild, chain));
             }
             Pat::Variant(qself, path, inner) => {
                 chain.push(selector(pattern_selector(qself, path)));
                 match inner {
                     Some(i) => pat = *i,
-                    None => return Ok((None, chain)),
+                    None => return Ok((Leaf::Unit, chain)),
                 }
             }
         }
@@ -489,29 +523,27 @@ fn selector(ty: Type) -> Type {
 fn chain_ty(chain: &[Type]) -> TokenStream2 {
     let mut t = quote!(());
     for s in chain.iter().rev() {
+        // Not re-spanned by `respan`: an unknown selector is reported at the
+        // attribute, not at the struct. (Only the selector path; nothing else
+        // of the generated code moves with the user's source.)
+        let s = proc_macro2::TokenTree::Group(proc_macro2::Group::new(proc_macro2::Delimiter::None, quote!(#s)));
         t = quote!((#s, #t));
     }
     t
 }
 
+/// `#[derive(ComponentSubscription)]` with `#[subscribe(..)]`. An entry with no
+/// `:` (`Average`), or a pattern with `_` as the leaf (`Some(On::<Btc>(_)): Ws`),
+/// is *handled*: the component implements `UpdateHandler<Entry>` for it instead
+/// of reading it in `update`, and it is not a field of `Input` or `Init`. For
+/// a selected handled entry the derive generates a marker type
+/// `<struct_snake>_edges::<Name>` (the innermost selector's name) that keys the
+/// `UpdateHandler` impl.
 #[proc_macro_derive(ComponentSubscription, attributes(subscribe, listener, key_listener))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let loc = input.ident.span();
-    finish(expand(input, false), loc)
-}
-
-/// `#[derive(Handler)]`: a component defined by `Collect` and `UpdateHandler`
-/// impls instead of `Component`. `#[handles(..)]` lists the handled edges,
-/// `#[subscribe(..)]` the plain inputs `finish` reads. Generates what
-/// `ComponentSubscription` does, plus `impl Component` (its `new` builds the
-/// initial output through `begin`, `on_update`, `finish`), and for every
-/// named handled edge a marker type `<struct_snake>_edges::<Name>`.
-#[proc_macro_derive(Handler, attributes(subscribe, handles))]
-pub fn derive_handler(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-    let loc = input.ident.span();
-    finish(expand(input, true), loc)
+    finish(expand(input), loc)
 }
 
 fn camel(name: &str) -> String {
@@ -524,7 +556,7 @@ fn camel(name: &str) -> String {
         .collect()
 }
 
-fn expand(input: DeriveInput, handler: bool) -> syn::Result<TokenStream2> {
+fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     let krate = quote!(::dataflow_flat);
     let name = &input.ident;
     let input_name = format_ident!("__{}Input", name);
@@ -535,17 +567,7 @@ fn expand(input: DeriveInput, handler: bool) -> syn::Result<TokenStream2> {
     for attr in input.attrs.iter() {
         if attr.path().is_ident("subscribe") {
             let list = attr.parse_args_with(Punctuated::<Subscription, Token![,]>::parse_terminated)?;
-            if handler {
-                if let Some(s) = list.iter().find(|s| !s.chain.is_empty()) {
-                    return Err(syn::Error::new_spanned(
-                        &s.ty,
-                        "a handler's plain `#[subscribe]` inputs can't use selectors (`finish` is also called at build); use `#[handles(Selector(name): Type)]` for a selected edge",
-                    ));
-                }
-            }
             subs.extend(list);
-        } else if handler && attr.path().is_ident("handles") {
-            subs.extend(attr.parse_args_with(parse_handles)?);
         }
     }
     for (i, s) in subs.iter_mut().enumerate() {
@@ -556,6 +578,12 @@ fn expand(input: DeriveInput, handler: bool) -> syn::Result<TokenStream2> {
     for (i, a) in subs.iter().enumerate() {
         if let Some(an) = &a.name {
             if subs[..i].iter().any(|b| b.name.as_ref() == Some(an)) {
+                if a.handled {
+                    return Err(syn::Error::new(
+                        a.span,
+                        format!("two handled entries end in the selector `{an}`, so one `UpdateHandler<{}_edges::{an}>` would have to serve both; give them different innermost selectors", snake_case(&name.to_string())),
+                    ));
+                }
                 return Err(syn::Error::new(an.span(), "duplicate subscription name"));
             }
         }
@@ -671,12 +699,12 @@ fn expand(input: DeriveInput, handler: bool) -> syn::Result<TokenStream2> {
             }
         })
         .collect();
-    let init_types: Vec<TokenStream2> = subs
+    let init_types: Vec<TokenStream2> = keep
         .iter()
-        .zip(&field_chains)
+        .map(|&i| (&subs[i], &field_chains[i]))
         .map(|(s, c)| {
             let t = &s.ty;
-            if s.chain.is_empty() && !s.handled {
+            if s.chain.is_empty() {
                 quote!(#krate::InitOf<#lt, #t>)
             } else {
                 quote!(<#c as #krate::SelectChain<<#t as #krate::Node>::Output>>::Init<#lt, #t>)
@@ -691,14 +719,12 @@ fn expand(input: DeriveInput, handler: bool) -> syn::Result<TokenStream2> {
     let mut unique: Vec<(String, &Type, &TokenStream2)> = Vec::new();
     let mut slot_of: Vec<usize> = Vec::new();
     // The marker of a handled unique entry.
-    let mut handled_of: Vec<Option<TokenStream2>> = Vec::new();
-    for (s, (t, c)) in subs.iter().zip(field_types.iter().zip(&field_chains)) {
+    for (t, c) in field_types.iter().zip(&field_chains) {
         let key = format!("{} => {}", quote!(#t), c);
         let i = match unique.iter().position(|(k, _, _)| *k == key) {
             Some(i) => i,
             None => {
                 unique.push((key, t, c));
-                handled_of.push(if s.handled { Some(marker_of(s)) } else { None });
                 unique.len() - 1
             }
         };
@@ -752,8 +778,9 @@ fn expand(input: DeriveInput, handler: bool) -> syn::Result<TokenStream2> {
 
 
     // `Node` for a component. Its bounds are the component's own.
-    let key_listener = !handler && input.attrs.iter().any(|a| a.path().is_ident("key_listener"));
-    let listener = !handler && input.attrs.iter().any(|a| a.path().is_ident("listener"));
+    let handler = subs.iter().any(|s| s.handled);
+    let key_listener = input.attrs.iter().any(|a| a.path().is_ident("key_listener"));
+    let listener = input.attrs.iter().any(|a| a.path().is_ident("listener"));
     let mut node_items = if key_listener {
         quote! {
             const LISTENER: bool = true;
@@ -765,7 +792,7 @@ fn expand(input: DeriveInput, handler: bool) -> syn::Result<TokenStream2> {
         quote!()
     };
     if handler {
-        node_items = quote!(const HANDLER: bool = true;);
+        node_items = quote!(#node_items const HANDLER: bool = true;);
     }
     let requests_ty = if listener {
         quote!(<#name #ty_generics as #krate::Listener>::Requests)
@@ -809,130 +836,75 @@ fn expand(input: DeriveInput, handler: bool) -> syn::Result<TokenStream2> {
         }
     };
 
-    if handler {
-        // Markers of the named handled edges.
-        let mut marker_items = Vec::new();
-        let mut marker_defs = Vec::new();
-        let decl_params: Vec<TokenStream2> = input
-            .generics
-            .params
-            .iter()
-            .filter_map(|p| match p {
-                GenericParam::Type(t) => {
-                    let id = &t.ident;
-                    Some(quote!(#id))
-                }
-                GenericParam::Const(c) => {
-                    let (id, ty) = (&c.ident, &c.ty);
-                    Some(quote!(const #id: #ty))
-                }
-                _ => None,
-            })
-            .collect();
-        for s in subs.iter().filter(|s| s.handled && s.name.is_some()) {
-            let m = format_ident!("{}", camel(&s.name_str()));
-            let ty = &s.ty;
-            let chain = chain_ty(&s.chain);
-            let full = marker_of(s);
-            marker_defs.push(quote! {
-                pub struct #m<#(#decl_params),*>(::core::marker::PhantomData<fn() -> (#(#type_params,)*)>);
-            });
-            marker_items.push(quote! {
-                impl #impl_generics #krate::HandledEdge for #full #where_clause {
-                    type Value = <#chain as #krate::SelectChain<<#ty as #krate::Node>::Output>>::Out;
-                }
-            });
-        }
-        let markers = if marker_defs.is_empty() {
-            quote!()
-        } else {
-            quote! {
-                #[allow(non_snake_case)]
-                pub mod #edges_mod {
-                    #(#marker_defs)*
-                }
-                #(#marker_items)*
+    // Markers of the selected handled edges, and the check that every handled
+    // entry has its `UpdateHandler` impl (spanned at the entry).
+// Markers of the named handled edges.
+    let mut marker_items = Vec::new();
+    let mut marker_defs = Vec::new();
+    let decl_params: Vec<TokenStream2> = input
+        .generics
+        .params
+        .iter()
+        .filter_map(|p| match p {
+            GenericParam::Type(t) => {
+                let id = &t.ident;
+                Some(quote!(#id))
             }
-        };
-
-        // The Component impl: `new` builds the initial output through the handlers.
-        let mut comp_generics = generics.clone();
-        {
-            let wc = comp_generics.make_where_clause();
-            wc.predicates.push(parse_quote!(#name #ty_generics: #krate::Collect));
-            for (i, m) in handled_of.iter().enumerate() {
-                if let Some(m) = m {
-                    let (t, c) = (types[i], chains[i]);
-                    wc.predicates.push(parse_quote!(#name #ty_generics: #krate::UpdateHandler<#m>));
-                    wc.predicates.push(parse_quote!(#c: #krate::HdChain<<#t as #krate::Node>::Output>));
-                }
+            GenericParam::Const(c) => {
+                let (id, ty) = (&c.ident, &c.ty);
+                Some(quote!(const #id: #ty))
             }
-        }
-        let (_, _, comp_where) = comp_generics.split_for_impl();
-        let feeds = handled_of.iter().enumerate().filter_map(|(i, m)| {
-            let m = m.as_ref()?;
-            let v = &vars[i];
-            Some(quote!(#krate::FeedInit::<#name #ty_generics, #m>::feed(#v, &mut __this, &mut __buf);))
+            _ => None,
+        })
+        .collect();
+    for s in subs.iter().filter(|s| s.handled && s.name.is_some()) {
+        let m = format_ident!("{}", camel(&s.name_str()));
+        let ty = &s.ty;
+        let chain = chain_ty(&s.chain);
+        let full = marker_of(s);
+        marker_defs.push(quote! {
+            pub struct #m<#(#decl_params),*>(::core::marker::PhantomData<fn() -> (#(#type_params,)*)>);
         });
-        let plain_inits = keep.iter().map(|&i| {
-            let f = subs[i].name.as_ref().unwrap();
-            let t = &subs[i].ty;
-            let v = &vars[slot_of[i]];
-            quote!(#f: #krate::InitRef::<'_, <#t as #krate::Node>::Output>::out(#v))
-        });
-        return Ok(quote! {
-            #[doc = #doc]
-            #[doc(hidden)]
-            #[allow(non_camel_case_types)]
-            pub struct #input_name #input_decl_generics #input_where {
-                #( pub #field_names: &#lt #input_types, )*
-                #[doc(hidden)]
-                pub __marker: #marker_ty,
+        marker_items.push(quote! {
+            impl #impl_generics #krate::HandledEdge for #full #where_clause {
+                type Value = <#chain as #krate::SelectChain<<#ty as #krate::Node>::Output>>::Out;
             }
-
-            #markers
-
-            impl #impl_generics #krate::ComponentSubscription for #name #ty_generics #where_clause {
-                type Deps = #deps_ty;
-                type Input<'a> = #input_name<'a, #(#ty_args),*>;
-                type Init<'a> = <#deps_ty as #krate::DepList>::Inits<'a>;
-
-                #[inline]
-                #[allow(unused_variables)]
-                fn input<'a>(raw: <Self::Deps as #krate::DepList>::Inputs<'a>) -> Self::Input<'a> {
-                    let #deps_pat = raw;
-                    #input_name { #( #field_names: #field_vars, )* __marker: ::core::marker::PhantomData }
-                }
-
-                #[inline]
-                fn init<'a>(raw: <Self::Deps as #krate::DepList>::Inits<'a>) -> Self::Init<'a> {
-                    raw
-                }
-            }
-
-            impl #impl_generics #krate::Component for #name #ty_generics #comp_where {
-                type Config = <#name #ty_generics as #krate::Collect>::Config;
-                type Output = <#name #ty_generics as #krate::Collect>::Output;
-
-                #[allow(unused_variables)]
-                fn new(config: Self::Config, init: <Self as #krate::ComponentSubscription>::Init<'_>) -> (Self, Self::Output) {
-                    let #deps_pat = init;
-                    let mut __this = <#name #ty_generics as #krate::Collect>::new(config);
-                    let mut __buf = <#name #ty_generics as #krate::Collect>::begin(&mut __this);
-                    #(#feeds)*
-                    let __input = #input_name { #(#plain_inits,)* __marker: ::core::marker::PhantomData };
-                    let __out = <#name #ty_generics as #krate::Collect>::finish(&mut __this, __buf, __input);
-                    (__this, __out)
-                }
-
-                fn update(&mut self, _: <Self as #krate::ComponentSubscription>::Input<'_>) -> Self::Output {
-                    unreachable!("a handler runs through begin / on_update / finish, never `update`")
-                }
-            }
-
-            #node_impls
         });
     }
+    let markers = if marker_defs.is_empty() {
+        quote!()
+    } else {
+        quote! {
+            #[allow(non_snake_case)]
+            pub mod #edges_mod {
+                #(#marker_defs)*
+            }
+            #(#marker_items)*
+        }
+    };
+    let checks: Vec<TokenStream2> = subs
+        .iter()
+        .filter(|s| s.handled)
+        .map(|s| {
+            let m = marker_of(s);
+            let sp = s.span;
+            let call = quote_spanned!(sp=> __need::<#m, #name #ty_generics>());
+            call
+        })
+        .collect();
+    let handler_check = if checks.is_empty() {
+        quote!()
+    } else {
+        quote! {
+            #[allow(dead_code, non_snake_case)]
+            const _: () = {
+                fn __need<E: #krate::HandledEdge, T: #krate::UpdateHandler<E>>() {}
+                fn __check #impl_generics () #where_clause {
+                    #(#checks;)*
+                }
+            };
+        }
+    };
 
     Ok(quote! {
         #[doc = #doc]
@@ -954,18 +926,23 @@ fn expand(input: DeriveInput, handler: bool) -> syn::Result<TokenStream2> {
             pub __marker: #marker_ty,
         }
 
+        #markers
+        #handler_check
+
         impl #impl_generics #krate::ComponentSubscription for #name #ty_generics #where_clause {
             type Deps = #deps_ty;
             type Input<'a> = #input_name<'a, #(#ty_args),*>;
             type Init<'a> = #init_name<'a, #(#ty_args),*>;
 
             #[inline]
+            #[allow(unused_variables)]
             fn input<'a>(raw: <Self::Deps as #krate::DepList>::Inputs<'a>) -> Self::Input<'a> {
                 let #deps_pat = raw;
                 #input_name { #( #field_names: #field_vars, )* __marker: ::core::marker::PhantomData }
             }
 
             #[inline]
+            #[allow(unused_variables)]
             fn init<'a>(raw: <Self::Deps as #krate::DepList>::Inits<'a>) -> Self::Init<'a> {
                 let #deps_pat = raw;
                 #init_name { #( #field_names: #field_vars, )* #init_requests_default __marker: ::core::marker::PhantomData }
@@ -1069,6 +1046,17 @@ mod tests {
     }
 
     #[test]
+    fn handled_entries() {
+        let s = sub("Foo(_): Ws").unwrap();
+        assert!(s.handled && s.name.unwrap() == "Foo" && s.chain.len() == 1);
+        let s = sub("Some(On::<Btc>(_)): Ws").unwrap();
+        assert!(s.handled && s.name.unwrap() == "Btc" && s.chain.len() == 2);
+        let s = sub("Quoter<Btc>").unwrap();
+        assert!(s.handled && s.name.is_none() && s.chain.is_empty());
+        assert!(!sub("a: A").unwrap().handled && !sub("Gone: W").unwrap().handled);
+    }
+
+    #[test]
     fn rejected_forms() {
         assert!(msg("Foo { x }: Ws").contains("struct patterns"));
         assert!(msg("Foo(a, b): Ws").contains("multi-field"));
@@ -1077,8 +1065,8 @@ mod tests {
         assert!(msg("Foo(x) if x > 1: Ws").contains("guards"));
         assert!(msg("Foo(x) | Bar(x): Ws").contains("or-patterns"));
         assert!(msg("Foo(3): Ws").contains("literal"));
-        assert!(msg("Foo(_): Ws").contains("wildcard"));
-        assert!(msg("_(x): Ws").contains("wildcard"));
+        assert!(sub("_(x): Ws").is_err());
+        assert!(msg("_: Ws").contains("bare `_`"));
         assert!(msg("Foo(&x): Ws").contains("references"));
         assert!(msg("Foo(): Ws").contains("exactly one field"));
     }

@@ -7,7 +7,7 @@ One root `Msg { key, v }` -> `Feed` (Option<Frame>, keyed) -> `Quoter<Sn>` for N
 (`Some(On::<Sn>(u)): Feed`, exclusive keys) -> one joining node, in three flavours selected by cargo
 features of the generated crate:
 
-  handler    `Oms`, a handler component: `on_update` per fired quoter, `finish`
+  handler    `Oms`, a handler component: `on_update` per fired quoter, then `update`
   component  `Sink`, a regular `Component` with N named inputs: it scans them all and takes the
              quoter with the newest sequence number (what a plain component has to do)
   hand       a hand-written nested match with the quoters' outputs in an array
@@ -60,7 +60,7 @@ main = f"""#![allow(dead_code, unused_imports)]
 use std::sync::atomic::{{AtomicU64, Ordering}};
 use std::time::Instant;
 
-use dataflow_flat::{{Collect, Component, ComponentSubscription, Configs, Handler, Keyed, On, Pipeline, Root, Symbol, UpdateHandler}};
+use dataflow_flat::{{Component, ComponentSubscription, Configs, Keyed, On, Pipeline, Root, Symbol, UpdateHandler}};
 
 pub const N: usize = {n};
 
@@ -102,22 +102,19 @@ pub static DIGEST: AtomicU64 = AtomicU64::new(0);
 #[cfg(feature = "handler")]
 pub mod h {{
     use super::*;
-    #[derive(Handler)]
-    #[handles({handles})]
-    pub struct Oms;
-    impl Collect for Oms {{
+    #[derive(ComponentSubscription)]
+    #[subscribe({handles})]
+    pub struct Oms {{ acc: (u64, u64) }}
+    impl Component for Oms {{
         type Config = ();
         type Output = (u64, u64);
-        type Buf = (u64, u64);
-        fn new((): ()) -> Self {{ Oms }}
+        fn new((): (), _: Self::Init<'_>) -> (Self, (u64, u64)) {{ (Oms {{ acc: (0, 0) }}, (0, 0) ) }}
         #[inline(always)]
-        fn begin(&mut self) -> (u64, u64) {{ (0, 0) }}
-        #[inline(always)]
-        fn finish(&mut self, buf: (u64, u64), _: Self::Input<'_>) -> (u64, u64) {{ buf }}
+        fn update(&mut self, _: Self::Input<'_>) -> (u64, u64) {{ std::mem::take(&mut self.acc) }}
     }}
     impl<S: Symbol> UpdateHandler<Quoter<S>> for Oms {{
         #[inline(always)]
-        fn on_update(&mut self, buf: &mut (u64, u64), v: &(u64, u64)) {{ buf.0 += v.1; buf.1 += 1; }}
+        fn on_update(&mut self, v: &(u64, u64)) {{ self.acc.0 += v.1; self.acc.1 += 1; }}
     }}
     #[derive(ComponentSubscription)]
     #[subscribe(o: Oms)]

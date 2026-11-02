@@ -15,7 +15,7 @@
 //!   each `#[listener]` and calls `Request<S>::add` once per distinct one; the
 //!   listener's `new` gets them as `init.requests`. Doge is on the wire (and a
 //!   variant of the frame enums) but nobody reads it, so it is never requested.
-//! * `OrderSender` is a handler component (`#[derive(Handler)]`): it handles the
+//! * `OrderSender` is a handler component (handled entries in its `#[subscribe]`): it handles the
 //!   three quoters and its `on_update` is called only for the one that changed.
 //! * `BestBid<S>` and `OrderSender` join branches that are mutually exclusive
 //!   (different variants / keys at the same place), which the plan accepts. Join

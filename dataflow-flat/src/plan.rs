@@ -80,8 +80,8 @@ pub(crate) const PG_SEQ: u8 = 0;
 pub(crate) const PG_RUN: u8 = 1;
 pub(crate) const PG_RUN_IF: u8 = 2;
 pub(crate) const PG_SWITCH: u8 = 3;
-/// A handler component's run: `begin`, the `on_update` of the handled edges listed for
-/// the node, `finish` (see `Plan::mk_hrun`).
+/// A handler component's run: the `on_update` of the handled edges listed for
+/// the node, then `update` (see `Plan::mk_hrun`).
 pub(crate) const PG_HRUN: u8 = 4;
 /// Items (handled edges that may fire) of all handler runs in the program.
 const HPOOL: usize = 1 << 17;
@@ -1530,8 +1530,8 @@ impl Plan {
 
     // -- handler components ----------------------------------------------------
     //
-    // A handler's run is `begin`, one `on_update` per handled edge that fired,
-    // `finish`. Under the context of decisions known to hold, each handled edge
+    // A handler's run is one `on_update` per handled edge that fired, then
+    // `update`. Under the context of decisions known to hold, each handled edge
     // is classified: it fired (its parent ran and its selectors match), it did
     // not (the parent cannot have run, or a selector decision excludes the
     // context), or it may have (then the parent's flag and/or the selector match
@@ -2451,7 +2451,7 @@ mod trace {
 mod handler_trace {
     use super::*;
     use crate::sinks::Anchor;
-    use crate::{Collect, Component, ComponentSubscription, Handler, Root, UpdateHandler};
+    use crate::{Component, ComponentSubscription, Root, UpdateHandler};
 
     #[derive(Root)]
     pub struct Poll;
@@ -2486,34 +2486,29 @@ mod handler_trace {
     scomp!(Y, [K1(p): Poll]);
     scomp!(Z, [p: Poll]);
 
-    #[derive(Handler)]
-    #[handles(X, Y)]
+    #[derive(ComponentSubscription)]
+    #[subscribe(X, Y)]
     pub struct H;
-    impl Collect for H {
+    impl Component for H {
         type Config = ();
         type Output = u8;
-        type Buf = ();
-        fn new((): ()) -> Self { H }
-        fn begin(&mut self) {}
-        fn finish(&mut self, (): (), _: Self::Input<'_>) -> u8 { 0 }
+        fn new((): (), _: Self::Init<'_>) -> (Self, u8) { (H, 0) }
+        fn update(&mut self, _: Self::Input<'_>) -> u8 { 0 }
     }
-    impl UpdateHandler<X> for H { fn on_update(&mut self, _: &mut (), _: &u8) {} }
-    impl UpdateHandler<Y> for H { fn on_update(&mut self, _: &mut (), _: &u8) {} }
+    impl UpdateHandler<X> for H { fn on_update(&mut self, _: &u8) {} }
+    impl UpdateHandler<Y> for H { fn on_update(&mut self, _: &u8) {} }
 
-    #[derive(Handler)]
-    #[handles(X, Y)]
-    #[subscribe(z: Z)]
+    #[derive(ComponentSubscription)]
+    #[subscribe(X, Y, z: Z)]
     pub struct G;
-    impl Collect for G {
+    impl Component for G {
         type Config = ();
         type Output = u8;
-        type Buf = ();
-        fn new((): ()) -> Self { G }
-        fn begin(&mut self) {}
-        fn finish(&mut self, (): (), _: Self::Input<'_>) -> u8 { 0 }
+        fn new((): (), _: Self::Init<'_>) -> (Self, u8) { (G, 0) }
+        fn update(&mut self, _: Self::Input<'_>) -> u8 { 0 }
     }
-    impl UpdateHandler<X> for G { fn on_update(&mut self, _: &mut (), _: &u8) {} }
-    impl UpdateHandler<Y> for G { fn on_update(&mut self, _: &mut (), _: &u8) {} }
+    impl UpdateHandler<X> for G { fn on_update(&mut self, _: &u8) {} }
+    impl UpdateHandler<Y> for G { fn on_update(&mut self, _: &u8) {} }
 
     /// Inside a switch leaf the fired edges are static: one item per leaf and no tests.
     #[test]
@@ -2548,7 +2543,7 @@ mod handler_trace {
 mod shapes {
     use super::*;
     use crate::sinks::Anchor;
-    use crate::{Collect, Component, ComponentSubscription, Handler, Root, UpdateHandler};
+    use crate::{Component, ComponentSubscription, Root, UpdateHandler};
 
     #[derive(Root)]
     pub struct Poll;
@@ -2596,33 +2591,28 @@ mod shapes {
     // two-level: X0 under K0 then a nested keyed read
     comp!(Deep, [x: X0, K0(p): Poll]);
 
-    #[derive(Handler)]
-    #[handles(X0, X1, X2, X3, X4, X5)]
+    #[derive(ComponentSubscription)]
+    #[subscribe(X0, X1, X2, X3, X4, X5)]
     pub struct HH;
-    impl Collect for HH {
+    impl Component for HH {
         type Config = ();
         type Output = u8;
-        type Buf = ();
-        fn new((): ()) -> Self { HH }
-        fn begin(&mut self) {}
-        fn finish(&mut self, (): (), _: Self::Input<'_>) -> u8 { 0 }
+        fn new((): (), _: Self::Init<'_>) -> (Self, u8) { (HH, 0) }
+        fn update(&mut self, _: Self::Input<'_>) -> u8 { 0 }
     }
-    macro_rules! upd { ($($x:ident),*) => { $(impl UpdateHandler<$x> for HH { fn on_update(&mut self, _: &mut (), _: &u8) {} })* }; }
+    macro_rules! upd { ($($x:ident),*) => { $(impl UpdateHandler<$x> for HH { fn on_update(&mut self, _: &u8) {} })* }; }
     upd!(X0, X1, X2, X3, X4, X5);
 
-    #[derive(Handler)]
-    #[handles(X0, X1, X2, X3, X4, X5)]
-    #[subscribe(z: Z)]
+    #[derive(ComponentSubscription)]
+    #[subscribe(X0, X1, X2, X3, X4, X5, z: Z)]
     pub struct HZ;
-    impl Collect for HZ {
+    impl Component for HZ {
         type Config = ();
         type Output = u8;
-        type Buf = ();
-        fn new((): ()) -> Self { HZ }
-        fn begin(&mut self) {}
-        fn finish(&mut self, (): (), _: Self::Input<'_>) -> u8 { 0 }
+        fn new((): (), _: Self::Init<'_>) -> (Self, u8) { (HZ, 0) }
+        fn update(&mut self, _: Self::Input<'_>) -> u8 { 0 }
     }
-    macro_rules! updz { ($($x:ident),*) => { $(impl UpdateHandler<$x> for HZ { fn on_update(&mut self, _: &mut (), _: &u8) {} })* }; }
+    macro_rules! updz { ($($x:ident),*) => { $(impl UpdateHandler<$x> for HZ { fn on_update(&mut self, _: &u8) {} })* }; }
     updz!(X0, X1, X2, X3, X4, X5);
 
     /// Program shapes of a few graphs: join of exclusive keys, mixed, handlers, plain.

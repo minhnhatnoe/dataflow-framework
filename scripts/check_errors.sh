@@ -480,36 +480,45 @@ impl Component for A {
 fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }
 EOF2
 
-# --- handler components ------------------------------------------------------------------------------
+# --- handler components (handled entries in `#[subscribe]`) ----------------------------------------------
 read -r -d '' HANDLERS <<'EOF'
-use dataflow_flat::{Collect, Handler, UpdateHandler};
+use dataflow_flat::UpdateHandler;
 macro_rules! handler {
     ($name:ident, [$($attr:tt)*]) => {
-        #[derive(Handler)]
+        #[derive(ComponentSubscription)]
         $($attr)*
-        pub struct $name;
-        impl Collect for $name {
+        pub struct $name { acc: u64 }
+        impl Component for $name {
             type Config = ();
             type Output = u64;
-            type Buf = u64;
-            fn new((): ()) -> Self { $name }
-            fn begin(&mut self) -> u64 { 0 }
-            fn finish(&mut self, buf: u64, _: Self::Input<'_>) -> u64 { buf }
+            fn new((): (), _: Self::Init<'_>) -> (Self, u64) { ($name { acc: 0 }, 0) }
+            fn update(&mut self, _: Self::Input<'_>) -> u64 { self.acc }
         }
     };
 }
 EOF
 
-# A handled edge without an `UpdateHandler` impl: the on_unimplemented message.
+# A handled entry without an `UpdateHandler` impl: the on_unimplemented message, naming the entry and the impl to write.
 CMD[handler_missing_update]=check
-PATTERN[handler_missing_update]='E0277.*does not handle the edge|does not handle the edge.*E0277'
+PATTERN[handler_missing_update]='E0277.*`H` subscribes to `B` without a handler for it'
 BODY[handler_missing_update]="$SELECTORS
 $HANDLERS
 comp!(A, [K0(p): Poll]);
 comp!(B, [K1(p): Poll]);
-handler!(H, [#[handles(A, B)]]);
-impl UpdateHandler<A> for H { fn on_update(&mut self, buf: &mut u64, v: &u64) { *buf += *v; } }
+handler!(H, [#[subscribe(A, B)]]);
+impl UpdateHandler<A> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
 fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }"
+
+# The note shows the impl to write.
+CMD[handler_missing_update_note]=check
+PATTERN[handler_missing_update_note]='write `impl UpdateHandler<B> for H'
+BODY[handler_missing_update_note]="$SELECTORS
+$HANDLERS
+comp!(A, [K0(p): Poll]);
+comp!(B, [K1(p): Poll]);
+handler!(H, [#[subscribe(A, B)]]);
+impl UpdateHandler<A> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
+fn main() {}"
 
 # Rule 4 still applies to handled edges: two guards can fire in the same step.
 CMD[handler_non_exclusive_join]=build
@@ -518,38 +527,47 @@ BODY[handler_non_exclusive_join]="$SELECTORS
 $HANDLERS
 comp!(A, [G1(p): Poll]);
 comp!(B, [G2(p): Poll]);
-handler!(H, [#[handles(A, B)]]);
-impl UpdateHandler<A> for H { fn on_update(&mut self, buf: &mut u64, v: &u64) { *buf += *v; } }
-impl UpdateHandler<B> for H { fn on_update(&mut self, buf: &mut u64, v: &u64) { *buf += *v; } }
+handler!(H, [#[subscribe(A, B)]]);
+impl UpdateHandler<A> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
+impl UpdateHandler<B> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
 fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }"
 
-# Exclusive handled edges compile (and a handled edge is not subject to rule 5).
+# Exclusive handled edges compile (and a handled edge is not subject to rule 5); a selected handled edge `K0(_): Poll`
+# is keyed by the marker `h_edges::K0`.
 CMD[handler_exclusive_ok]=build
 PATTERN[handler_exclusive_ok]='NOERROR'
 BODY[handler_exclusive_ok]="$SELECTORS
 $HANDLERS
 comp!(A, [K0(p): Poll]);
 comp!(B, [K1(p): Poll]);
-handler!(H, [#[handles(A, B)] #[handles(K0(sel): Poll)]]);
-impl UpdateHandler<A> for H { fn on_update(&mut self, buf: &mut u64, v: &u64) { *buf += *v; } }
-impl UpdateHandler<B> for H { fn on_update(&mut self, buf: &mut u64, v: &u64) { *buf += *v; } }
-impl UpdateHandler<h_edges::Sel> for H { fn on_update(&mut self, buf: &mut u64, v: &Poll) { *buf += 1; } }
+handler!(H, [#[subscribe(A, B)] #[subscribe(K0(_): Poll)]]);
+impl UpdateHandler<A> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
+impl UpdateHandler<B> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
+impl UpdateHandler<h_edges::K0> for H { fn on_update(&mut self, _: &Poll) { self.acc += 1; } }
 fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }"
 
-# A plain `#[subscribe]` input of a handler can't carry selectors.
-CMD[handler_selected_input]=check
-PATTERN[handler_selected_input]="can't use selectors"
-BODY[handler_selected_input]="$SELECTORS
+# Two selected handled entries ending in the same selector would share one `UpdateHandler` key.
+CMD[handler_duplicate_marker]=check
+PATTERN[handler_duplicate_marker]='two handled entries end in the selector `K0`'
+BODY[handler_duplicate_marker]="$SELECTORS
 $HANDLERS
-handler!(H, [#[subscribe(K0(p): Poll)]]);
+handler!(H, [#[subscribe(K0(_): Poll, K0(_): Poll)]]);
 fn main() {}"
 
-# A plain input that is the root has no value at build, when `finish` runs for the initial output.
-CMD[handler_root_input]=check
-PATTERN[handler_root_input]='plain `#\[subscribe\]` input of a handler must be a component'
-BODY[handler_root_input]="$HANDLERS
-handler!(H, [#[handles(Src)] #[subscribe(p: Poll)]]);
-impl UpdateHandler<Src> for H { fn on_update(&mut self, buf: &mut u64, v: &u64) { *buf += *v; } }
+# A selected handled entry without its impl names the marker.
+CMD[handler_selected_missing_update]=check
+PATTERN[handler_selected_missing_update]='E0277.*`H` subscribes to `h_edges::K0` without a handler for it'
+BODY[handler_selected_missing_update]="$SELECTORS
+$HANDLERS
+handler!(H, [#[subscribe(K0(_): Poll)]]);
+fn main() {}"
+
+# A bare `_` is not a pattern.
+CMD[handler_bare_wildcard]=check
+PATTERN[handler_bare_wildcard]='a bare `_` is not a pattern'
+BODY[handler_bare_wildcard]="$SELECTORS
+$HANDLERS
+handler!(H, [#[subscribe(_: Poll)]]);
 fn main() {}"
 
 
@@ -571,8 +589,6 @@ pat_case pattern_range_literal 'Foo(1..=3)' 'literal patterns are not supported'
 pat_case pattern_guard 'Foo(x) if x > 1' 'guards are not supported'
 pat_case pattern_or 'Foo(x) | Bar(x)' 'or-patterns are not supported'
 pat_case pattern_literal 'Some(3)' 'literal patterns are not supported'
-pat_case pattern_wildcard 'Some(_)' 'a wildcard `_` is not a selector'
-pat_case pattern_wildcard_selector '_(x)' 'a wildcard `_` is not a selector'
 pat_case pattern_reference 'Some(&x)' 'references are not supported'
 
 # `=>` is gone: the message says how to write the pattern.
@@ -584,9 +600,9 @@ BODY[pattern_arrow]='
 pub struct A;
 fn main() {}'
 
-# A bare uppercase name is a unit selector; one that names no type is rustc's E0425 "cannot find type" (at the struct).
+# A bare uppercase name is a unit selector; one that names no type is rustc's E0425 "cannot find type", reported at the attribute.
 CMD[unit_selector_unknown]=check
-PATTERN[unit_selector_unknown]='E0425.*cannot find type `Disconnected` in this scope'
+PATTERN[unit_selector_unknown]='E0425.*cannot find type `Disconnected` in this scope.*subscribe\(Disconnected: Src\)'
 BODY[unit_selector_unknown]='
 #[derive(ComponentSubscription)]
 #[subscribe(Disconnected: Src)]
@@ -721,9 +737,9 @@ ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        keep_input_reference name_input_struct_outside unused_config
        non_exclusive_join exclusive_join_ok deep_non_exclusive_join deep_exclusive_join_ok demux_reader_not_implied selector_unreachable_component
        selector_wrong_input orphan_first on_not_keyed symbols_share_key
-       handler_missing_update handler_non_exclusive_join handler_exclusive_ok handler_selected_input handler_root_input
+       handler_missing_update handler_missing_update_note handler_non_exclusive_join handler_exclusive_ok handler_duplicate_marker handler_selected_missing_update handler_bare_wildcard
        pattern_struct pattern_multi_field pattern_range pattern_range_literal pattern_guard pattern_or pattern_literal
-       pattern_wildcard pattern_wildcard_selector pattern_reference pattern_arrow unit_selector_unknown unit_selector_data_variant pattern_ok
+       pattern_reference pattern_arrow unit_selector_unknown unit_selector_data_variant pattern_ok
        listener_missing_request listener_request_ok)
 
 run_case() {

@@ -134,13 +134,13 @@ pub use select::ChainKey;
 #[doc(hidden)]
 pub use select::SelectChain;
 pub use sinks::{SinkList, Sinks};
-pub use handler::{Collect, HandledEdge, UpdateHandler};
+pub use handler::{HandledEdge, UpdateHandler};
 #[doc(hidden)]
-pub use handler::{FeedInit, Hd, HdChain, InitRef};
+pub use handler::{Hd, HdChain};
 
 // Used by the derives' output.
 #[doc(hidden)]
 pub use node::{CompKind, RootKind, __private, KIND_COMPONENT, KIND_ROOT};
 
 // The derive macros share their names with the traits, in the macro namespace.
-pub use dataflow_macros::{ComponentSubscription, Demux, Handler, Root};
+pub use dataflow_macros::{ComponentSubscription, Demux, Root};

@@ -1,24 +1,29 @@
-//! Handler components: a second way to define a component, for a node that
-//! joins many upstreams and only cares about the ones that fired.
+//! Handler components: a component whose `#[subscribe]` lists *handled* entries.
 //!
 //! ```ignore
-//! #[derive(Handler)]
-//! #[handles(Quoter<Btc>, Quoter<Eth>)]      // handled edges (plain, or `Sel(f): P`)
-//! #[subscribe(limits: RiskLimits)]          // plain inputs, read in `finish`
-//! struct Oms { .. }
+//! #[derive(ComponentSubscription)]
+//! #[subscribe(limits: Limits, Average, DoorCount)]   // named: input to `update`; unnamed: goes to its handler
+//! pub struct Log { pending: Vec<String> }
 //!
-//! impl Collect for Oms { type Config; type Output; type Buf;
-//!     fn new(config) -> Self; fn begin(&mut self) -> Buf; fn finish(&mut self, buf, input) -> Output; }
-//! impl<S: Symbol> UpdateHandler<Quoter<S>> for Oms {
-//!     fn on_update(&mut self, buf: &mut Self::Buf, v: &<Quoter<S> as Node>::Output) { .. }
+//! impl Component for Log { /* new, and `update`: once per push when any input fired,
+//!                            after that push's `on_update`s */ }
+//! impl UpdateHandler<Average> for Log {
+//!     fn on_update(&mut self, avg: &i32) { self.pending.push(format!("{avg}")); }
 //! }
 //! ```
 //!
-//! A handler is a node with a stored output like a [`Component`](crate::Component);
-//! it runs iff one of its edges (handled or plain) fired. When it runs:
-//! `begin`, then `on_update` for each handled edge that fired in this step (in
-//! the execution order of their parents), then `finish`, whose result is
-//! stored.
+//! A bare type is a handled entry keyed by the node type. A selected handled
+//! entry is written with `_` as the leaf, `Some(On::<Btc>(_)): Ws`, and is
+//! keyed by a marker the derive generates, `<struct_snake>_edges::Btc` (named
+//! after the innermost selector, or its one generic argument), because the
+//! value's type depends on the parent and the orphan rules forbid an impl of
+//! [`HandledEdge`] for the selector itself.
+//!
+//! The component is an ordinary one with a stored output (`update`'s result);
+//! it runs iff one of its edges (handled or named) fired. When it runs, each
+//! handled edge that fired in this push gets `on_update` (in the execution
+//! order of their parents), then `update` is called once. Neither is called
+//! at build: `new` returns the initial output.
 //!
 //! # In the plan and the push program
 //!
@@ -33,7 +38,7 @@
 
 use std::marker::PhantomData;
 
-use crate::component::ComponentSubscription;
+use crate::component::{Component, ComponentSubscription};
 use crate::drive::{CondAt, Ch, EntryOf, ExecK, FiredOps, HRunK, Pn, PnC, PushCtx, PushPh, Rg, RgCl};
 use crate::flat::{Inner, Leaf, NthT};
 use crate::gather::{ChainSeed, GatherIn, Layout, Ready, Source};
@@ -52,30 +57,16 @@ impl<N: Node> HandledEdge for N {
     type Value = N::Output;
 }
 
-/// The handler side of a component: replaces `Component::{new, update}`.
-pub trait Collect: ComponentSubscription + Sized {
-    /// Owned configuration passed to `new`; `Default::default()` if none is supplied.
-    type Config: Default + 'static;
-    /// Stored after each run; what subscribers read.
-    type Output: 'static;
-    /// What `begin` hands to the `on_update` calls and `finish`.
-    type Buf;
-    /// Build the handler (once, in execution order, when the pipeline is built).
-    fn new(config: Self::Config) -> Self;
-    /// Start a run (also called once at build for the initial output).
-    fn begin(&mut self) -> Self::Buf;
-    /// End a run: the new output. `input` has the plain `#[subscribe]` inputs.
-    fn finish(&mut self, buf: Self::Buf, input: Self::Input<'_>) -> Self::Output;
-}
-
 /// `on_update` of the handled edge `E`. A missing impl for a listed edge is a
 /// compile error pointing at the handler.
 #[diagnostic::on_unimplemented(
-    message = "`{Self}` does not handle the edge `{E}`",
-    label = "`{Self}` lists `{E}` in `#[handles(..)]` but has no `UpdateHandler<{E}>` impl"
+    message = "`{Self}` subscribes to `{E}` without a handler for it",
+    label = "`{Self}` has `{E}` in `#[subscribe(..)]` as a handled entry, but no `UpdateHandler<{E}>` impl",
+    note = "write `impl UpdateHandler<{E}> for {Self} {{ fn on_update(&mut self, v: &<value>) {{ .. }} }}`, or give the entry a name (`name: ..`) to read it in `update`"
 )]
-pub trait UpdateHandler<E: HandledEdge>: Collect {
-    fn on_update(&mut self, buf: &mut Self::Buf, v: &E::Value);
+pub trait UpdateHandler<E: HandledEdge>: Component {
+    /// Called once per push in which the edge `E` fired, before `update`.
+    fn on_update(&mut self, v: &E::Value);
 }
 
 /// The selector chain of a handled edge: `C` with the marker `Em`. Reads as
@@ -148,44 +139,6 @@ const impl<In, Em, C: [const] ChainWalk<In>> ChainWalk<In> for Hd<Em, C> {
 }
 
 // ---------------------------------------------------------------------------
-// The initial output: used by the code the derive generates for `Component::new`
-// ---------------------------------------------------------------------------
-
-/// What `new` was given for a handled edge: a reference to the initial output
-/// of a component parent (then `on_update` is called with it), or `()` (the
-/// root, or a selected edge: nothing to call).
-#[doc(hidden)]
-pub trait FeedInit<H: Collect, E: HandledEdge> {
-    fn feed(self, h: &mut H, buf: &mut H::Buf);
-}
-impl<H: Collect, E: HandledEdge> FeedInit<H, E> for () {
-    #[inline]
-    fn feed(self, _: &mut H, _: &mut H::Buf) {}
-}
-impl<'a, H: UpdateHandler<E>, E: HandledEdge> FeedInit<H, E> for &'a E::Value {
-    #[inline]
-    fn feed(self, h: &mut H, buf: &mut H::Buf) {
-        h.on_update(buf, self)
-    }
-}
-
-/// A plain input of a handler as the reference `finish` gets at build time.
-#[doc(hidden)]
-#[diagnostic::on_unimplemented(
-    message = "a plain `#[subscribe]` input of a handler must be a component",
-    label = "`finish` is also called at build, when the root has no value; use a component that stores it, or handle the edge in `#[handles]`"
-)]
-pub trait InitRef<'a, O: 'static> {
-    fn out(self) -> &'a O;
-}
-impl<'a, O: 'static> InitRef<'a, O> for &'a O {
-    #[inline]
-    fn out(self) -> &'a O {
-        self
-    }
-}
-
-// ---------------------------------------------------------------------------
 // The push: one handled edge, the items of a run, the run
 // ---------------------------------------------------------------------------
 
@@ -201,10 +154,10 @@ impl<A: Planned, Q: Rg, const K: usize> HiOf<A, Q, K> {
 
 /// Item `K`: if the handled edge fired, `on_update` it.
 #[doc(hidden)]
-pub trait HItemAt<Ph, H: Collect, const P: usize, const I: usize, const M: usize>: Layout {
-    fn item(ctx: &mut PushCtx<'_, Self>, buf: &mut H::Buf);
+pub trait HItemAt<Ph, H: Component, const P: usize, const I: usize, const M: usize>: Layout {
+    fn item(ctx: &mut PushCtx<'_, Self>);
 }
-impl<A: Layout, H: Collect, const P: usize, const I: usize, const M: usize> HItemAt<PushPh<A>, H, P, I, M> for A
+impl<A: Layout, H: Component, const P: usize, const I: usize, const M: usize> HItemAt<PushPh<A>, H, P, I, M> for A
 where
     A: NthT<P, T = H>,
     A: EntryOf<PushPh<A>, P, I>,
@@ -220,7 +173,7 @@ where
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn item(ctx: &mut PushCtx<'_, A>, buf: &mut H::Buf) {
+    fn item(ctx: &mut PushCtx<'_, A>) {
         type E<A, const P: usize, const I: usize> = <A as EntryOf<PushPh<A>, P, I>>::E;
         type C<A, const P: usize, const I: usize> = <A as EntryOf<PushPh<A>, P, I>>::Ch;
         let x = <E<A, P, I> as Source<A>>::fetch(ctx.root, &*ctx.outs);
@@ -230,7 +183,6 @@ where
         {
             <H as UpdateHandler<<C<A, P, I> as HdChain<<E<A, P, I> as Node>::Output>>::Em>>::on_update(
                 <A::States as AtPos<H, P>>::at_mut(&mut *ctx.states),
-                buf,
                 <C<A, P, I> as HdChain<<E<A, P, I> as Node>::Output>>::value(x),
             );
         }
@@ -246,20 +198,20 @@ impl<A: Planned, const N: usize> Rg for HItems<A, N> {
 }
 
 #[doc(hidden)]
-pub trait HDrive<A: Layout, Ph, H: Collect, const P: usize, Cl>: Rg {
-    fn items(ctx: &mut PushCtx<'_, A>, buf: &mut H::Buf);
+pub trait HDrive<A: Layout, Ph, H: Component, const P: usize, Cl>: Rg {
+    fn items(ctx: &mut PushCtx<'_, A>);
 }
 macro_rules! h_leaf {
     ($n:literal; $($k:literal)*) => {
-        impl<A: Layout, Ph, H: Collect, const P: usize, Q: Rg> HDrive<A, Ph, H, P, Leaf<$n>> for Q
+        impl<A: Layout, Ph, H: Component, const P: usize, Q: Rg> HDrive<A, Ph, H, P, Leaf<$n>> for Q
         where
             $(A: HItemAt<Ph, H, P, { HiOf::<A, Q, $k>::POS }, { HiOf::<A, Q, $k>::MODE }>,)*
         {
             #[cfg_attr(not(debug_assertions), inline(always))]
             #[cfg_attr(debug_assertions, inline)]
             #[allow(unused_variables)]
-            fn items(ctx: &mut PushCtx<'_, A>, buf: &mut H::Buf) {
-                $(<A as HItemAt<Ph, H, P, { HiOf::<A, Q, $k>::POS }, { HiOf::<A, Q, $k>::MODE }>>::item(ctx, buf);)*
+            fn items(ctx: &mut PushCtx<'_, A>) {
+                $(<A as HItemAt<Ph, H, P, { HiOf::<A, Q, $k>::POS }, { HiOf::<A, Q, $k>::MODE }>>::item(ctx);)*
             }
         }
     };
@@ -267,15 +219,15 @@ macro_rules! h_leaf {
 dataflow_macros::leaf_idx!(h_leaf);
 macro_rules! h_inner {
     ($($k:literal)*) => {
-        impl<A: Layout, Ph, H: Collect, const P: usize, Q: Rg> HDrive<A, Ph, H, P, Inner> for Q
+        impl<A: Layout, Ph, H: Component, const P: usize, Q: Rg> HDrive<A, Ph, H, P, Inner> for Q
         where
             $(Ch<Q, $k>: RgCl,
               Ch<Q, $k>: HDrive<A, Ph, H, P, <Ch<Q, $k> as RgCl>::Cl>,)*
         {
             #[cfg_attr(not(debug_assertions), inline(always))]
             #[cfg_attr(debug_assertions, inline)]
-            fn items(ctx: &mut PushCtx<'_, A>, buf: &mut H::Buf) {
-                $(<Ch<Q, $k> as HDrive<A, Ph, H, P, <Ch<Q, $k> as RgCl>::Cl>>::items(ctx, buf);)*
+            fn items(ctx: &mut PushCtx<'_, A>) {
+                $(<Ch<Q, $k> as HDrive<A, Ph, H, P, <Ch<Q, $k> as RgCl>::Cl>>::items(ctx);)*
             }
         }
     };
@@ -290,10 +242,9 @@ pub trait HRunAt<Ph, const P: usize, const N: usize>: Layout {
 
 #[cfg_attr(not(debug_assertions), inline(always))]
 #[cfg_attr(debug_assertions, inline)]
-fn hrun_at<A: Layout, H: Collect + Comp, const P: usize, const N: usize>(ctx: &mut PushCtx<'_, A>)
+fn hrun_at<A: Layout, H: Component + Comp, const P: usize, const N: usize>(ctx: &mut PushCtx<'_, A>)
 where
     A: NthT<P, T = H>,
-    H: Collect<Output = <H as Node>::Output>,
     <H as ComponentSubscription>::Deps: GatherIn<A> + Ready<A>,
     A::States: AtPos<H, P>,
     A::Outs: AtPos<<H as Node>::Output, P>,
@@ -305,11 +256,10 @@ where
     {
         return;
     }
-    let mut buf = <A::States as AtPos<H, P>>::at_mut(&mut *ctx.states).begin();
-    <HItems<A, N> as HDrive<A, PushPh<A>, H, P, <HItems<A, N> as RgCl>::Cl>>::items(ctx, &mut buf);
+    <HItems<A, N> as HDrive<A, PushPh<A>, H, P, <HItems<A, N> as RgCl>::Cl>>::items(ctx);
     let out = {
         let inputs = <<H as ComponentSubscription>::Deps as GatherIn<A>>::gather(ctx.root, &*ctx.outs);
-        <A::States as AtPos<H, P>>::at_mut(&mut *ctx.states).finish(buf, <H as ComponentSubscription>::input(inputs))
+        <A::States as AtPos<H, P>>::at_mut(&mut *ctx.states).update(<H as ComponentSubscription>::input(inputs))
     };
     *<A::Outs as AtPos<<H as Node>::Output, P>>::at_mut(&mut *ctx.outs) = out;
     if CondAt::<A, P>::FLAG != NO_FLAG {
@@ -320,8 +270,7 @@ where
 impl<A: Layout, const P: usize, const N: usize> HRunAt<PushPh<A>, P, N> for A
 where
     A: NthT<P>,
-    <A as NthT<P>>::T: Collect + Comp,
-    <A as NthT<P>>::T: Collect<Output = <<A as NthT<P>>::T as Node>::Output>,
+    <A as NthT<P>>::T: Component + Comp,
     <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A> + Ready<A>,
     A::States: AtPos<<A as NthT<P>>::T, P>,
     A::Outs: AtPos<<<A as NthT<P>>::T as Node>::Output, P>,

@@ -1,16 +1,15 @@
-//! Handler components (`#[derive(Handler)]`, `Collect`, `UpdateHandler`): only
-//! the edges that fired reach `on_update`, in execution order; `finish` once per
-//! step; the initial output is built through the handlers; plain inputs in
-//! `finish`; lifecycle; order across a mix with regular components; selected
-//! handled edges. No `#![feature]` here.
+//! Handler components (handled entries in `#[subscribe]`, `UpdateHandler`):
+//! only the edges that fired reach `on_update`, in execution order; `update`
+//! once per push, after them; nothing is called at build; named inputs;
+//! lifecycle; order across a mix with regular components; selected handled
+//! edges. No `#![feature]` here.
 
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use dataflow_flat::{
-    Collect, Component, ComponentSubscription, Configs, Demux, Handler, Keyed, On, Pipeline, Root, Symbol,
-    UpdateHandler,
+    Component, ComponentSubscription, Configs, Demux, Keyed, On, Pipeline, Root, Symbol, UpdateHandler,
 };
 
 static LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -114,28 +113,23 @@ static DROPS: AtomicUsize = AtomicUsize::new(0);
 // An OMS over exclusive keys: every run is a switch leaf, edges known statically
 // ---------------------------------------------------------------------------
 
-#[derive(Handler)]
-#[handles(Quoter<Btc>, Quoter<Eth>, Quoter<Sol>)]
+#[derive(ComponentSubscription)]
+#[subscribe(Quoter<Btc>, Quoter<Eth>, Quoter<Sol>)]
 pub struct Oms {
-    scratch: Vec<String>,
+    pending: Vec<String>,
 }
-impl Collect for Oms {
+impl Component for Oms {
     type Config = ();
     type Output = Vec<String>;
-    type Buf = Vec<String>;
-    fn new((): ()) -> Self {
+    fn new((): (), _: Self::Init<'_>) -> (Self, Vec<String>) {
         log("Oms.new");
         NEWS.fetch_add(1, Ordering::SeqCst);
         LIVE.fetch_add(1, Ordering::SeqCst);
-        Oms { scratch: Vec::new() }
+        (Oms { pending: Vec::new() }, Vec::new())
     }
-    fn begin(&mut self) -> Vec<String> {
-        log("Oms.begin");
-        std::mem::take(&mut self.scratch)
-    }
-    fn finish(&mut self, buf: Vec<String>, _: Self::Input<'_>) -> Vec<String> {
-        log("Oms.finish");
-        buf
+    fn update(&mut self, _: Self::Input<'_>) -> Vec<String> {
+        log("Oms.update");
+        std::mem::take(&mut self.pending)
     }
 }
 impl Drop for Oms {
@@ -145,9 +139,9 @@ impl Drop for Oms {
     }
 }
 impl<S: Symbol> UpdateHandler<Quoter<S>> for Oms {
-    fn on_update(&mut self, buf: &mut Vec<String>, v: &u64) {
+    fn on_update(&mut self, v: &u64) {
         log(format!("Oms.on<{}>", S::NAME));
-        buf.push(format!("{}={}", S::NAME, v));
+        self.pending.push(format!("{}={}", S::NAME, v));
     }
 }
 
@@ -178,12 +172,12 @@ fn only_the_fired_quoter_reaches_on_update() {
     p.push(Msg { key: Some(1), v: 5 });
     assert_eq!(
         take(),
-        ["Ws.update", "Quoter<Eth>", "Oms.begin", "Oms.on<Eth>", "Oms.finish", r#"Report["Eth=10"]"#]
+        ["Ws.update", "Quoter<Eth>", "Oms.on<Eth>", "Oms.update", r#"Report["Eth=10"]"#]
     );
     p.push(Msg { key: Some(0), v: 3 });
     assert_eq!(
         take(),
-        ["Ws.update", "Quoter<Btc>", "Oms.begin", "Oms.on<Btc>", "Oms.finish", r#"Report["Btc=6"]"#]
+        ["Ws.update", "Quoter<Btc>", "Oms.on<Btc>", "Oms.update", r#"Report["Btc=6"]"#]
     );
     // No quoter fires: the handler does not run, Report neither.
     p.push(Msg { key: Some(9), v: 1 });
@@ -193,7 +187,7 @@ fn only_the_fired_quoter_reaches_on_update() {
 }
 
 #[test]
-fn finish_runs_once_per_step() {
+fn update_runs_once_per_push() {
     let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut p = P::build(Configs::new()).unwrap();
     take();
@@ -202,30 +196,24 @@ fn finish_runs_once_per_step() {
     }
     let l = take();
     let count = |s: &str| l.iter().filter(|x| *x == s).count();
-    assert_eq!(count("Oms.begin"), 5);
-    assert_eq!(count("Oms.finish"), 5);
+    assert_eq!(count("Oms.update"), 5);
     assert_eq!(count("Oms.on<Btc>"), 2);
     assert_eq!(count("Oms.on<Eth>"), 1);
     assert_eq!(count("Oms.on<Sol>"), 2);
 }
 
 #[test]
-fn the_initial_output_is_built_through_the_handlers() {
+fn nothing_is_called_at_build() {
     let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     take();
     let _p = P::build(Configs::new()).unwrap();
     let l = take();
-    // Quoters hold initial outputs 1000 + key; the handler saw each, in listing order,
-    // between its begin and finish; Report's `new` got the result.
+    // Quoters hold initial outputs 1000 + key, but the handler is not fed them:
+    // `new` returned the initial output (empty), which Report's `new` got.
     let at = |s: &str| l.iter().position(|x| x == s).unwrap_or_else(|| panic!("{s} in {l:?}"));
     assert!(at("Quoter<Sol>.new") < at("Oms.new"));
-    assert!(at("Oms.new") < at("Oms.begin"));
-    assert!(at("Oms.begin") < at("Oms.on<Btc>"));
-    assert!(at("Oms.on<Btc>") < at("Oms.on<Eth>") && at("Oms.on<Eth>") < at("Oms.on<Sol>"));
-    assert!(at("Oms.on<Sol>") < at("Oms.finish"));
-    assert!(at("Oms.finish") < at(r#"Report.new["Btc=1000", "Eth=1001", "Sol=1002"]"#));
-    // Nothing ran as a step.
-    assert!(!l.iter().any(|x| x == "Ws.update"));
+    assert!(at("Oms.new") < at("Report.new[]"));
+    assert!(!l.iter().any(|x| x.starts_with("Oms.on") || x == "Oms.update" || x == "Ws.update"), "{l:?}");
 }
 
 #[test]
@@ -247,37 +235,34 @@ fn lifecycle_new_once_dropped_once() {
 }
 
 // ---------------------------------------------------------------------------
-// Plain inputs in finish, and a handler whose run is not known statically
+// Named inputs in update, and a handler whose run is not known statically
 // ---------------------------------------------------------------------------
 
 /// Joins the three quoters (known statically only partly) and reads `Limits`,
 /// which runs on every push: the handler runs every step, its edges are
 /// tested at run time.
-#[derive(Handler)]
-#[handles(Quoter<Btc>, Quoter<Eth>)]
-#[subscribe(limits: Limits)]
-pub struct OmsL;
-impl Collect for OmsL {
+#[derive(ComponentSubscription)]
+#[subscribe(Quoter<Btc>, Quoter<Eth>, limits: Limits)]
+pub struct OmsL {
+    acc: (u64, usize),
+}
+impl Component for OmsL {
     type Config = ();
     type Output = (u64, usize);
-    type Buf = (u64, usize);
-    fn new((): ()) -> Self {
-        OmsL
+    fn new((): (), i: Self::Init<'_>) -> (Self, (u64, usize)) {
+        (OmsL { acc: (0, 0) }, (*i.limits, 0))
     }
-    fn begin(&mut self) -> (u64, usize) {
-        log("OmsL.begin");
-        (0, 0)
-    }
-    fn finish(&mut self, buf: (u64, usize), i: Self::Input<'_>) -> (u64, usize) {
-        log("OmsL.finish");
-        (buf.0 + *i.limits, buf.1)
+    fn update(&mut self, i: Self::Input<'_>) -> (u64, usize) {
+        log("OmsL.update");
+        let acc = std::mem::take(&mut self.acc);
+        (acc.0 + *i.limits, acc.1)
     }
 }
 impl<S: Symbol> UpdateHandler<Quoter<S>> for OmsL {
-    fn on_update(&mut self, buf: &mut (u64, usize), v: &u64) {
+    fn on_update(&mut self, v: &u64) {
         log(format!("OmsL.on<{}>", S::NAME));
-        buf.0 += *v;
-        buf.1 += 1;
+        self.acc.0 += *v;
+        self.acc.1 += 1;
     }
 }
 
@@ -297,20 +282,20 @@ impl Component for ReportL {
 }
 
 #[test]
-fn plain_inputs_reach_finish_and_unfired_edges_are_skipped() {
+fn named_inputs_reach_update_and_unfired_edges_are_skipped() {
     let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     take();
     let mut p = Pipeline::<Msg, (ReportL,)>::build(Configs::new()).unwrap();
-    // Initial: limits 7 + 1000 + 1001.
-    assert!(take().contains(&"ReportL.new(2008, 2)".to_string()), "initial output");
+    // Initial: `new` alone (limits 7), the quoters' initial outputs are not replayed.
+    assert!(take().contains(&"ReportL.new(7, 0)".to_string()), "initial output");
     p.push(Msg { key: Some(1), v: 5 });
     assert_eq!(
         take(),
-        ["Ws.update", "Quoter<Eth>", "Limits", "OmsL.begin", "OmsL.on<Eth>", "OmsL.finish", "ReportL(17, 1)"]
+        ["Ws.update", "Quoter<Eth>", "Limits", "OmsL.on<Eth>", "OmsL.update", "ReportL(17, 1)"]
     );
     // Nothing handled fired, but `limits` did: the handler still runs.
     p.push(Msg { key: Some(2), v: 5 });
-    assert_eq!(take(), ["Ws.update", "Limits", "OmsL.begin", "OmsL.finish", "ReportL(7, 0)"]);
+    assert_eq!(take(), ["Ws.update", "Limits", "OmsL.update", "ReportL(7, 0)"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -342,31 +327,28 @@ comp!(Post, [mix: Mix]);
 
 /// Listing order is Gamma, Beta, Alpha, but Alpha runs first (Gamma needs it):
 /// `on_update` follows execution order.
-#[derive(Handler)]
-#[handles(Gamma, Beta)]
-#[handles(Alpha)]
-pub struct Mix;
-impl Collect for Mix {
+#[derive(ComponentSubscription)]
+#[subscribe(Gamma, Beta)]
+#[subscribe(Alpha)]
+pub struct Mix {
+    acc: u64,
+}
+impl Component for Mix {
     type Config = ();
     type Output = u64;
-    type Buf = u64;
-    fn new((): ()) -> Self {
-        Mix
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) {
+        (Mix { acc: 0 }, 0)
     }
-    fn begin(&mut self) -> u64 {
-        log("Mix.begin");
-        0
-    }
-    fn finish(&mut self, buf: u64, _: Self::Input<'_>) -> u64 {
-        log("Mix.finish");
-        buf
+    fn update(&mut self, _: Self::Input<'_>) -> u64 {
+        log("Mix.update");
+        std::mem::take(&mut self.acc)
     }
 }
 macro_rules! handles {
     ($($t:ident),*) => { $(impl UpdateHandler<$t> for Mix {
-        fn on_update(&mut self, buf: &mut u64, v: &u64) {
+        fn on_update(&mut self, v: &u64) {
             log(concat!("Mix.on ", stringify!($t)));
-            *buf += *v;
+            self.acc += *v;
         }
     })* };
 }
@@ -380,7 +362,7 @@ fn execution_order_holds_across_regular_components_and_handled_edges() {
     p.push(Msg { key: None, v: 0 });
     assert_eq!(
         take(),
-        ["Alpha", "Gamma", "Beta", "Mix.begin", "Mix.on Alpha", "Mix.on Gamma", "Mix.on Beta", "Mix.finish", "Post"]
+        ["Alpha", "Gamma", "Beta", "Mix.on Alpha", "Mix.on Gamma", "Mix.on Beta", "Mix.update", "Post"]
     );
 }
 
@@ -438,34 +420,30 @@ impl Component for Every {
 }
 
 /// Always runs (`every` fires on each push); `OnA` and `OnB` are tested by flag.
-#[derive(Handler)]
-#[handles(OnA, OnB)]
-#[subscribe(every: Every)]
-pub struct Flags;
-impl Collect for Flags {
+#[derive(ComponentSubscription)]
+#[subscribe(every: Every, OnA, OnB)]
+pub struct Flags {
+    acc: Vec<String>,
+}
+impl Component for Flags {
     type Config = ();
     type Output = Vec<String>;
-    type Buf = Vec<String>;
-    fn new((): ()) -> Self {
-        Flags
+    fn new((): (), _: Self::Init<'_>) -> (Self, Vec<String>) {
+        (Flags { acc: Vec::new() }, Vec::new())
     }
-    fn begin(&mut self) -> Vec<String> {
-        Vec::new()
-    }
-    fn finish(&mut self, buf: Vec<String>, i: Self::Input<'_>) -> Vec<String> {
-        let mut buf = buf;
-        buf.push(format!("every={}", i.every));
-        buf
+    fn update(&mut self, i: Self::Input<'_>) -> Vec<String> {
+        self.acc.push(format!("every={}", i.every));
+        std::mem::take(&mut self.acc)
     }
 }
 impl UpdateHandler<OnA> for Flags {
-    fn on_update(&mut self, buf: &mut Vec<String>, v: &u32) {
-        buf.push(format!("a={v}"));
+    fn on_update(&mut self, v: &u32) {
+        self.acc.push(format!("a={v}"));
     }
 }
 impl UpdateHandler<OnB> for Flags {
-    fn on_update(&mut self, buf: &mut Vec<String>, v: &u32) {
-        buf.push(format!("b={v}"));
+    fn on_update(&mut self, v: &u32) {
+        self.acc.push(format!("b={v}"));
     }
 }
 #[derive(ComponentSubscription)]
@@ -509,42 +487,38 @@ fn edges_with_conditional_parents_are_tested_by_flag() {
 // Selected handled edges
 // ---------------------------------------------------------------------------
 
-#[derive(Handler)]
-#[handles(Some(On::<Btc>(btc)): Ws, Some(On::<Eth>(eth)): Ws)]
-#[handles(Quoter<Sol>)]
-pub struct Fills;
-impl Collect for Fills {
+#[derive(ComponentSubscription)]
+#[subscribe(Some(On::<Btc>(_)): Ws, Some(On::<Eth>(_)): Ws, Quoter<Sol>)]
+pub struct Fills {
+    acc: Vec<String>,
+}
+impl Component for Fills {
     type Config = ();
     type Output = Vec<String>;
-    type Buf = Vec<String>;
-    fn new((): ()) -> Self {
-        Fills
+    fn new((): (), _: Self::Init<'_>) -> (Self, Vec<String>) {
+        (Fills { acc: Vec::new() }, Vec::new())
     }
-    fn begin(&mut self) -> Vec<String> {
-        log("Fills.begin");
-        Vec::new()
-    }
-    fn finish(&mut self, buf: Vec<String>, _: Self::Input<'_>) -> Vec<String> {
-        log("Fills.finish");
-        buf
+    fn update(&mut self, _: Self::Input<'_>) -> Vec<String> {
+        log("Fills.update");
+        std::mem::take(&mut self.acc)
     }
 }
 impl UpdateHandler<fills_edges::Btc> for Fills {
-    fn on_update(&mut self, buf: &mut Vec<String>, v: &u64) {
+    fn on_update(&mut self, v: &u64) {
         log("Fills.btc");
-        buf.push(format!("btc:{v}"));
+        self.acc.push(format!("btc:{v}"));
     }
 }
 impl UpdateHandler<fills_edges::Eth> for Fills {
-    fn on_update(&mut self, buf: &mut Vec<String>, v: &u64) {
+    fn on_update(&mut self, v: &u64) {
         log("Fills.eth");
-        buf.push(format!("eth:{v}"));
+        self.acc.push(format!("eth:{v}"));
     }
 }
 impl UpdateHandler<Quoter<Sol>> for Fills {
-    fn on_update(&mut self, buf: &mut Vec<String>, v: &u64) {
+    fn on_update(&mut self, v: &u64) {
         log("Fills.sol");
-        buf.push(format!("sol:{v}"));
+        self.acc.push(format!("sol:{v}"));
     }
 }
 
@@ -568,16 +542,16 @@ fn a_selected_handled_edge() {
     let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     take();
     let mut p = Pipeline::<Msg, (FillsOut,)>::build(Configs::new()).unwrap();
-    // Selected edges have no initial value; the plain one (Quoter<Sol>, 1002) has.
-    assert!(take().contains(&r#"FillsOut.new["sol:1002"]"#.to_string()));
+    // No handler is called at build: the initial output is what `new` returned.
+    assert!(take().contains(&"FillsOut.new[]".to_string()));
     p.push(Msg { key: Some(0), v: 4 });
-    assert_eq!(take(), ["Ws.update", "Fills.begin", "Fills.btc", "Fills.finish", r#"FillsOut["btc:4"]"#]);
+    assert_eq!(take(), ["Ws.update", "Fills.btc", "Fills.update", r#"FillsOut["btc:4"]"#]);
     p.push(Msg { key: Some(1), v: 6 });
-    assert_eq!(take(), ["Ws.update", "Fills.begin", "Fills.eth", "Fills.finish", r#"FillsOut["eth:6"]"#]);
+    assert_eq!(take(), ["Ws.update", "Fills.eth", "Fills.update", r#"FillsOut["eth:6"]"#]);
     p.push(Msg { key: Some(2), v: 9 });
     assert_eq!(
         take(),
-        ["Ws.update", "Quoter<Sol>", "Fills.begin", "Fills.sol", "Fills.finish", r#"FillsOut["sol:18"]"#]
+        ["Ws.update", "Quoter<Sol>", "Fills.sol", "Fills.update", r#"FillsOut["sol:18"]"#]
     );
     p.push(Msg { key: Some(7), v: 1 });
     assert_eq!(take(), ["Ws.update"]);
