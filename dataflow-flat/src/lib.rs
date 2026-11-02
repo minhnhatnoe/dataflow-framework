@@ -59,11 +59,11 @@
 //!    not reachable from the root) are const panics there.
 //! 2. **Flat storage** (`flat`, `store`, types via `generic_const_exprs`). The
 //!    states of the components and their stored outputs are two balanced
-//!    tuples (8-ary, so as deep as log8 of the number of components) with one
-//!    `Slot` per component in execution order. The type at each position is
+//!    trees (16-ary, so as deep as log16 of the number of components) with one
+//!    value per component in execution order. The type at each position is
 //!    found by a halving descent of the first-parent tree (`flat::Down`), so
 //!    the solver depth is about log2 of the graph depth. A position is read or
-//!    written by a constant descent (`store::Access`): one field offset after
+//!    written by a constant descent (`store::AtPos`): one field offset after
 //!    inlining.
 //! 3. **Construction** (`drive`, `gather`). The pass visits positions in
 //!    execution order; each `new` is given the outputs built so far.
@@ -111,7 +111,7 @@
 // A const panic with a component's name (`panic!` can't format in a `const fn`).
 #![feature(panic_internals)]
 #![allow(internal_features)]
-// The plan's constants select types (`Slot<{ LO + 3 }, ..>`, `Access<.., { SelP::POS }>`). Incomplete, but
+// The plan's constants select types (`PathTo<LO, HI, P>`, `Digits<{ path(LO, HI, P) }>`). Incomplete, but
 // confined to this crate: users of `Pipeline` need no feature gate.
 #![feature(generic_const_exprs)]
 #![allow(incomplete_features)]

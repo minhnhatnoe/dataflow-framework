@@ -1,14 +1,13 @@
-//! Flat storage: balanced tuples whose elements are `Slot<P, V>`, one per
-//! component position `P`.
+//! Flat storage: balanced blocks ([`Blk`]) whose leaves are tuples of one
+//! value per component position.
 //!
-//! The states of the components and their stored outputs are two such tuples
+//! The states of the components and their stored outputs are two such trees
 //! of the same shape (`flat::FlatOf` with the [`StateM`] and [`OutM`]
 //! mappers). Both are indexed by position, so reading or writing the element
-//! at position `P` is a *constant* descent through at most `log8(N)` levels of
-//! tuple fields: after inlining it is one field offset. How the descent knows
-//! which field to take: every node of the tree knows the range of positions
-//! below it ([`Span`], from the `Slot`s' const parameter), and [`SelP`] picks
-//! the field whose range holds `P`.
+//! at position `P` is a *constant* descent through at most four levels of
+//! blocks: after inlining it is one field offset. The index of the child to
+//! take at each level is computed from the block's range and `P`
+//! ([`path`]).
 //!
 //! While the pipeline is built, the same shapes exist with every value wrapped
 //! in an `Option` ([`StateOptM`], [`OutOptM`]): construction fills them in
@@ -17,11 +16,6 @@
 //! unwraps; it is part of `Pipeline::build`, not of a step).
 
 use crate::node::Node;
-
-/// An element of the flat storage: the value for the component at position
-/// `P`. Zero cost.
-#[doc(hidden)]
-pub struct Slot<const P: usize, V>(pub V);
 
 // ---------------------------------------------------------------------------
 // What is stored
@@ -58,136 +52,200 @@ impl Mapper for OutOptM {
 }
 
 // ---------------------------------------------------------------------------
-// Which positions are below a node
-// ---------------------------------------------------------------------------
-
-const fn min_all(xs: &[usize]) -> usize {
-    let mut m = usize::MAX;
-    let mut i = 0;
-    while i < xs.len() {
-        if xs[i] < m {
-            m = xs[i];
-        }
-        i += 1;
-    }
-    m
-}
-const fn max_all(xs: &[usize]) -> usize {
-    let mut m = 0;
-    let mut i = 0;
-    while i < xs.len() {
-        if xs[i] > m {
-            m = xs[i];
-        }
-        i += 1;
-    }
-    m
-}
-
-/// The positions `LO..HI` of the slots below a node. The empty tuple has the
-/// empty range (`LO = usize::MAX`, `HI = 0`), which holds no position.
-#[doc(hidden)]
-pub trait Span {
-    const LO: usize;
-    const HI: usize;
-}
-impl<const P: usize, V> Span for Slot<P, V> {
-    const LO: usize = P;
-    const HI: usize = P + 1;
-}
-macro_rules! span_impl {
-    ($($g:ident)*) => {
-        impl<$($g: Span),*> Span for ($($g,)*) {
-            const LO: usize = min_all(&[$(<$g as Span>::LO),*]);
-            const HI: usize = max_all(&[$(<$g as Span>::HI),*]);
-        }
-    };
-}
-dataflow_macros::tuple_sizes!(span_impl);
-
-/// Which field of a node holds position `P`.
-#[doc(hidden)]
-pub trait SelP<const P: usize> {
-    const POS: usize;
-}
-impl<const P: usize, const Q: usize, V> SelP<P> for Slot<Q, V> {
-    const POS: usize = 0;
-}
-macro_rules! selp_impl {
-    ($($g:ident $i:tt)+) => {
-        impl<const P: usize, $($g: Span),+> SelP<P> for ($($g,)+) {
-            const POS: usize = {
-                $(if <$g as Span>::LO <= P && P < <$g as Span>::HI { $i } else)+
-                { panic!("position not in this node") }
-            };
-        }
-    };
-}
-dataflow_macros::select_tuples!(selp_impl);
-
-// ---------------------------------------------------------------------------
 // Access by position
 // ---------------------------------------------------------------------------
+//
+// The path from the top block to position `P` is a few digits (`path`): at
+// each level, the index of the child that holds `P`. It is walked by `Proj`
+// steps, one per level, all in the body of one function (`AtPos::at`), so that
+// the functions below the top are shared by every position under the same
+// child instead of being instantiated once per (position, level). A path
+// shorter than the maximum is padded with `Stop`, the identity.
 
-/// The value `V` at position `P`, which a node holds in its field `S`.
-#[doc(hidden)]
-pub trait Access<V, const P: usize, const S: usize> {
-    fn get(&self) -> &V;
-    fn get_mut(&mut self) -> &mut V;
-}
-impl<const Q: usize, const P: usize, V> Access<V, P, 0> for Slot<Q, V> {
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn get(&self) -> &V {
-        &self.0
-    }
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn get_mut(&mut self) -> &mut V {
-        &mut self.0
-    }
-}
-macro_rules! access_impl {
-    (($($g:ident)+) $k:tt $s:ident) => {
-        impl<V, const P: usize, $($g: Span),+> Access<V, P, $k> for ($($g,)+)
-        where
-            $s: SelP<P> + Access<V, P, { <$s as SelP<P>>::POS }>,
-        {
-            #[cfg_attr(not(debug_assertions), inline(always))]
-            #[cfg_attr(debug_assertions, inline)]
-            fn get(&self) -> &V {
-                Access::<V, P, { <$s as SelP<P>>::POS }>::get(&self.$k)
-            }
-            #[cfg_attr(not(debug_assertions), inline(always))]
-            #[cfg_attr(debug_assertions, inline)]
-            fn get_mut(&mut self) -> &mut V {
-                Access::<V, P, { <$s as SelP<P>>::POS }>::get_mut(&mut self.$k)
-            }
-        }
-    };
-}
-dataflow_macros::get_tuples!(access_impl);
-
-/// The value `V` at position `P` of a whole storage tuple (a descent from the
+/// The value at position `P` of a whole storage tuple (a descent from the
 /// top).
 #[doc(hidden)]
 pub trait AtPos<V, const P: usize> {
     fn at(&self) -> &V;
     fn at_mut(&mut self) -> &mut V;
 }
-impl<V, const P: usize, T> AtPos<V, P> for T
+
+/// Identity step: the path ended.
+#[doc(hidden)]
+pub struct Stop;
+
+/// Element `K` of a tuple.
+#[doc(hidden)]
+pub trait TupAt<K> {
+    type Out: 'static;
+    fn at_k(&self) -> &Self::Out;
+    fn at_k_mut(&mut self) -> &mut Self::Out;
+}
+macro_rules! tup_at_impl {
+    (($($g:ident)+) $k:tt $s:ident) => {
+        impl<$($g: 'static),+> TupAt<Ix<$k>> for ($($g,)+) {
+            type Out = $s;
+            #[cfg_attr(not(debug_assertions), inline(always))]
+            #[cfg_attr(debug_assertions, inline)]
+            fn at_k(&self) -> &$s {
+                &self.$k
+            }
+            #[cfg_attr(not(debug_assertions), inline(always))]
+            #[cfg_attr(debug_assertions, inline)]
+            fn at_k_mut(&mut self) -> &mut $s {
+                &mut self.$k
+            }
+        }
+    };
+}
+dataflow_macros::get_tuples!(tup_at_impl);
+
+/// One step down: from a block into its child `K`, or `Stop`.
+#[doc(hidden)]
+pub trait Proj<K> {
+    type Out: 'static;
+    fn proj(&self) -> &Self::Out;
+    fn proj_mut(&mut self) -> &mut Self::Out;
+}
+impl<T: 'static> Proj<Stop> for T {
+    type Out = T;
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn proj(&self) -> &T {
+        self
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn proj_mut(&mut self) -> &mut T {
+        self
+    }
+}
+impl<R: Fields<M, LO, HI>, M: Mapper, const LO: usize, const HI: usize, const K: usize> Proj<Ix<K>> for Blk<R, M, LO, HI>
 where
-    T: Access<V, P, 0>,
+    <R as Fields<M, LO, HI>>::F: TupAt<Ix<K>>,
+{
+    type Out = <<R as Fields<M, LO, HI>>::F as TupAt<Ix<K>>>::Out;
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn proj(&self) -> &Self::Out {
+        TupAt::<Ix<K>>::at_k(&self.0)
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn proj_mut(&mut self) -> &mut Self::Out {
+        TupAt::<Ix<K>>::at_k_mut(&mut self.0)
+    }
+}
+
+/// The digits of the path to position `p` in the block over `lo..hi`, packed
+/// 8 bits each (first digit lowest); 255 after the last one, or everywhere
+/// when `p` is not in the block (no `Proj` chain then reaches the value, so
+/// that is a type error, not a const panic).
+#[doc(hidden)]
+pub const fn path(mut lo: usize, mut hi: usize, p: usize) -> usize {
+    let mut out = 0usize;
+    let mut i = 0;
+    while i < 4 {
+        let d = if p < lo || p >= hi {
+            255
+        } else if hi - lo <= crate::flat::ARITY {
+            let d = p - lo;
+            hi = lo; // the last level: the rest of the path is empty
+            d
+        } else {
+            let c = crate::flat::cap(hi - lo);
+            let k = (p - lo) / c;
+            let nh = crate::flat::bound(lo, hi, k + 1);
+            lo += k * c;
+            hi = nh;
+            k
+        };
+        out |= d << (8 * i);
+        i += 1;
+    }
+    out
+}
+#[doc(hidden)]
+pub trait DigitOf<const D: usize> {
+    type Ty;
+}
+impl DigitOf<255> for () {
+    type Ty = Stop;
+}
+macro_rules! digit_of {
+    ($($n:literal)*) => { $(impl DigitOf<$n> for () { type Ty = Ix<$n>; })* };
+}
+dataflow_macros::arity_classes!(digit_of);
+
+/// The four digit types of a packed path.
+#[doc(hidden)]
+pub trait Digits<const N: usize> {
+    type D1;
+    type D2;
+    type D3;
+    type D4;
+}
+impl<const N: usize> Digits<N> for ()
+where
+    (): DigitOf<{ N & 255 }>,
+    (): DigitOf<{ (N >> 8) & 255 }>,
+    (): DigitOf<{ (N >> 16) & 255 }>,
+    (): DigitOf<{ (N >> 24) & 255 }>,
+{
+    type D1 = <() as DigitOf<{ N & 255 }>>::Ty;
+    type D2 = <() as DigitOf<{ (N >> 8) & 255 }>>::Ty;
+    type D3 = <() as DigitOf<{ (N >> 16) & 255 }>>::Ty;
+    type D4 = <() as DigitOf<{ (N >> 24) & 255 }>>::Ty;
+}
+/// The path to position `P` in the block over `LO..HI`, as types. The
+/// constant is inside an impl of `(LO, HI, P)` only, so it is evaluated once
+/// per (block, position).
+#[doc(hidden)]
+pub struct PathTo<const LO: usize, const HI: usize, const P: usize>;
+#[doc(hidden)]
+pub trait PathT {
+    type D1;
+    type D2;
+    type D3;
+    type D4;
+}
+impl<const LO: usize, const HI: usize, const P: usize> PathT for PathTo<LO, HI, P>
+where
+    (): Digits<{ path(LO, HI, P) }>,
+{
+    type D1 = <() as Digits<{ path(LO, HI, P) }>>::D1;
+    type D2 = <() as Digits<{ path(LO, HI, P) }>>::D2;
+    type D3 = <() as Digits<{ path(LO, HI, P) }>>::D3;
+    type D4 = <() as Digits<{ path(LO, HI, P) }>>::D4;
+}
+
+type Out<T, K> = <T as Proj<K>>::Out;
+
+impl<R, M, V, D1, D2, D3, D4, const LO: usize, const HI: usize, const P: usize> AtPos<V, P> for Blk<R, M, LO, HI>
+where
+    R: Fields<M, LO, HI>,
+    M: Mapper,
+    PathTo<LO, HI, P>: PathT<D1 = D1, D2 = D2, D3 = D3, D4 = D4>,
+    Blk<R, M, LO, HI>: Proj<D1>,
+    Out<Blk<R, M, LO, HI>, D1>: Proj<D2>,
+    Out<Out<Blk<R, M, LO, HI>, D1>, D2>: Proj<D3>,
+    Out<Out<Out<Blk<R, M, LO, HI>, D1>, D2>, D3>: Proj<D4, Out = V>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
     fn at(&self) -> &V {
-        Access::<V, P, 0>::get(self)
+        let a = Proj::<D1>::proj(self);
+        let b = Proj::<D2>::proj(a);
+        let c = Proj::<D3>::proj(b);
+        Proj::<D4>::proj(c)
     }
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
     fn at_mut(&mut self) -> &mut V {
-        Access::<V, P, 0>::get_mut(self)
+        let a = Proj::<D1>::proj_mut(self);
+        let b = Proj::<D2>::proj_mut(a);
+        let c = Proj::<D3>::proj_mut(b);
+        Proj::<D4>::proj_mut(c)
     }
 }
 
@@ -201,8 +259,8 @@ pub trait Empty: Sized {
     /// A constant, not a fn: no mono item per slot.
     const EMPTY: Self;
 }
-impl<const P: usize, V> Empty for Slot<P, Option<V>> {
-    const EMPTY: Self = Slot(None);
+impl<V> Empty for Option<V> {
+    const EMPTY: Self = None;
 }
 macro_rules! empty_impl {
     ($($g:ident)*) => {
@@ -219,10 +277,10 @@ pub trait Finish {
     type Done;
     fn finish(self) -> Self::Done;
 }
-impl<const P: usize, V> Finish for Slot<P, Option<V>> {
-    type Done = Slot<P, V>;
-    fn finish(self) -> Slot<P, V> {
-        Slot(self.0.expect("every component is constructed in execution order"))
+impl<V> Finish for Option<V> {
+    type Done = V;
+    fn finish(self) -> V {
+        self.expect("every component is constructed in execution order")
     }
 }
 impl Finish for () {
@@ -245,63 +303,8 @@ dataflow_macros::select_tuples!(finish_impl);
 // Blocks: the nominal nodes of the tree (see `flat::Blk`)
 // ---------------------------------------------------------------------------
 
-use crate::flat::{Blk, FieldIdx, FieldSel, Fields, Ix};
+use crate::flat::{Blk, Fields, Ix};
 
-impl<R: Fields<M, LO, HI>, M: Mapper, const LO: usize, const HI: usize> Span for Blk<R, M, LO, HI> {
-    const LO: usize = LO;
-    const HI: usize = HI;
-}
-impl<R: Fields<M, LO, HI>, M: Mapper, const LO: usize, const HI: usize, const P: usize> SelP<P>
-    for Blk<R, M, LO, HI>
-{
-    const POS: usize = 0;
-}
-impl<R: Fields<M, LO, HI>, M: Mapper, V, const LO: usize, const HI: usize, const P: usize> Access<V, P, 0>
-    for Blk<R, M, LO, HI>
-where
-    FieldIdx<LO, HI, P>: FieldSel,
-    <R as Fields<M, LO, HI>>::F: Field<V, P, <FieldIdx<LO, HI, P> as FieldSel>::Ix>,
-{
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn get(&self) -> &V {
-        Field::<V, P, <FieldIdx<LO, HI, P> as FieldSel>::Ix>::get(&self.0)
-    }
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn get_mut(&mut self) -> &mut V {
-        Field::<V, P, <FieldIdx<LO, HI, P> as FieldSel>::Ix>::get_mut(&mut self.0)
-    }
-}
-
-/// Field `K` of a block's tuple; its element is a slot or a block (both are
-/// `Access<.., 0>`). Unlike `Access` for a tuple, it needs no `Span` of the
-/// siblings: the field index comes from the block's range alone.
-#[doc(hidden)]
-pub trait Field<V, const P: usize, I> {
-    fn get(&self) -> &V;
-    fn get_mut(&mut self) -> &mut V;
-}
-macro_rules! field_impl {
-    (($($g:ident)+) $k:tt $s:ident) => {
-        impl<V, const P: usize, $($g),+> Field<V, P, Ix<$k>> for ($($g,)+)
-        where
-            $s: Access<V, P, 0>,
-        {
-            #[cfg_attr(not(debug_assertions), inline(always))]
-            #[cfg_attr(debug_assertions, inline)]
-            fn get(&self) -> &V {
-                Access::<V, P, 0>::get(&self.$k)
-            }
-            #[cfg_attr(not(debug_assertions), inline(always))]
-            #[cfg_attr(debug_assertions, inline)]
-            fn get_mut(&mut self) -> &mut V {
-                Access::<V, P, 0>::get_mut(&mut self.$k)
-            }
-        }
-    };
-}
-dataflow_macros::get_tuples!(field_impl);
 impl<R: Fields<M, LO, HI>, M: Mapper, const LO: usize, const HI: usize> Empty for Blk<R, M, LO, HI>
 where
     <R as Fields<M, LO, HI>>::F: Empty,

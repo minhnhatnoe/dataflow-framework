@@ -6,12 +6,12 @@
 //! `J`; for a long way it first goes to the ancestor of `J` halfway, then from
 //! there, so the solver depth is about log2 of the graph depth, not the graph
 //! depth. `FlatSpec` is the balanced 8-ary tuple type over positions, with one
-//! `Slot` per component holding whatever a [`Mapper`] makes of its type
+//! element per component holding whatever a [`Mapper`] makes of its type
 //! (the state, the output, or either one while it is being constructed).
 
 use crate::component::Sub;
 use crate::node::Node;
-use crate::store::{Mapper, Slot};
+use crate::store::Mapper;
 use crate::plan::Planned;
 
 // ---------------------------------------------------------------------------
@@ -452,43 +452,9 @@ pub(crate) const fn cap(w: usize) -> usize {
     c
 }
 
-/// The field of a block over `LO..HI` that holds position `P`: the block's
-/// shape is fixed by `(LO, HI)` (a leaf of `HI - LO <= 8` slots, or 8 children of
-/// `cap(HI - LO)` positions), so this is arithmetic, not a test of every child.
-#[doc(hidden)]
-pub struct FieldIdx<const LO: usize, const HI: usize, const P: usize>;
-/// Field index as a type. The constant is inside an impl of `(LO, HI, P)` only,
-/// so it is evaluated once per block position, not once per (storage, value).
+/// Field index as a type (see `store::PathTo`).
 #[doc(hidden)]
 pub struct Ix<const K: usize>;
-#[doc(hidden)]
-pub trait FieldSel {
-    type Ix;
-}
-impl<const LO: usize, const HI: usize, const P: usize> FieldSel for FieldIdx<LO, HI, P>
-where
-    (): IxOf<{ field_idx(LO, HI, P) }>,
-{
-    type Ix = <() as IxOf<{ field_idx(LO, HI, P) }>>::Ix;
-}
-#[doc(hidden)]
-pub trait IxOf<const K: usize> {
-    type Ix;
-}
-impl<const K: usize> IxOf<K> for () {
-    type Ix = Ix<K>;
-}
-#[doc(hidden)]
-pub const fn field_idx(lo: usize, hi: usize, p: usize) -> usize {
-    if p < lo || p >= hi {
-        return usize::MAX; // not in this block: no `Field` impl, so a type error, not a const panic
-    }
-    if hi - lo <= ARITY {
-        p - lo
-    } else {
-        (p - lo) / cap(hi - lo)
-    }
-}
 
 pub(crate) const fn bound(lo: usize, hi: usize, k: usize) -> usize {
     let b = lo + k * cap(hi - lo);
@@ -539,7 +505,7 @@ where
 /// The piece of the flat storage over component positions `LO..HI`, of class
 /// `Cl`: `()` for an empty range, otherwise the *nominal* block
 /// [`Blk<R, M, LO, HI>`](Blk), whose element at position `P` is
-/// `Slot<P, M::Of<the node at P>>`.
+/// `M::Of<the node at P>`.
 ///
 /// The block is a named struct so that its type (and so every symbol and
 /// query key that mentions it) stays small however many components lie below
@@ -584,7 +550,7 @@ macro_rules! flat_leaf {
         where
             $(R: NthS<M, { LO + $k }>,)*
         {
-            type F = ($(Slot<{ LO + $k }, M::Of<<R as NthS<M, { LO + $k }>>::T>>,)*);
+            type F = ($(M::Of<<R as NthS<M, { LO + $k }>>::T>,)*);
         }
     };
 }
