@@ -62,7 +62,7 @@ use syn::{
 /// an inner node and anything shorter a leaf. The library's per-shape impls are
 /// generated from it by the callback macros below ([`leaf_shapes`] and friends),
 /// so changing this constant is the only edit needed.
-const ARITY: usize = 8;
+const ARITY: usize = 16;
 /// Entries a leaf holds at most.
 const LEAF: usize = ARITY - 1;
 
@@ -84,6 +84,29 @@ pub fn leaf_shapes(input: TokenStream) -> TokenStream {
         quote!(#cb!([#(#rows)*]);)
     });
     quote!(#(#items)*).into()
+}
+
+/// `arity!()`: the literal `ARITY`, for the library's `const ARITY`.
+#[proc_macro]
+pub fn arity(_input: TokenStream) -> TokenStream {
+    let n = syn::Index::from(ARITY);
+    quote!(#n).into()
+}
+
+/// `arity_classes!(cb)`: `cb!(0 1 .. ARITY);`, the leaf sizes of the flat storage.
+#[proc_macro]
+pub fn arity_classes(input: TokenStream) -> TokenStream {
+    let cb = callback(input);
+    let ks = (0..=ARITY).map(syn::Index::from);
+    quote!(#cb!(#(#ks)*);).into()
+}
+
+/// `arity_classes1!(cb)`: `cb!(1 .. ARITY);`, the non-empty leaf sizes.
+#[proc_macro]
+pub fn arity_classes1(input: TokenStream) -> TokenStream {
+    let cb = callback(input);
+    let ks = (1..=ARITY).map(syn::Index::from);
+    quote!(#cb!(#(#ks)*);).into()
 }
 
 /// `inner_shape!(cb)`: `cb!([K0 .. K{ARITY-1}]);`, the inner node.
@@ -820,15 +843,15 @@ mod tests {
 
     #[test]
     fn capacities() {
-        assert_eq!(capacity(0), 7);
-        assert_eq!(capacity(1), 56);
-        assert_eq!(capacity(2), 448);
-        assert_eq!(capacity(3), 3584);
+        assert_eq!(capacity(0), LEAF);
+        assert_eq!(capacity(1), LEAF * ARITY);
+        assert_eq!(capacity(2), LEAF * ARITY * ARITY);
+        assert_eq!(capacity(3), LEAF * ARITY * ARITY * ARITY);
     }
 
     #[test]
     fn shapes() {
-        for n in (0..=600).chain([3584, 3585]) {
+        for n in (0..=600).chain([capacity(3), capacity(3) + 1]) {
             let items: Vec<usize> = (0..n).collect();
             let shape = Shape::build(&items);
 
@@ -853,14 +876,20 @@ mod tests {
     #[test]
     fn fill_first() {
         let shape = |n: usize| show(&Shape::build(&(0..n).collect::<Vec<_>>()));
-        assert_eq!(shape(7), "(0 1 2 3 4 5 6)");
-        assert_eq!(shape(8), "[(0 1 2 3 4 5 6), (7), (), (), (), (), (), ()]");
-        assert_eq!(shape(12), "[(0 1 2 3 4 5 6), (7 8 9 10 11), (), (), (), (), (), ()]");
+        let rest = vec!["()"; ARITY - 2].join(", ");
+        let leaf = |a: usize, b: usize| format!("({})", (a..b).map(|e| e.to_string()).collect::<Vec<_>>().join(" "));
+        assert_eq!(shape(LEAF), leaf(0, LEAF));
+        assert_eq!(shape(ARITY), format!("[{}, {}, {}]", leaf(0, LEAF), leaf(LEAF, ARITY), rest));
+        assert_eq!(shape(ARITY + 4), format!("[{}, {}, {}]", leaf(0, LEAF), leaf(LEAF, ARITY + 4), rest));
         // Every non-final child is full.
-        let s = Shape::build(&(0..100).collect::<Vec<_>>());
+        let n = LEAF * ARITY + 10;
+        let s = Shape::build(&(0..n).collect::<Vec<_>>());
         let Shape::Inner(cs) = s else { panic!() };
         let sizes: Vec<usize> = cs.iter().map(|c| { let mut v = vec![]; flatten(c, &mut v); v.len() }).collect();
-        assert_eq!(sizes, [56, 44, 0, 0, 0, 0, 0, 0]);
+        let mut want = vec![0; ARITY];
+        want[0] = LEAF * ARITY;
+        want[1] = 10;
+        assert_eq!(sizes, want);
     }
 }
 

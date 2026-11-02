@@ -263,22 +263,25 @@ where
 // The balanced 8-ary type over component positions
 // ---------------------------------------------------------------------------
 
+/// Children of an inner node of the flat storage: `ARITY` of `dataflow-macros`.
+pub(crate) const ARITY: usize = dataflow_macros::arity!();
+
 pub(crate) const fn class(lo: usize, hi: usize) -> usize {
     if hi <= lo {
         0
-    } else if hi - lo <= 8 {
+    } else if hi - lo <= ARITY {
         hi - lo
     } else {
-        9
+        ARITY + 1
     }
 }
 
 /// Components per child of a node of width `w > 8`: 8, 64, 512, ... whichever
 /// is the least with `8 * cap >= w`.
 const fn cap(w: usize) -> usize {
-    let mut c = 8;
-    while c * 8 < w {
-        c *= 8;
+    let mut c = ARITY;
+    while c * ARITY < w {
+        c *= ARITY;
     }
     c
 }
@@ -313,8 +316,8 @@ pub trait ClassOf<const C: usize> {
 macro_rules! class_of {
     ($($n:literal)*) => { $(impl ClassOf<$n> for () { type Ty = Leaf<$n>; })* };
 }
-class_of!(0 1 2 3 4 5 6 7 8);
-impl ClassOf<9> for () {
+dataflow_macros::arity_classes!(class_of);
+impl ClassOf<{ ARITY + 1 }> for () {
     type Ty = Inner;
 }
 
@@ -356,7 +359,7 @@ macro_rules! flat_piece {
         }
     )*};
 }
-flat_piece!(1 2 3 4 5 6 7 8);
+dataflow_macros::arity_classes1!(flat_piece);
 impl<R: Planned, M: Mapper, const LO: usize, const HI: usize> FlatSpec<M, LO, HI, Inner> for R
 where
     R: Fields<M, LO, HI>,
