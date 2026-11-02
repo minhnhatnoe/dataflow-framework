@@ -225,3 +225,36 @@ Replace `#[derive(Handler)]`/`#[handles]`. Agreed: Oms is a normal component and
 ```
 
 With `impl<S> UpdateHandler<Quoter<S>>` plus plain `Component::update`, the buffer as a field on `self`, no `Collect`/`begin`/`Buf`. Catalogs are plain nested tuples with `M<X, S>` pairs and `Product`/`Concat`/`Zip`, no filtering.
+
+## Results after the `Blk` merge (2026-11-01)
+
+**Small sizes, `Blk` + flag vs before.** 111 components: release 1.63–1.68 → 1.77 s, first dev build 1.37–1.43 → 1.49 s, edits 0.16 s both. 415: release 5.21–5.25 → 5.65 s, first dev 5.77 → 4.90 s, edits 0.51 → 0.37 s. Run time at 415 (4 rounds): 90.9–91.7 vs 90.7–91.4 ns, no change. At 111 (5 rounds): before 45.4–48.05 (middle 46.5), after 47.2–48.5 (middle 47.7), baseline unchanged; maybe about 1 ns real.
+
+**12,412 components.** Pre-`Blk` `cargo check` 923 s, 6.1 GB. On `Blk` it did not finish within 1500 s (exit 124, no errors in the log). Release at that size is untested.
+
+**Cold `cargo check`, same apps and command** (`cargo check -p app --offline`, target dir removed, 4 jobs; generated sources identical on both sides):
+
+| Library | 2,044 | 4,079 |
+|---|---|---|
+| Pre-`Blk` master `0ad5cdf` | 8.8 s, 0.93 GB | 18.2–18.4 s, 1.75 GB |
+| `Blk` master `86c7c97` | 12.4–13.0 s, 1.05 GB | 28.4–30.0 s, 2.02 GB |
+| `Blk` + `Field` (branch `check-descent`, f8a0af3) | 10.6–12.4 s, 0.72 GB | 52.2–55.7 s, 1.28 GB |
+
+- `Blk` is 1.4–1.65x slower here. Pre-`Blk` grows about linearly in this range; `Blk` less so.
+- Removing `-Zshare-generics=n` changes nothing: 8.9/18.5 s and 13.2/31.3 s.
+- Seven commits from `bf316c8` to `0ad5cdf` all cost 17.8–18.8 s at 4,079, so the 26 commits between them are not a cause.
+- Unexplained: older figures for pre-`Blk` of 18.5 s at 2,044 and 51.8 s at 4,079. They used other runs of the same sizes. The self-profile claim that `Blk` is 1.5x faster compared against those, so it is wrong.
+
+**`Blk` profile (query-keys at 415, 823, about 1,370).** `Planned::PLAN` is linear (0.47, 0.75, 1.16 s) and not the cause. `check_well_formed` is nearly all `app::build` (1.49, 3.39, 6.33 s). `resolve_instance_raw` of `store::SelP::POS`: about 105 calls per component, 4.9 to 8.8 µs per call.
+
+**`Field` (direct child index, `check-descent`, not merged).** Valid, and `cargo test` passes. `SelP::POS` work falls about 30x at both sizes (`resolve_instance_raw` at 4,079: 440k calls, 10.2 s → 49k calls, 0.31 s), but `check_well_formed` of `app::build` rises from 30.8 to 55.7 s. Cause unknown. Memory falls 31–37%. `check_errors.sh`, run time and release were not run on it. A variant with the index as an associated const on a struct gave the same time. Scripts and apps: `.claude/worktrees/agent-ad73c0142f3b83542/target/w/`.
+
+**Enum vs `Frame`, second test (branch `enum-keys`, 827 symbols, 5 rounds).** Cycles per packet:
+
+| | `Frame` | Enum | Hand `match` |
+|---|---|---|---|
+| Different bodies, random | 73.4 | 72.8 | 62.4 |
+| Different bodies, sorted | 33.4 | 35.1 | 35.5 |
+| Identical bodies, random | 21.6 | 64.9 | 58.4 |
+
+`Frame`'s lead with identical bodies comes from LLVM sinking its 827 identical arms into one block, which also fails with `-C codegen-units=1`. The enum misses it because three address calculations were hoisted out of the last switch group's 52 arms. Whether real apps get that merge is untested; check the typical app before committing to the enum syntax. Raw data: `.claude/worktrees/agent-a4e0d2d85fdaec8bc/target/enumwork2/`.
