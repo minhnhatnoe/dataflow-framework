@@ -1,0 +1,30 @@
+[workspace]
+
+[package]
+name = "handle-proto"
+version = "0.0.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "bench"
+path = "src/bench.rs"
+
+[[bin]]
+name = "sel"
+path = "src/sel.rs"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false
+debug-assertions = false
+overflow-checks = false
+
+[[bin]]
+name = "hnd"
+path = "src/hnd.rs"
