@@ -70,6 +70,12 @@ pub trait AtPos<V, const P: usize> {
     fn at_mut(&mut self) -> &mut V;
 }
 
+// The steps (`TupAt`, `Proj`) are plain `#[inline]` and only `AtPos::at` is `inline(always)`:
+// LLVM's AlwaysInliner keeps every function it has inlined until the end of the pass, so its
+// memory grows with the number of `alwaysinline` functions (6,114 components: LLVM stage peak
+// 6.2 GB with all of them forced, 2.8 GB with the steps left to the ordinary inliner, which
+// frees as it goes), while the machine code and the push time are the same.
+
 /// Identity step: the path ended.
 #[doc(hidden)]
 pub struct Stop;
@@ -85,13 +91,11 @@ macro_rules! tup_at_impl {
     (($($g:ident)+) $k:tt $s:ident) => {
         impl<$($g: 'static),+> TupAt<Ix<$k>> for ($($g,)+) {
             type Out = $s;
-            #[cfg_attr(not(debug_assertions), inline(always))]
-            #[cfg_attr(debug_assertions, inline)]
+            #[inline]
             fn at_k(&self) -> &$s {
                 &self.$k
             }
-            #[cfg_attr(not(debug_assertions), inline(always))]
-            #[cfg_attr(debug_assertions, inline)]
+            #[inline]
             fn at_k_mut(&mut self) -> &mut $s {
                 &mut self.$k
             }
@@ -109,13 +113,11 @@ pub trait Proj<K> {
 }
 impl<T: 'static> Proj<Stop> for T {
     type Out = T;
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
+    #[inline]
     fn proj(&self) -> &T {
         self
     }
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
+    #[inline]
     fn proj_mut(&mut self) -> &mut T {
         self
     }
@@ -125,13 +127,11 @@ where
     <R as Fields<M, LO, HI>>::F: TupAt<Ix<K>>,
 {
     type Out = <<R as Fields<M, LO, HI>>::F as TupAt<Ix<K>>>::Out;
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
+    #[inline]
     fn proj(&self) -> &Self::Out {
         TupAt::<Ix<K>>::at_k(&self.0)
     }
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
+    #[inline]
     fn proj_mut(&mut self) -> &mut Self::Out {
         TupAt::<Ix<K>>::at_k_mut(&mut self.0)
     }
