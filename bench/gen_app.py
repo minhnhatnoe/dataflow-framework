@@ -75,8 +75,8 @@ CARGO_CONFIG = """[build]
 rustflags = ["-Zshare-generics=n", "-Ctarget-cpu=native"]
 
 [env]
-# rustc's jemalloc reads MALLOC_CONF (not _RJEM_MALLOC_CONF): never return memory to the OS.
-MALLOC_CONF = "dirty_decay_ms:-1,muzzy_decay_ms:-1"
+# rustc's jemalloc reads MALLOC_CONF (not _RJEM_MALLOC_CONF): never return muzzy (madvise-freed) pages to the OS; dirty decay stays at the default.
+MALLOC_CONF = "muzzy_decay_ms:-1"
 """
 
 PROFILE = """

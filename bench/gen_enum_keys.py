@@ -178,7 +178,7 @@ overflow-checks = false
 def _cargo_config(d):
     os.makedirs(os.path.join(d, ".cargo"), exist_ok=True)
     open(os.path.join(d, ".cargo", "config.toml"), "w").write(
-        '[build]\nrustflags = ["-Zshare-generics=n", "-Ctarget-cpu=native"]\n\n[env]\nMALLOC_CONF = "dirty_decay_ms:-1,muzzy_decay_ms:-1"\n')
+        '[build]\nrustflags = ["-Zshare-generics=n", "-Ctarget-cpu=native"]\n\n[env]\nMALLOC_CONF = "muzzy_decay_ms:-1"\n')
 
 def write(name, main):
     d = os.path.join(out, name)
