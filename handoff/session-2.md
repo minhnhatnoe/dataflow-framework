@@ -339,3 +339,13 @@ Gap to hand-written code, `enum`: 823 3.9 ns, 4,079 9.1 ns, `perps` 26 to 27 ns.
 `full` (generator gives 30,186 components): plan limits raised (33661c2). Cold check with patched rustc, empty `MALLOC_CONF`: 310 s, 10.1 GB, 4.8M faults. Release on 2ebfcdd, 26 GB cap: type check 169 s, 8.4 GB; front end ends at 250 s, 20 GB; RSS falls to about 5 GB; LLVM climbs about 150 MB/s and the rustc was OOM-killed at 432 s (`anon-rss` 27.2 GB), still climbing. At `perps` the same climb goes from 4.4 to 11.8 GB in about 40 s and then stays flat.
 
 rustc: `MAX_POOLED_RECORDERS` 4 to 256 in `compiler/rustc_middle/src/dep_graph/edges.rs` (local stage 1, single runs, default allocator): minimal reproducer 953k to 164k faults; 4,079 cold 54.7-58.3 s, about 12M to 35.2 s, 0.84M, +90 MB; library edit 71.5 s, 37M to 9.05 s, 0.57M. Minimal reproducer: `target/probe-ex/rr/minimal/repro.sh` (scratch). Not filed. Whether a smaller pool suffices and rustc's `tests/incremental` are still open. `muzzy_decay_ms:-1` alone is not a workaround at `perps`.
+
+## Shared tails, wide components, first `full` release (2026-11-02)
+
+Shared tail (79a4241, `PG_TAIL`, `exec_tail`): plain runs that end every branch of a switch compile once. 4,079: framework 97.0 to 93.0 ns, gap 10.7 to 6.7; `perps`: framework min 116.81 to 109.33 (6 alternating runs, cpu 9), gap about 27.5 to about 17, 537 to 472 s, 12.08 to 8.64 GB. It didn't change the climb at `full`.
+
+Wide components (d9d4423, `WIDE_INPUTS` = 24, `run_wide`): the climb was the AlwaysInliner; the IR after it grew quadratically (9.3M, 18.4M, 30.3M lines at 4,964, 7,447, 9,929 components) because the gather of wide sinks was inlined into every arm and tail. LLVM stage peak at 12,385 components 7.2 to 2.95 GB. `perps`: framework min 110.01 to 96.41 (6 alternating runs, cpu 9), baseline min 92.40 and 89.72 in the two binaries, per-round gap 14.8-19.8 to 4.0-7.0, 472 to 416 s, peak 8.64 to 8.75 GB (front end). 4,079: 91.66 to 91.43, no gain there, so the gain only shows at scale. Tests 84 ok, error cases 58 ok on d9d4423.
+
+`full` release (30,186 components, d9d4423, 26 GB cap): first finished build, 1,536.7 s, 19.66 GB. App crate: type check 168 s, 8.4 GB; codegen ends at 247 s, 20 GB; LLVM 497 s, near 7 GB. Runner: fat LTO 602 s. 4 runs on cpu 10: framework min 111.02, baseline min 102.49, gap about 8.5; the baseline slows more than the framework from `perps` to `full`, reason unknown. Still superlinear: ArgumentPromotion at about n^1.9 (6.2, 11.4, 34 s at 4,964, 7,447, 12,385).
+
+rustc report: `MAX_POOLED_RECORDERS` of 64 matches 256 (max live 42 and 26 on two workloads); `tests/incremental` 180 of 180 with and without it. Draft at `target/probe-ex/rr/final/REPORT.md` (scratch). Not filed.
