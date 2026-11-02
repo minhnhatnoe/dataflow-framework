@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generator for the realistic multi-crate market app (benchmark / profiling harness).
 
-usage: bench/gen_app.py --size tiny|small|typical|perps|full|m<L>-<B>-<H> [--mode 1a|enum|on] [--out DIR] [--lib CHECKOUT]
+usage: bench/gen_app.py --size tiny|small|typical|perps|full|m<L>-<B>-<H> [--mode 1a|enum|req|on] [--out DIR] [--lib CHECKOUT]
                         [--markets L,B,H] [--sink-scan N|all] [--big-width N] [--core-inline none|hint]
 
 Writes a self-contained cargo workspace to DIR (default: ./gen/<size>-<mode>):
@@ -19,6 +19,8 @@ Modes:
   enum selectors via one `#[derive(Demux)]` enum per exchange with a variant per market
        (`#[subscribe(u: W => <S as Symbol>::Sel, body::Depth)]`); works on phase 1b. The baseline is a
        `match` on the same enum. Every component runs only when its edges fire.
+  req  `enum`, but each exchange's feed component is a `#[listener]` whose `Requests` counts the distinct
+       selectors the graph reads from it (`Request<S>::add`); measures the cost of the request pass.
   on   the spec's keyed selector: `#[subscribe(u: W => On<S>, body::Depth)]` plus `Keyed` for the frame.
        Not on master yet: generated against the spec, UNTESTED.
 
@@ -42,6 +44,7 @@ import argparse, os, shutil, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
+REQ = False  # mode req: enum plus #[listener] feeds (set in main)
 LIB = REPO  # the checkout whose dataflow-flat / dataflow-macros are used (--lib)
 
 # Spec table: Lighter 224, Binance 2214, Hyperliquid 527 markets (total 2965; perps 213+827+179).
@@ -246,6 +249,15 @@ pub static SENT: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU
 /// `on` mode: how many keys each exchange's listener was asked to subscribe to, and a digest of them.
 pub static SUBS: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
 pub static SUBKEYS: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+/// `req` mode: the listener requests; counts the distinct selectors read and digests their names.
+#[derive(Default)]
+pub struct Reqs { pub n: u64, pub digest: u64 }
+impl<S: 'static> dataflow_flat::Request<S> for Reqs {
+    fn add(&mut self) {
+        self.n += 1;
+        self.digest = self.digest.wrapping_mul(31).wrapping_add(std::any::type_name::<S>().len() as u64);
+    }
+}
 pub static RISK: AtomicU64 = AtomicU64::new(0);
 pub static BIG: AtomicU64 = AtomicU64::new(0);
 
@@ -472,13 +484,17 @@ use crate::wire::*;
     for e, (mod, var, ws) in enumerate(EX):
         if ENUM:
             evt = f"crate::catalog::{mod}::Ev"
+            lattr = "\n#[listener]" if REQ else ""
+            limpl = f"impl dataflow_flat::Listener for {ws} {{ type Requests = crate::stats::Reqs; }}\n" if REQ else ""
+            newbody = (f"{{ crate::stats::SUBS[{e}].store(i.requests.n, std::sync::atomic::Ordering::Relaxed); crate::stats::SUBKEYS[{e}].store(i.requests.digest, std::sync::atomic::Ordering::Relaxed); ({ws}, {evt}::default()) }}"
+                       if REQ else f"({ws}, {evt}::default())")
             comp.append(f"""#[derive(ComponentSubscription)]
-#[subscribe({lsub(var)})]
+#[subscribe({lsub(var)})]{lattr}
 pub struct {ws};
-impl Component for {ws} {{
+{limpl}impl Component for {ws} {{
     type Config = ();
     type Output = {evt};
-    fn new((): (), _: Self::Init<'_>) -> (Self, {evt}) {{ ({ws}, {evt}::default()) }}
+    fn new((): (), {"i" if REQ else "_"}: Self::Init<'_>) -> (Self, {evt}) {newbody}
     fn update(&mut self, i: Self::Input<'_>) -> {evt} {{ *i.w }}
 }}
 """)
@@ -1074,7 +1090,7 @@ fn main() {{
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--size", default="tiny")
-    ap.add_argument("--mode", default="1a", choices=["1a", "enum", "on"],
+    ap.add_argument("--mode", default="1a", choices=["1a", "enum", "req", "on"],
                     help="1a: no selectors, everything runs; enum: selectors via one #[derive(Demux)] enum per exchange (works on phase 1b); on: On<S> keyed selectors per the spec (not on master yet)")
     ap.add_argument("--lib", help="path of the dataflow checkout to depend on (default: this repo)")
     ap.add_argument("--out")
@@ -1092,7 +1108,10 @@ def main():
         counts = tuple(int(x) for x in a.size[1:].split("-"))
     assert len(counts) == 3 and all(c >= 1 for c in counts)
     out = os.path.abspath(a.out or f"gen/{a.size}-{a.mode}")
-    global LIB
+    global LIB, REQ
+    REQ = a.mode == "req"
+    if REQ:
+        a.mode = "enum"
     if a.lib:
         LIB = os.path.abspath(a.lib)
     M = Model(counts, a.sink_scan, a.big_width)
