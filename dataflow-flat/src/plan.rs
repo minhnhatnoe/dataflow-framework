@@ -90,6 +90,11 @@ pub(crate) const PG_RUNSW: u8 = 5;
 /// A sequence of plain runs shared by the branches of a switch, compiled once as a function of
 /// its own (`Plan::share_tail`).
 pub(crate) const PG_TAIL: u8 = 6;
+/// `PG_RUN` and `PG_RUN_IF` of a component with a handle component among its subscriptions: its
+/// inputs are read with a view of the parent's state (`drive::UpdView`). Such runs are never fused
+/// with a switch or shared in a tail; by-value components keep the bounds they had before handles.
+pub(crate) const PG_RUN_VIEW: u8 = 7;
+pub(crate) const PG_RUN_IF_VIEW: u8 = 8;
 /// The fewest runs worth a shared tail (0 disables sharing).
 const TAIL_MIN: usize = 2;
 /// Items (handled edges that may fire) of all handler runs in the program.
@@ -198,6 +203,9 @@ const fn enter<N: Vertex, C: [const] ChainWalk<N::Stored>>(plan: &mut Plan, pare
         if e == MAX_EDGES {
             plan.fail("too many subscriptions: ", "raise dataflow_flat::MAX_EDGES", "");
         } else {
+            if N::VIEW {
+                plan.view[parent as usize] = true;
+            }
             plan.cur_sub = parent;
             plan.cur_pos = pos;
             plan.cur_h = false;
@@ -412,6 +420,8 @@ pub struct Plan {
     /// Is the node a handler component? Is edge `e` a handled edge, and the entry
     /// position that named it?
     handler: [bool; MAX_COMPONENTS],
+    /// Does the node subscribe to a handle component?
+    view: [bool; MAX_COMPONENTS],
     edge_h: [bool; MAX_EDGES],
     edge_pos: [u32; MAX_EDGES],
     cur_h: bool,
@@ -568,6 +578,7 @@ impl Plan {
             sc_head: [NONE; MAX_DECISIONS],
             sc_used: [false; MAX_DECISIONS],
             handler: [false; MAX_COMPONENTS],
+            view: [false; MAX_COMPONENTS],
             edge_h: [false; MAX_EDGES],
             edge_pos: [0; MAX_EDGES],
             cur_h: false,
@@ -1683,7 +1694,12 @@ impl Plan {
                 e = self.edge_next[e as usize];
             }
         }
-        let kind = if guarded { PG_RUN_IF } else { PG_RUN };
+        let kind = match (guarded, self.view[i]) {
+            (false, false) => PG_RUN,
+            (true, false) => PG_RUN_IF,
+            (false, true) => PG_RUN_VIEW,
+            (true, true) => PG_RUN_IF_VIEW,
+        };
         self.new_node(kind, self.cpos[i], 0)
     }
 

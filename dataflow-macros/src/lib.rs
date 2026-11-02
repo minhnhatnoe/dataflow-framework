@@ -1203,6 +1203,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
                 type Kind = #krate::HandleKind;
                 type Requests = #requests_ty;
                 const KIND: u8 = #krate::KIND_COMPONENT;
+                const VIEW: bool = true;
             }
             impl #nimpl_generics #krate::HandleView for #name #nty_generics #node_where {
                 #[cfg_attr(not(debug_assertions), inline(always))]
@@ -1213,7 +1214,6 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
             }
             impl #nimpl_generics #krate::Comp for #name #nty_generics #node_where {
                 type Cfg = <#name #nty_generics as #krate::HandleComponent>::Config;
-                type Mode = <<#name #nty_generics as #krate::ComponentSubscription>::Deps as #krate::DepList>::Mode;
                 #[cfg_attr(not(debug_assertions), inline(always))]
                 #[cfg_attr(debug_assertions, inline)]
                 fn __new(config: Self::Cfg, init: <Self as #krate::ComponentSubscription>::Init<'_>) -> (Self, Self::Stored) {
@@ -1246,7 +1246,6 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
             }
             impl #nimpl_generics #krate::Comp for #name #nty_generics #node_where {
                 type Cfg = <#name #nty_generics as #krate::Component>::Config;
-                type Mode = <<#name #nty_generics as #krate::ComponentSubscription>::Deps as #krate::DepList>::Mode;
                 #[cfg_attr(not(debug_assertions), inline(always))]
                 #[cfg_attr(debug_assertions, inline)]
                 fn __new(config: Self::Cfg, init: <Self as #krate::ComponentSubscription>::Init<'_>) -> (Self, Self::Stored) {

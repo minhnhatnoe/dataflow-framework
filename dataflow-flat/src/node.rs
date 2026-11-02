@@ -57,6 +57,9 @@ pub trait Vertex: __private::Sealed + Edge + Sized + 'static {
     /// Is this a handler component (a `#[subscribe]` with handled entries)? The plan treats its
     /// handled edges differently (see `handler`).
     const HANDLER: bool = false;
+    /// Is this a handle component? Its subscribers read a view of its state, so the plan gives
+    /// them the `PG_RUN_VIEW` kinds (by-value components keep `PG_RUN`/`PG_RUN_IF`).
+    const VIEW: bool = false;
     /// Is this a [`Listener`](crate::Listener) (`#[listener]`)?
     const LISTENS: bool = false;
     /// The listener's `Requests` (`NoRequests` for other nodes).
@@ -86,31 +89,8 @@ where
 #[doc(hidden)]
 pub trait NodeKind: 'static {
     type Init<'a, N: Vertex>;
-    /// [`ByView`] if reading a node of this kind needs the state of the node (a handle
-    /// component), else [`ByVal`]. A component whose subscriptions are all [`ByVal`] is updated
-    /// the way it always was (`drive::Upd`).
-    type Mode: ModeT;
 }
 
-/// Reading only stored outputs and the root.
-#[doc(hidden)]
-pub struct ByVal;
-/// Reading a view of a handle component's state: the reader's state is split off from the
-/// states before it.
-#[doc(hidden)]
-pub struct ByView;
-/// A mode, and the mode of a pair of readings (a component is `ByView` if any of its
-/// subscriptions is).
-#[doc(hidden)]
-pub trait ModeT {
-    type Or<B: ModeT>: ModeT;
-}
-impl ModeT for ByVal {
-    type Or<B: ModeT> = B;
-}
-impl ModeT for ByView {
-    type Or<B: ModeT> = ByView;
-}
 #[doc(hidden)]
 pub type ReadOf<'a, N> = <N as Edge>::Read<'a>;
 
@@ -118,14 +98,12 @@ pub type ReadOf<'a, N> = <N as Edge>::Read<'a>;
 #[doc(hidden)]
 pub struct RootKind;
 impl NodeKind for RootKind {
-    type Mode = ByVal;
     type Init<'a, N: Vertex> = ();
 }
 /// A component: its first output exists when later components are constructed.
 #[doc(hidden)]
 pub struct CompKind;
 impl NodeKind for CompKind {
-    type Mode = ByVal;
     type Init<'a, N: Vertex> = &'a N::Stored;
 }
 /// A handle component: `new` of a subscriber gets the view computed from the constructed
@@ -133,14 +111,12 @@ impl NodeKind for CompKind {
 #[doc(hidden)]
 pub struct HandleKind;
 impl NodeKind for HandleKind {
-    type Mode = ByView;
     type Init<'a, N: Vertex> = <N as Edge>::Read<'a>;
 }
 /// The anchor. Never subscribed to.
 #[doc(hidden)]
 pub struct AnchorKind;
 impl NodeKind for AnchorKind {
-    type Mode = ByVal;
     type Init<'a, N: Vertex> = ();
 }
 
@@ -186,8 +162,6 @@ pub trait HandleView: Vertex<Kind = HandleKind> {
 pub trait Comp: crate::component::ComponentSubscription + Vertex {
     /// `Component::Config` or `HandleComponent::Config`.
     type Cfg: Default + 'static;
-    /// [`ByView`] if a subscription is a handle component, else [`ByVal`] (`DepList::Mode`).
-    type Mode: ModeT;
     fn __new(config: Self::Cfg, init: Self::Init<'_>) -> (Self, Self::Stored);
     fn __update(&mut self, input: Self::Input<'_>) -> Self::Stored;
 }
@@ -204,7 +178,6 @@ pub const KIND_SLOT: u8 = 4;
 #[doc(hidden)]
 pub struct SlotKind;
 impl NodeKind for SlotKind {
-    type Mode = ByVal;
     type Init<'a, N: Vertex> = ();
 }
 

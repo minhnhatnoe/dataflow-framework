@@ -23,12 +23,12 @@ use std::any::type_name;
 use std::marker::PhantomData;
 
 use crate::build::ConstructPass;
-use crate::component::{Component, ComponentSubscription, DepList};
+use crate::component::{ComponentSubscription, DepList};
 use crate::flat::{bound, class, ClassOf, EntryPos, Inner, Leaf, Loc, NthS, NthT, PickEdge, PosSelect, Whole};
 use crate::gather::{GatherCx, GatherIn, GatherInit, Layout, Ready, Source};
 use crate::split::SplitAt;
 use crate::select::{ChainInitial, ChainKey, Keep, SelectChain};
-use crate::node::{ByVal, ByView, Comp, SlotNode, Vertex};
+use crate::node::{Comp, SlotNode, Vertex};
 use crate::plan::{Planned, NO_FLAG};
 use crate::store::AtPos;
 
@@ -277,20 +277,23 @@ pub struct PushCtx<'c, A: Layout> {
 pub struct PushPh<A>(PhantomData<A>);
 
 /// The body of running one component (shared by `RunAt::run` and the guarded
-/// `RunIfAt::run_if`; a macro, not a fn, so it costs no mono item per component).
+/// `RunIfAt::run_if`; a macro, not a fn, so it costs no mono item per component). `$upd` is
+/// `upd_val` (the inputs are stored outputs and the root) or `upd_view` (a parent is a handle
+/// component): the plan picks the program node kind, so a by-value component's bounds don't
+/// mention the view machinery at all.
 macro_rules! run_body {
-    ($A:ident, $P:ident, $ctx:ident) => {{
-        run_body_pre!($A, $P, $ctx, |_o| ());
+    ($upd:ident, $A:ident, $P:ident, $ctx:ident) => {{
+        run_body_pre!($upd, $A, $P, $ctx, |_o| ());
     }};
 }
 /// `run_body` that also evaluates `$pre` on the value `update` returned, before it is
 /// stored, and gives the result back (the fused run and switch takes the key here).
 macro_rules! run_body_pre {
-    ($A:ident, $P:tt, $ctx:ident, |$o:ident| $pre:expr) => {{
+    ($upd:ident, $A:ident, $P:tt, $ctx:ident, |$o:ident| $pre:expr) => {{
         type C<A, const P: usize> = <A as NthT<P>>::T;
         // The inputs borrow the stored outputs and the root only while
         // `update` runs; the write to the output comes after.
-        let out = <<C<$A, $P> as Comp>::Mode as UpdVia<$A, $P>>::upd_via($ctx);
+        let out = $upd!($A, $P, $ctx);
         let pre = {
             let $o = &out;
             $pre
@@ -305,53 +308,23 @@ macro_rules! run_body_pre {
         pre
     }};
 }
-
-/// Gather the inputs of the component at `P` and call its `update`, in the way the mode `Self`
-/// says (`Comp::Mode`: `ByVal`, or `ByView` if a parent is a handle component).
-#[doc(hidden)]
-pub trait UpdVia<A, const P: usize> {
-    fn upd_via(ctx: &mut PushCtx<'_, A>) -> <<A as NthT<P>>::T as Vertex>::Stored
-    where
-        A: Layout + NthT<P>;
-}
-impl<A: Layout, const P: usize> UpdVia<A, P> for ByVal
-where
-    A: NthT<P>,
-    <A as NthT<P>>::T: Comp,
-    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P>,
-    A::States: AtPos<<A as NthT<P>>::T, P>,
-{
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn upd_via(ctx: &mut PushCtx<'_, A>) -> <<A as NthT<P>>::T as Vertex>::Stored
-    where
-        A: Layout + NthT<P>,
-    {
+/// Gather the inputs of the component at `P` from stored outputs and the root, and call `update`.
+macro_rules! upd_val {
+    ($A:ident, $P:tt, $ctx:ident) => {{
         type C<A, const P: usize> = <A as NthT<P>>::T;
-        // The inputs borrow the stored outputs and the root only while `update` runs; the write
-        // to the output comes after.
-        let inputs = <<C<A, P> as ComponentSubscription>::Deps as GatherIn<A, P>>::gather(ctx.root, &*ctx.outs);
-        <A::States as AtPos<C<A, P>, P>>::at_mut(&mut *ctx.states).__update(<C<A, P> as ComponentSubscription>::input(inputs))
-    }
+        let inputs = <<C<$A, $P> as ComponentSubscription>::Deps as GatherIn<$A, $P>>::gather($ctx.root, &*$ctx.outs);
+        <$A::States as AtPos<C<$A, $P>, $P>>::at_mut(&mut *$ctx.states).__update(<C<$A, $P> as ComponentSubscription>::input(inputs))
+    }};
 }
-impl<A: Layout, const P: usize> UpdVia<A, P> for ByView
-where
-    A: NthT<P>,
-    <A as NthT<P>>::T: Comp,
-    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherCx<A, P>,
-    A::States: SplitAt<P, Child = <A as NthT<P>>::T>,
-{
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn upd_via(ctx: &mut PushCtx<'_, A>) -> <<A as NthT<P>>::T as Vertex>::Stored
-    where
-        A: Layout + NthT<P>,
-    {
+/// As `upd_val`, for a component with a handle parent: its own state is split off from the states
+/// before it (`split.rs`), and the view of the parent is computed from those.
+macro_rules! upd_view {
+    ($A:ident, $P:tt, $ctx:ident) => {{
         type C<A, const P: usize> = <A as NthT<P>>::T;
-        let (cx, me) = <A::States as SplitAt<P>>::split_at(&mut *ctx.states);
-        let inputs = <<C<A, P> as ComponentSubscription>::Deps as GatherCx<A, P>>::gather(ctx.root, &*ctx.outs, &cx);
-        me.__update(<C<A, P> as ComponentSubscription>::input(inputs))
-    }
+        let (cx, me) = <$A::States as SplitAt<$P>>::split_at(&mut *$ctx.states);
+        let inputs = <<C<$A, $P> as ComponentSubscription>::Deps as GatherCx<$A, $P>>::gather($ctx.root, &*$ctx.outs, &cx);
+        me.__update(<C<$A, $P> as ComponentSubscription>::input(inputs))
+    }};
 }
 
 /// Run the component at component position `P` unconditionally: gather its
@@ -364,8 +337,9 @@ pub trait RunAt<Ph, const P: usize>: Layout {
 impl<A: Layout, const P: usize> RunAt<PushPh<A>, P> for A
 where
     A: NthT<P>,
-    <<A as NthT<P>>::T as Comp>::Mode: UpdVia<A, P>,
     <A as NthT<P>>::T: Comp,
+    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P>,
+    A::States: AtPos<<A as NthT<P>>::T, P>,
     A::Outs: AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>,
     SrcSlots<A, P>: RgCl,
     SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
@@ -376,7 +350,32 @@ where
         if WIDE_RUN::<A, P>() {
             run_wide::<A, P>(ctx);
         } else {
-            run_body!(A, P, ctx);
+            run_body!(upd_val, A, P, ctx);
+        }
+    }
+}
+/// `RunAt` for a component with a handle parent.
+#[doc(hidden)]
+pub trait RunViewAt<Ph, const P: usize>: Layout {
+    fn run_view(ctx: &mut PushCtx<'_, Self>);
+}
+impl<A: Layout, const P: usize> RunViewAt<PushPh<A>, P> for A
+where
+    A: NthT<P>,
+    <A as NthT<P>>::T: Comp,
+    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherCx<A, P>,
+    A::States: SplitAt<P, Child = <A as NthT<P>>::T>,
+    A::Outs: AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>,
+    SrcSlots<A, P>: RgCl,
+    SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn run_view(ctx: &mut PushCtx<'_, A>) {
+        if WIDE_RUN::<A, P>() {
+            run_wide_view::<A, P>(ctx);
+        } else {
+            run_body!(upd_view, A, P, ctx);
         }
     }
 }
@@ -402,13 +401,29 @@ where
 pub fn run_wide<A: Layout, const P: usize>(ctx: &mut PushCtx<'_, A>)
 where
     A: NthT<P>,
-    <<A as NthT<P>>::T as Comp>::Mode: UpdVia<A, P>,
     <A as NthT<P>>::T: Comp,
+    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P>,
+    A::States: AtPos<<A as NthT<P>>::T, P>,
     A::Outs: AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>,
     SrcSlots<A, P>: RgCl,
     SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
 {
-    run_body!(A, P, ctx);
+    run_body!(upd_val, A, P, ctx);
+}
+#[doc(hidden)]
+#[cfg_attr(not(debug_assertions), inline(never))]
+#[cfg_attr(debug_assertions, inline)]
+pub fn run_wide_view<A: Layout, const P: usize>(ctx: &mut PushCtx<'_, A>)
+where
+    A: NthT<P>,
+    <A as NthT<P>>::T: Comp,
+    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherCx<A, P>,
+    A::States: SplitAt<P, Child = <A as NthT<P>>::T>,
+    A::Outs: AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>,
+    SrcSlots<A, P>: RgCl,
+    SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
+{
+    run_body!(upd_view, A, P, ctx);
 }
 
 /// Run the component at `P` if one of its edges fired (the flag-based guard).
@@ -419,9 +434,9 @@ pub trait RunIfAt<Ph, const P: usize>: Layout {
 impl<A: Layout, const P: usize> RunIfAt<PushPh<A>, P> for A
 where
     A: NthT<P>,
-    <<A as NthT<P>>::T as Comp>::Mode: UpdVia<A, P>,
     <A as NthT<P>>::T: Comp,
-    <<A as NthT<P>>::T as ComponentSubscription>::Deps: Ready<A>,
+    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P> + Ready<A>,
+    A::States: AtPos<<A as NthT<P>>::T, P>,
     A::Outs: AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>,
     SrcSlots<A, P>: RgCl,
     SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
@@ -433,7 +448,34 @@ where
             if WIDE_RUN::<A, P>() {
                 run_wide::<A, P>(ctx);
             } else {
-                run_body!(A, P, ctx);
+                run_body!(upd_val, A, P, ctx);
+            }
+        }
+    }
+}
+/// `RunIfAt` for a component with a handle parent.
+#[doc(hidden)]
+pub trait RunIfViewAt<Ph, const P: usize>: Layout {
+    fn run_if_view(ctx: &mut PushCtx<'_, Self>);
+}
+impl<A: Layout, const P: usize> RunIfViewAt<PushPh<A>, P> for A
+where
+    A: NthT<P>,
+    <A as NthT<P>>::T: Comp,
+    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherCx<A, P> + Ready<A>,
+    A::States: SplitAt<P, Child = <A as NthT<P>>::T>,
+    A::Outs: AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>,
+    SrcSlots<A, P>: RgCl,
+    SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn run_if_view(ctx: &mut PushCtx<'_, A>) {
+        if <<<A as NthT<P>>::T as ComponentSubscription>::Deps as Ready<A>>::ready(ctx.root, &*ctx.outs, &ctx.fired) {
+            if WIDE_RUN::<A, P>() {
+                run_wide_view::<A, P>(ctx);
+            } else {
+                run_body!(upd_view, A, P, ctx);
             }
         }
     }
@@ -545,6 +587,16 @@ impl PgKindOf<6> for () {
     type Ty = TailK;
 }
 #[doc(hidden)]
+pub struct RunViewK;
+impl PgKindOf<7> for () {
+    type Ty = RunViewK;
+}
+#[doc(hidden)]
+pub struct RunIfViewK;
+impl PgKindOf<8> for () {
+    type Ty = RunIfViewK;
+}
+#[doc(hidden)]
 pub trait ExecK<A: Layout, Ph, K> {
     fn exec_k(ctx: &mut PushCtx<'_, A>);
 }
@@ -588,6 +640,27 @@ where
     #[cfg_attr(debug_assertions, inline)]
     fn exec_k(ctx: &mut PushCtx<'_, A>) {
         <A as RunIfAt<Ph, { PnC::<A, N>::A0 }>>::run_if(ctx)
+    }
+}
+
+impl<A: Layout, Ph, const N: usize> ExecK<A, Ph, RunViewK> for Pn<A, N>
+where
+    A: RunViewAt<Ph, { PnC::<A, N>::A0 }>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn exec_k(ctx: &mut PushCtx<'_, A>) {
+        <A as RunViewAt<Ph, { PnC::<A, N>::A0 }>>::run_view(ctx)
+    }
+}
+impl<A: Layout, Ph, const N: usize> ExecK<A, Ph, RunIfViewK> for Pn<A, N>
+where
+    A: RunIfViewAt<Ph, { PnC::<A, N>::A0 }>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn exec_k(ctx: &mut PushCtx<'_, A>) {
+        <A as RunIfViewAt<Ph, { PnC::<A, N>::A0 }>>::run_if_view(ctx)
     }
 }
 
@@ -867,19 +940,18 @@ pub trait RunSwAt<Ph, const P: usize>: Layout {
 impl<A: Layout, const P: usize> RunSwAt<PushPh<A>, P> for A
 where
     A: NthT<P>,
-    <<A as NthT<P>>::T as Comp>::Mode: UpdVia<A, P>,
     <A as NthT<P>>::T: Comp,
+    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P>,
+    A::States: AtPos<<A as NthT<P>>::T, P>,
     A::Outs: AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>,
-    <A as NthT<P>>::T: Component + Vertex<Stored = <<A as NthT<P>>::T as Component>::Output>,
-    A::Outs: AtPos<<<A as NthT<P>>::T as Component>::Output, P>,
     SrcSlots<A, P>: RgCl,
     SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
 {
-    type Out = <<A as NthT<P>>::T as Component>::Output;
+    type Out = <<A as NthT<P>>::T as Vertex>::Stored;
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
     fn run_sw<F: SwFn<A, Self::Out>>(ctx: &mut PushCtx<'_, A>) {
-        let key = run_body_pre!(A, P, ctx, |o| F::key(o));
+        let key = run_body_pre!(upd_val, A, P, ctx, |o| F::key(o));
         F::bst(ctx, key);
     }
 }
