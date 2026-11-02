@@ -1029,8 +1029,13 @@ impl Plan {
         while k < n0 {
             let pl = self.dn_place[self.term_item(t0, k) as usize];
             if !self.sc_used[pl as usize] {
-                place = pl;
-                break;
+                // The verdict does not depend on which unused place is taken (every
+                // pair is checked exactly once either way), but the speed does: the
+                // root-most place splits the terms into the most groups, because item
+                // order lists each branch's deepest decision first.
+                if place == NONE || self.dn_depth[pl as usize] < self.dn_depth[place as usize] {
+                    place = pl;
+                }
             }
             k += 1;
         }

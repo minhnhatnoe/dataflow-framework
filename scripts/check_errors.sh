@@ -310,6 +310,46 @@ comp!(B, [p: Poll => K1]);
 comp!(J, [a: A, b: B]);
 fn main() { let _ = Pipeline::<Poll, (J,)>::build(Configs::new()); }"
 
+# Rule 4 at a deep place: six branches on different root keys plus two that agree on the first selector
+# (K3) and differ only at the second place, where both are guards. Must be rejected, and the verdict must
+# not depend on which place the pairwise check splits on first.
+CMD[deep_non_exclusive_join]=build
+PATTERN[deep_non_exclusive_join]='E0080.*J joins branches that can fire in the same step'
+BODY[deep_non_exclusive_join]="$SELECTORS
+pub struct K2; pub struct K3; pub struct K4; pub struct K5;
+impl Select<Poll> for K2 { type Out = Poll; const KEY: u32 = 2; fn select(x: &Poll) -> Option<&Poll> { Some(x) } fn key_of(_: &Poll) -> u32 { 2 } }
+impl Select<Poll> for K3 { type Out = Poll; const KEY: u32 = 3; fn select(x: &Poll) -> Option<&Poll> { Some(x) } fn key_of(_: &Poll) -> u32 { 3 } }
+impl Select<Poll> for K4 { type Out = Poll; const KEY: u32 = 4; fn select(x: &Poll) -> Option<&Poll> { Some(x) } fn key_of(_: &Poll) -> u32 { 4 } }
+impl Select<Poll> for K5 { type Out = Poll; const KEY: u32 = 5; fn select(x: &Poll) -> Option<&Poll> { Some(x) } fn key_of(_: &Poll) -> u32 { 5 } }
+comp!(A0, [p: Poll => K0]);
+comp!(A1, [p: Poll => K1]);
+comp!(A2, [p: Poll => K2]);
+comp!(A4, [p: Poll => K4]);
+comp!(A5, [p: Poll => K5]);
+comp!(D1, [p: Poll => K3, G1]);
+comp!(D2, [p: Poll => K3, G2]);
+comp!(J, [a0: A0, a1: A1, a2: A2, d1: D1, d2: D2, a4: A4, a5: A5]);
+fn main() { let _ = Pipeline::<Poll, (J,)>::build(Configs::new()); }"
+
+# The same shape with exclusive keys at the deep place: compiles.
+CMD[deep_exclusive_join_ok]=build
+PATTERN[deep_exclusive_join_ok]='NOERROR'
+BODY[deep_exclusive_join_ok]="$SELECTORS
+pub struct K2; pub struct K3; pub struct K4; pub struct K5;
+impl Select<Poll> for K2 { type Out = Poll; const KEY: u32 = 2; fn select(x: &Poll) -> Option<&Poll> { Some(x) } fn key_of(_: &Poll) -> u32 { 2 } }
+impl Select<Poll> for K3 { type Out = Poll; const KEY: u32 = 3; fn select(x: &Poll) -> Option<&Poll> { Some(x) } fn key_of(_: &Poll) -> u32 { 3 } }
+impl Select<Poll> for K4 { type Out = Poll; const KEY: u32 = 4; fn select(x: &Poll) -> Option<&Poll> { Some(x) } fn key_of(_: &Poll) -> u32 { 4 } }
+impl Select<Poll> for K5 { type Out = Poll; const KEY: u32 = 5; fn select(x: &Poll) -> Option<&Poll> { Some(x) } fn key_of(_: &Poll) -> u32 { 5 } }
+comp!(A0, [p: Poll => K0]);
+comp!(A1, [p: Poll => K1]);
+comp!(A2, [p: Poll => K2]);
+comp!(A4, [p: Poll => K4]);
+comp!(A5, [p: Poll => K5]);
+comp!(D1, [p: Poll => K3, K0]);
+comp!(D2, [p: Poll => K3, K1]);
+comp!(J, [a0: A0, a1: A1, a2: A2, d1: D1, d2: D2, a4: A4, a5: A5]);
+fn main() { let _ = Pipeline::<Poll, (J,)>::build(Configs::new()); }"
+
 # Rule 5: a selected edge read in steps where its selectors do not match (J also runs when K1 matches).
 CMD[demux_reader_not_implied]=build
 PATTERN[demux_reader_not_implied]='E0080.*J reads .*Poll through selectors in steps where they do not match; subscribe to a component that stores it'
@@ -519,7 +559,7 @@ ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        generic_missing_sinks_bound generic_sinks_bound_ok
        unreachable_component second_root wrong_root_type
        keep_input_reference name_input_struct_outside unused_config
-       non_exclusive_join exclusive_join_ok demux_reader_not_implied selector_unreachable_component
+       non_exclusive_join exclusive_join_ok deep_non_exclusive_join deep_exclusive_join_ok demux_reader_not_implied selector_unreachable_component
        selector_wrong_input orphan_first on_not_keyed symbols_share_key
        handler_missing_update handler_non_exclusive_join handler_exclusive_ok handler_selected_input handler_root_input)
 
