@@ -573,7 +573,7 @@ EOF
 
 # A handled entry without an `UpdateHandler` impl: the on_unimplemented message, naming the entry and the impl to write.
 CMD[handler_missing_update]=check
-PATTERN[handler_missing_update]='E0277.*`H` subscribes to `B` without a handler for it'
+PATTERN[handler_missing_update]='E0277.*`H` subscribes to `B` without a handler for it.*subscribe\(A, B\)'
 BODY[handler_missing_update]="$SELECTORS
 $HANDLERS
 comp!(A, [K0(p): Poll]);
@@ -643,6 +643,68 @@ $HANDLERS
 handler!(H, [#[subscribe(_: Poll)]]);
 fn main() {}"
 
+
+# --- `for` entries (catalogs) --------------------------------------------------------------------------------
+
+# A `for` over a catalog compiles when every element has its `UpdateHandler` impl (here one generic impl).
+CMD[for_ok]=build
+PATTERN[for_ok]='NOERROR'
+BODY[for_ok]="$SELECTORS
+$HANDLERS
+comp!(A, [K0(p): Poll]);
+comp!(B, [K1(p): Poll]);
+handler!(H, [#[subscribe(for T in dataflow_flat::catalog![A, B] { T })]]);
+impl<T: dataflow_flat::Node<Output = u64>> UpdateHandler<T> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
+fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }"
+
+# An element of the catalog without its `UpdateHandler` impl: the same message as for a written-out entry, naming the element.
+CMD[for_missing_update]=check
+PATTERN[for_missing_update]='E0277.*`H` subscribes to `B` without a handler for it'
+BODY[for_missing_update]="$SELECTORS
+$HANDLERS
+comp!(A, [K0(p): Poll]);
+comp!(B, [K1(p): Poll]);
+handler!(H, [#[subscribe(for T in dataflow_flat::catalog![A, B] { T })]]);
+impl UpdateHandler<A> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
+fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }"
+
+# Something that is not a catalog.
+CMD[for_not_a_catalog]=check
+PATTERN[for_not_a_catalog]='E0277.*`u32` is not a catalog.*for T in u32'
+BODY[for_not_a_catalog]="$SELECTORS
+$HANDLERS
+comp!(A, [K0(p): Poll]);
+handler!(H, [#[subscribe(for T in u32 { T })]]);
+impl UpdateHandler<A> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
+fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }"
+
+# `Zip` of catalogs of different shapes.
+CMD[for_zip_shapes]=check
+PATTERN[for_zip_shapes]='E0277.*cannot be mapped by this `for` entry|is not a catalog'
+BODY[for_zip_shapes]="$SELECTORS
+$HANDLERS
+comp!(A, [K0(p): Poll]);
+comp!(B, [K1(p): Poll]);
+handler!(H, [#[subscribe(for (X, Y) in dataflow_flat::Zip<dataflow_flat::catalog![A, B], dataflow_flat::catalog![A]> { X })]]);
+fn main() {}"
+
+# A `for` body is one node type: a named entry in it is rejected.
+CMD[for_body_named]=check
+PATTERN[for_body_named]='a `for` body is one node type'
+BODY[for_body_named]="$SELECTORS
+$HANDLERS
+comp!(A, [K0(p): Poll]);
+handler!(H, [#[subscribe(for T in (A,) { x: T })]]);
+fn main() {}"
+
+# A pair pattern needs exactly two parts.
+CMD[for_pattern_triple]=check
+PATTERN[for_pattern_triple]='a `for` pattern destructures a pair'
+BODY[for_pattern_triple]="$SELECTORS
+$HANDLERS
+comp!(A, [K0(p): Poll]);
+handler!(H, [#[subscribe(for (X, Y, Z) in (A,) { X })]]);
+fn main() {}"
 
 # --- subscription patterns (`Some(Btc(t)): Src`): sugar over selector chains ------------------------------
 # pat_case <name> <pattern> <regex of our message>; the pattern is a subscription of component `A`.
@@ -812,6 +874,7 @@ ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        stored_payload_no_default stored_payload_no_clone unstored_payload_ok selector_unreachable_component
        selector_wrong_input orphan_first on_not_keyed symbols_share_key
        handler_missing_update handler_missing_update_note handler_non_exclusive_join handler_exclusive_ok handler_duplicate_marker handler_selected_missing_update handler_bare_wildcard
+       for_ok for_missing_update for_not_a_catalog for_zip_shapes for_body_named for_pattern_triple
        pattern_struct pattern_multi_field pattern_range pattern_range_literal pattern_guard pattern_or pattern_literal
        pattern_reference pattern_arrow unit_selector_unknown unit_selector_data_variant pattern_ok
        listener_missing_request listener_request_ok)
