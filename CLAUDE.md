@@ -6,22 +6,22 @@ Read `README.md` first. It covers the requirements, the model, the syntax, why e
 
 `rust-toolchain.toml` pins `nightly-2026-10-30`. Without rustup, use `RUSTC_BOOTSTRAP=1`. `dataflow-flat` enables `const_type_name`, `const_trait_impl`, `const_cmp`, `panic_internals` and `generic_const_exprs`; the library prints a "not supported with the next-generation trait solver ... reverted" warning (and uses `#![allow(incomplete_features)]`). That is expected. User crates (`dataflow-flat/examples/*`, `bench`, the tests, the error cases) must not need any `#![feature]`.
 
-`.cargo/config.toml` sets `-Zshare-generics=n` (dev edit time), `-Ctarget-cpu=native` and `scripts/rustc-env.sh` as the rustc wrapper (jemalloc never returns memory; `[env]` does not reach rustc). Release means that plus the `[profile.release]` in `Cargo.toml`; a number measured without them is not a release number.
+`.cargo/config.toml` sets `-Zshare-generics=n` (dev edit time), `-Ctarget-cpu=native` and `[env] MALLOC_CONF = "dirty_decay_ms:-1,muzzy_decay_ms:-1"` (rustc's jemalloc reads `MALLOC_CONF`, not `_RJEM_MALLOC_CONF`; without it cold checks of thousands of components spend most of their time in page faults: 13.4M vs 0.68M at 4,079 components, 52 s vs 33 s). Cargo merges config files up the tree, so a generated app inside the repo inherits it. Release means that plus the `[profile.release]` in `Cargo.toml`; a number measured without them is not a release number.
 
 Always run cargo under a timeout and a memory cap (see "Rules for agents"). Large graphs compile slowly, and past bugs made builds exponential. Run long checks one at a time and write results to files.
 
 ```sh
 CARGO_BUILD_JOBS=1 timeout 600 cargo test -p dataflow-flat        # tests are heavy: build one test with --test name
 CARGO_BUILD_JOBS=1 timeout 300 cargo test --doc -p dataflow-flat  # doc tests (pipeline.rs, sinks.rs, node.rs)
-timeout 900 scripts/check_errors.sh                # all 48 cases; or pass case names to run a subset
+timeout 900 scripts/check_errors.sh                # all 56 cases; or pass case names to run a subset
 timeout 120 cargo run -p dataflow-flat --example exchanges   # also basic, diamond, selbench
 python3 bench/gen_app.py --size typical --mode enum --out DIR # --mode is required: 1a | enum | req
-python3 scripts/measure.py --mode enum --sizes tiny,small --out DIR   # pass --out; the default is an old path
+python3 scripts/measure.py --mode enum --sizes tiny,small --out DIR   # default --out is target/harness
 python3 scripts/gen_selbench.py [E S K packets]                        # writes examples/selbench.rs
 python3 bench/gen_bench.py full 20 && scripts/bench.sh                 # old flat-graph benchmark; restores `full 20`
 ```
 
-Sizes of `bench/gen_app.py` (components): tiny 111, small 415, typical 823, then 2,044 (`m15-150-35`), 4,079 (`m30-300-70`), `perps` 12,412, `full` 29,650. Safe under a few GB: tiny, small, typical (dev first build about 2 GB, release about 1.5 to 3 GB). 2,044 check about 1.2 GB; 4,079 release about 6 GB (needs a larger cap, ask first); `perps` check needs `CARGO_INCREMENTAL=0` (6.7 GB); `perps` release and `full` do not fit in 16 GB. Apps above about 1,300 to 2,000 components need `#![allow(long_running_const_eval)]` in the application crate (`gen_app.py` adds it above 1,500). `bench/` is excluded from default members; `bench/gen_bench.py` output (`bench/src/main.rs`) should be what the generator produces (`full 20`) when committed.
+Sizes of `bench/gen_app.py` (components): tiny 111, small 415, typical 823, then 2,044 (`m15-150-35`), 4,079 (`m30-300-70`), `perps` 12,412, `full` 29,650. Safe under a few GB: tiny, small, typical (dev first build about 2 GB, release about 1.5 to 3 GB). 2,044 check about 1.2 GB; 4,079 release about 6 GB (needs a larger cap, ask first); `perps` check about 5.3 GB with `MALLOC_CONF`, 126 s; release memory is about 0.94 MB per component (823: 0.87 GB, 4,079: 3.83 GB), so `perps` release is about 11.7 GB (killed at a 12 GB cap) and `full` about 28 GB. Apps above about 1,300 to 2,000 components need `#![allow(long_running_const_eval)]` in the application crate (`gen_app.py` adds it above 1,500). `bench/` is excluded from default members; `bench/gen_bench.py` output (`bench/src/main.rs`) should be what the generator produces (`full 20`) when committed.
 
 ## Invariants: don't break these without discussing
 
@@ -75,9 +75,8 @@ Changed since the earlier model: `run` returning the root's output (replaced by 
 | `bench/gen_handler.py`, `gen_enum_keys.py`, `enum_keys_build.sh`, `enum_keys_run.sh` | Handler graph (`for` option), enum-key comparison and its build/run drivers |
 | `bench/gen_bench.py`, `bench/src/main.rs`, `bench/Cargo.toml` | The old layered flat-graph benchmark; `main.rs` is generated (`full 20`) |
 | `bench/sfb/sfb.rs` | Standalone store-forwarding repro (no framework dependency) |
-| `scripts/check_errors.sh` | 48 error cases, each a tiny crate under `target/error-cases/` |
+| `scripts/check_errors.sh` | 56 error cases, each a tiny crate under `target/error-cases/` |
 | `scripts/measure.py`, `scripts/bench.sh`, `scripts/gen_selbench.py` | Measurement harness for generated apps; pinned flat-graph benchmark; selector benchmark generator |
-| `scripts/rustc-env.sh` | rustc wrapper exporting `_RJEM_MALLOC_CONF` |
 | `handoff/tools/` | `memset-shim/` (`LD_PRELOAD` shim that found the incremental page-fault cost; hard-coded paths of a removed worktree), `profile-reader/` (self-profile aggregators), `excl-group-differential.py` and `excl-group-counters.diff` (old-vs-new differential for `excl_group`), `probes-scratch.diff`, `pv.sh` (hard-coded old path) |
 | `handoff/agent-env/` | `cap.sh` and `rules.md` for a container without systemd (hard-coded scratchpad path) |
 
@@ -85,6 +84,6 @@ Changed since the earlier model: `run` returning the root's output (replaced by 
 
 * The plan's `Upstream` bound is proved recursively by the trait solver, so graph depth costs solver depth. Keep that proof two levels per layer (a bound on `C::Deps` rather than a trait on components), keep the constant-evaluation walk at one stack frame per layer (the `Upstream` impls call `enter`/`leave` inline), and keep `Upstream` implemented per tree node (an 8- or 16-ary tree, not a list: the cons list overflowed the recursion limit at 20 subscriptions).
 * Chains are the worst case: 85 components build in 2 s in debug, 90 in 14 s, 95 exhausts 2 GB. Typical graphs are wide and shallow.
-* At large sizes most `cargo check` time is incremental compilation bookkeeping (page faults); measure cold checks with `CARGO_INCREMENTAL=0`.
+* At large sizes `cargo check` time was dominated by page faults from rustc's allocator returning memory; keep `MALLOC_CONF` set (`.cargo/config.toml` does); `CARGO_INCREMENTAL=0` is only a little faster for a cold check with no edits after it.
 * `cargo check` misses post-monomorphization errors (plan errors, exclusive joins); take limits from real builds.
 * Profile with `-Zself-profile` (format v9 needs analyzeme/decodeme 12.0.3 or newer) or `-Ztime-passes` before changing anything for speed. `query-keys` on a graph of more than a few hundred components makes a profile of tens of GB.

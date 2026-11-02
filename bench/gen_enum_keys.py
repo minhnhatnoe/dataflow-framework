@@ -176,10 +176,9 @@ overflow-checks = false
 """
 
 def _cargo_config(d):
-    root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     os.makedirs(os.path.join(d, ".cargo"), exist_ok=True)
     open(os.path.join(d, ".cargo", "config.toml"), "w").write(
-        '[build]\nrustflags = ["-Zshare-generics=n", "-Ctarget-cpu=native"]\nrustc-wrapper = "' + root + '/scripts/rustc-env.sh"\n')
+        '[build]\nrustflags = ["-Zshare-generics=n", "-Ctarget-cpu=native"]\n\n[env]\nMALLOC_CONF = "dirty_decay_ms:-1,muzzy_decay_ms:-1"\n')
 
 def write(name, main):
     d = os.path.join(out, name)

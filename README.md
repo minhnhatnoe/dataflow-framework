@@ -109,7 +109,7 @@ total 16
 | `dataflow-flat/` | The library: plan, storage, construction and push (`src/`), tests (`tests/`), examples |
 | `dataflow-macros/` | `#[derive(ComponentSubscription)]` with `#[subscribe(..)]`, `#[derive(Root)]`, `#[derive(Demux)]`, the `catalog!` macro and the callback macros that generate the per-shape impls |
 | `bench/` | Generators for benchmark apps (`gen_app.py` is the main one; see [Performance](#performance-and-compile-time)) |
-| `scripts/` | `check_errors.sh` (one tiny crate per class of user mistake), `measure.py`, `bench.sh`, `rustc-env.sh`, `gen_selbench.py` |
+| `scripts/` | `check_errors.sh` (one tiny crate per class of user mistake), `measure.py`, `bench.sh`, `gen_selbench.py` |
 | `handoff/` | Design notes and session logs (`event-spec.md`, `README.md`, `session-2.md`), small profiling tools |
 | `.cargo/config.toml` | Build flags for this tree (see [Build flags](#build-flags-and-files)) |
 
@@ -387,7 +387,7 @@ Out: spread 8 alarm 1
 Rules:
 
 * **Last value.** For each (source, selector chain) that some subscriber reads in steps where the chain does not match, the plan keeps one slot, shared by all such subscribers, written right after the source runs (at the start of the push for the root) when the chain matches. An input that is always matched when its subscriber runs has no slot and is read straight from the source.
-* **Initial value, and `new`.** Every selected input has an initial value that `new` is given (`init.a`, which dereferences to the part): `Default::default()` of the payload for `#[derive(Demux)]` selectors, `Some`, `Ok` and `Err`, and `Initial::initial()` for a hand-written selector (`impl Initial<In> for Sel`). `None` and unit selectors have the part `()`.
+* **Initial value, and `new`.** Every selected input has an initial value that `new` is given (`init.a`, which dereferences to the part): `Default::default()` of the payload for `#[derive(Demux)]` selectors, `Some`, `Ok` and `Err`, and `Initial::initial()` for a hand-written selector (`impl Initial<In> for Sel`). `None` and unit selectors have the part `()`. The derive fills the field in the user's crate, where the chain and payload are concrete types: it uses the chain's `Initial` if there is one, else the field is a `SelInit` that panics when dereferenced, naming the component, the input and the payload (`SelInit::get` gives `None` instead). This cannot be a compile error, since `new` reads the field at run time. Limit: a component that is generic over its selector or its payload sees only type parameters there, so no `Initial` is found, and `new` panics if it reads such an input unless the edge has a slot (the slot's value wins).
 * **`Default` and `Clone`.** `Clone` is required only for an input that is stored (the value is cloned out of the source's output); a payload that is read only when matched needs neither. A missing `Clone` is: ``error[E0277]: `NoClone` is read through selectors in steps where they do not match, so it is stored, and must implement `Clone` ``. A missing initial value: ``error[E0277]: the trait bound `NoDef: Default` is not satisfied``.
 * Handled entries are never read in `update` and never stored.
 
@@ -540,7 +540,7 @@ The price of being `unsafe`-free is `generic_const_exprs`, which is confined to 
 | A config for a component outside the graph | `Pipeline::build` returns | `BuildError { unused: [..] }` |
 | Generic code without the `Sinks<R>` bound | `cargo check` | `E0277` ``not valid sinks`` / `Sinks<R>` |
 
-`MAX_EDGES` (131,072 subscription entries), `MAX_DECISIONS` (32,768) and `MAX_TERMS` (8,192 distinct conditions per component) fail the same way; each message names the constant to raise. `scripts/check_errors.sh` runs 48 cases, each a tiny crate that must fail (or, for the `_ok` cases, succeed) with the expected code or message.
+`MAX_EDGES` (131,072 subscription entries), `MAX_DECISIONS` (32,768) and `MAX_TERMS` (8,192 distinct conditions per component) fail the same way; each message names the constant to raise. `scripts/check_errors.sh` runs 56 cases, each a tiny crate that must fail (or, for the `_ok` cases, succeed) with the expected code or message.
 
 ## Performance and compile time
 
@@ -550,10 +550,10 @@ User priorities, in order: release run time; release build of the typical app (o
 
 * **Release means every compiler optimization.** The `[profile.release]` in `Cargo.toml` (`opt-level = 3`, `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, no debug assertions) and `-Ctarget-cpu=native`. Numbers from a build without either are not release numbers. Because `-Ctarget-cpu=native` is a rustflag in `.cargo/config.toml`, it applies to dev builds too and the binaries are not portable.
 * **`.cargo/config.toml`** sets `rustflags = ["-Zshare-generics=n", "-Ctarget-cpu=native"]`. `-Zshare-generics=n` exists for the dev edit loop: with sharing on, `exported_generic_symbols` re-runs on any edit that changes a line's length (a dev rebuild on 823 components took 4.9 s instead of 0.8 s), through the normalization and constant evaluation it triggers. Release time, binary size and run time did not change with it. `bench/gen_app.py` writes the same file into generated apps. Apps of your own should copy it.
-* **`scripts/rustc-env.sh`** is set as `build.rustc-wrapper`. It exports `_RJEM_MALLOC_CONF=dirty_decay_ms:-1,muzzy_decay_ms:-1` so that the jemalloc inside rustc never returns memory to the OS; the large builds spend much of their time in kernel page faults. The variable has to be in rustc's own environment. `[env]` in `.cargo/config.toml` does not reach rustc (it sets the environment of build scripts and of what the crate sees through `env!`), hence a wrapper. A path with a slash is relative to the directory that holds `.cargo`.
+* **`MALLOC_CONF` in `[env]`.** `.cargo/config.toml` has `[env] MALLOC_CONF = "dirty_decay_ms:-1,muzzy_decay_ms:-1"`, so the jemalloc inside rustc never returns memory to the OS. This nightly's rustc reads `MALLOC_CONF`; `_RJEM_MALLOC_CONF` is ignored. (An earlier version of this tree used a `rustc-wrapper` script exporting `_RJEM_MALLOC_CONF`; it did nothing.) Without it, large checks spend most of their time in kernel page faults: cold `cargo check -p app`, `--mode enum`, 4,079 components, incremental on, measured here with `perf stat -e page-faults` on 2026-11-02: 13.4M faults and 52 s with jemalloc's defaults, 0.68M and 33 s with `[env]`. Note that cargo merges `.cargo/config.toml` files up the directory tree, so removing the file in a generated app that lives inside this repo does not switch the setting off; override it with a shell variable instead (`MALLOC_CONF=dirty_decay_ms:10000,muzzy_decay_ms:0`). At 2,044 components the fault count was about 0.5M either way, so the effect only shows at thousands of components.
 * **`#![allow(long_running_const_eval)]`.** The plan is one constant. Above about 1,300 to 2,000 components its evaluation passes rustc's `long_running_const_eval` limit, which is a deny-by-default lint; the allow can only be given in the crate that evaluates the plan, i.e. the application crate. Without it the build fails with a misleading `E0275` instead of naming the lint (reported; the text was not reproduced for this document, so it is not quoted). `bench/gen_app.py` adds the allow above 1,500 components. Equivalent: `-A long_running_const_eval` in the app's cargo config.
-* **`CARGO_INCREMENTAL=0` for cold checks and CI at very large sizes.** Incremental compilation makes each query task zero a buffer sized to the dependency graph, so cost grows quadratically with the number of tasks and the graph. Cold `cargo check`: 4,079 components 46.5 s incremental vs 25.1 s with `CARGO_INCREMENTAL=0`; `perps` (12,412 components) 82 s with `CARGO_INCREMENTAL=0` vs 995 s incremental. Keep incremental on for the dev edit loop: at the typical size an edit is 0.7 s incremental and 8.5 s with it off.
-* **Large release builds.** Release of `perps` is currently not achieved on a machine with 16 GB free: it was killed at about 17.5 GB (mono collector, +7.5 GB in `monomorphization_collector_graph_walk`). 4,079 components release builds in about 200 s at about 6 GB.
+* **`CARGO_INCREMENTAL=0`** is no longer the main advice for large cold checks: `MALLOC_CONF` removes most of the page-fault cost. Incremental off is still a little faster when no edits follow (`perps`, older `on` mode: 82 s, 6.7 GB). Keep incremental on for the dev edit loop: at the typical size an edit is 0.7 s incremental and 8.5 s with it off.
+* **Large release builds.** Release memory grows linearly, about 0.94 MB per component (full profile, `--mode enum`, 2026-11-02): 823 components 0.87 GB / 16 s, 2,044: 1.86 GB / 59 s, 4,079: 3.83 GB / 226 s. `perps` (12,412) extrapolates to about 11.7 GB and was killed at a 12 GB cap; it is otherwise unbuilt. `full` (29,650) extrapolates to about 28 GB.
 
 ### Measured numbers
 
@@ -564,10 +564,11 @@ All on the author's 4-core machine, nightly-2026-10-30. They are copied from `ha
 | 2026-11-01 | typical, run time, framework vs hand-written `match` | release, `enum`/`on`, pinned core | 107.6 vs 99.6 ns per packet (about 8%); gap accepted by the user |
 | 2026-11-01 | typical, release build (app crate / runner) | release, ARITY 16 | 12.8 s / 19 s |
 | 2026-11-01 | typical, first dev build / edit | dev, incremental | 10.4 s / 0.8 s |
-| 2026-11-01 | 4,079 components, release build | release, ARITY 16 | 198 s, 5.9 GB |
+| 2026-11-02 | 823 / 2,044 / 4,079 components, release build | release, `enum` | 0.87 GB, 16 s / 1.86 GB, 59 s / 3.83 GB, 226 s |
 | 2026-11-01 | 2,044 components, cold `cargo check` | `on`, incremental | 17.3 s (after the `excl_group` fix) |
-| 2026-11-02 | 4,079 components, cold `cargo check` | `on` | 46.5 s incremental, 25.1 s with `CARGO_INCREMENTAL=0` |
-| 2026-11-02 | `perps` (12,412), cold `cargo check` | `on` | 82 s, 6.7 GB with `CARGO_INCREMENTAL=0`; 995 s incremental (2,004 s while self-profiling) |
+| 2026-11-02 | 4,079 components, cold `cargo check -p app`, single runs, shared machine | `enum`, incremental | jemalloc defaults 48.9 s, 1.33 GB, 12.7M page faults; `_RJEM_MALLOC_CONF` (ignored) 49.6 s, 13.1M; `MALLOC_CONF` 30.0 s, 1.49 GB, 0.68M; via `[env]` 29.7 s, 0.68M (my own run: 52 s, 13.4M vs 33 s, 0.68M) |
+| 2026-11-02 | `perps` (12,412), cold `cargo check -p app` | `enum`, incremental, `MALLOC_CONF` | 125.9 s, 5.29 GB, 1.68M page faults |
+| 2026-11-02 | older figures for `perps` and 4,079, cold `cargo check` | `on` mode, jemalloc defaults | 4,079: 46.5 s incremental, 25.1 s with `CARGO_INCREMENTAL=0`; `perps`: 82 s with `CARGO_INCREMENTAL=0`, 995 s incremental (2,004 s while self-profiling) |
 | 2026-11-01 | 827 / 2,214 enum variants, `cargo check` | `enum` | 12.6 s / 67.9 s (3.0 GB); release at 2,214 timed out at 1,200 s |
 | 2026-11-02 | chain of N components (`C0 <- Poll` .. `C(N-1)`), debug build | default recursion limit | 85 builds in 2 s; 90 in 14 s; 95 was killed by memory pressure at a 2 GB cap |
 
@@ -582,7 +583,7 @@ All on the author's 4-core machine, nightly-2026-10-30. They are copied from `ha
 
 ### Tools
 
-`bench/gen_app.py --size tiny|small|typical|perps|full|m<L>-<B>-<H> --mode 1a|enum|req` generates a multi-crate app (`marketlib/`, `app/`, `baseline/`, `runner/`). **`--mode` is required.** Use `enum` (selectors through one `#[derive(Demux)]` enum per exchange) for anything meant to resemble a real app, `req` for `enum` with `#[listener]` feeds, and `1a` only for the old no-selector shape. `scripts/measure.py --mode ..` drives it (pass `--out` as well: its default is a path from an old session); `bench/gen_handler.py N OUT [for]` builds an OMS-style handler graph; `bench/gen_enum_keys.py` compares enum keys; `scripts/gen_selbench.py` writes `examples/selbench.rs`. `bench/gen_bench.py full 20` regenerates `bench/src/main.rs`; the committed file should be what the generator produces.
+`bench/gen_app.py --size tiny|small|typical|perps|full|m<L>-<B>-<H> --mode 1a|enum|req` generates a multi-crate app (`marketlib/`, `app/`, `baseline/`, `runner/`). **`--mode` is required.** Use `enum` (selectors through one `#[derive(Demux)]` enum per exchange) for anything meant to resemble a real app, `req` for `enum` with `#[listener]` feeds, and `1a` only for the old no-selector shape. `scripts/measure.py --mode ..` drives it (its default `--out` is `target/harness`); `bench/gen_handler.py N OUT [for]` builds an OMS-style handler graph; `bench/gen_enum_keys.py` compares enum keys; `scripts/gen_selbench.py` writes `examples/selbench.rs`. `bench/gen_bench.py full 20` regenerates `bench/src/main.rs`; the committed file should be what the generator produces.
 
 ## Design history and rejected alternatives
 
@@ -629,8 +630,8 @@ Smaller decisions: configs are keyed by component `TypeId`; `type Config: Defaul
 | Identity | Exact (`TypeId`). Two types with the same `type_name` (two crate versions) are different components, shown by `Pipeline::order()` under the same name. |
 | Capacity | `MAX_COMPONENTS` 32,768, `MAX_EDGES` 131,072, `MAX_DECISIONS` 32,768, `MAX_TERMS` 8,192. At most 15 sinks. Compile-time memory grows with the number of components. The plan's pools (push program, lists) have private limits with messages such as "the push program is too large: raise dataflow_flat's list pool". |
 | Graph depth | The plan's `Upstream` proof is as deep as the graph. A chain builds up to about 85 components in a debug build in seconds; memory then grows steeply (90 took 14 s, 95 was killed at 2 GB). Typical graphs are shallow (about 6 levels) and wide. |
-| Scale | `long_running_const_eval` allow needed above about 1,300 to 2,000 components. Release of 12,412 components is not achieved on 16 GB. Cold `cargo check` at that size needs `CARGO_INCREMENTAL=0`. |
-| Listeners | `Select::REQUEST` is true only for derived selectors; a hand-written selector never reaches `Request`. The session log recorded that one component cannot read two variants of one listener; a scratch component reading `Some(markets::Btc(a)): Ws` and `Some(markets::Eth(b)): Ws` from one listener built fine here, so that note is unconfirmed. |
+| Scale | `long_running_const_eval` allow needed above about 1,300 to 2,000 components. Release of 12,412 components is unbuilt (about 11.7 GB extrapolated; killed at a 12 GB cap). |
+| Listeners | `Select::REQUEST` is true only for derived selectors; a hand-written selector never reaches `Request`. One component can read several variants of one listener (stored selector values). |
 | Unit selector on a data variant | Compiles and ignores the payload. |
 | Patterns | Enum-variant style with at most one field; anything else is a hand-written `Select`. `for` bodies are one node type. |
 | Inputs | Shared references only. A component can't take ownership of an upstream output. |

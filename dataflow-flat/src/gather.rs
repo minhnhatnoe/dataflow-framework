@@ -258,7 +258,7 @@ pub trait SeedVia<N: Node, A: Layout, Mode, const POS: usize>: SelectChain<N::Ou
 impl<N: Node, A: Layout, S: Select<N::Output>, T: SelectChain<S::Out>, const POS: usize> SeedVia<N, A, Direct, POS> for (S, T) {
     #[inline]
     fn seed_via<'a>(_: &'a A::OutsOpt) -> SelInit<'a, T::Out> {
-        SelInit(None)
+        SelInit::empty()
     }
 }
 impl<N: Node, A: Layout, S: Select<N::Output>, T: SelectChain<S::Out>, const POS: usize> SeedVia<N, A, Stored, POS> for (S, T)
@@ -267,11 +267,11 @@ where
 {
     #[inline]
     fn seed_via<'a>(outs: &'a A::OutsOpt) -> SelInit<'a, T::Out> {
-        SelInit(Some(
+        SelInit::slot(
             <A::OutsOpt as AtPos<Option<T::Out>, POS>>::at(outs)
                 .as_ref()
                 .expect("a stored selected value is initialised before any subscriber is constructed"),
-        ))
+        )
     }
 }
 
