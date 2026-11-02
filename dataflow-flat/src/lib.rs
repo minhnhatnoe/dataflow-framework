@@ -37,7 +37,8 @@
 //! selectors matched, or, before the first match, the selector's [`Initial`]
 //! value (`Default::default()` of the payload for `#[derive(Demux)]`, `Some`,
 //! `Ok` and `Err`; a hand-written selector implements `Initial`), and
-//! `new` is given that value too (a [`SelInit`], which dereferences to the part).
+//! `new` is given that value too, slot or not (a [`SelInit`], which dereferences
+//! to the part; it panics when read if the payload has no default).
 //! The plan stores a value only for an input that needs it, namely one some of
 //! whose subscriber's terms do not imply it: one slot per (source, selector
 //! chain), shared by all such subscribers, written right after the source runs
@@ -145,7 +146,7 @@ pub use plan::{MAX_COMPONENTS, MAX_DECISIONS, MAX_EDGES, MAX_TERMS};
 pub use request::{Listener, Request};
 pub use select::{option, result, Initial, SelInit, Select, GUARD};
 #[doc(hidden)]
-pub use select::{ChainInitial, Identity, Keep};
+pub use select::{probe, ChainInitial, Identity, Keep};
 #[doc(hidden)]
 pub use select::ChainKey;
 #[doc(hidden)]

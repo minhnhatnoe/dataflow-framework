@@ -118,55 +118,161 @@ impl<In: 'static, S: Select<In>, T: SelectChain<S::Out>> SelectChain<In> for (S,
 
 /// What `new` is given for a selected input: the value the input has before its
 /// selectors have matched (the selector's initial value, see [`Initial`]). It
-/// dereferences to the selected part. The value exists for an input that is
-/// *stored*, i.e. one that can be read in a step where its selectors do not
-/// match; an input that is always covered has no slot and no initial value, and
-/// dereferencing it panics when the pipeline is built ([`SelInit::get`] gives
-/// `None` instead).
-pub struct SelInit<'a, T>(pub(crate) Option<&'a T>);
+/// dereferences to the selected part.
+///
+/// The value is the slot's initial value if the input is *stored* (it can be read
+/// in a step where its selectors do not match); otherwise, if the selector chain
+/// has an [`Initial`] value (`Some`/`Ok`/`Err` and `#[derive(Demux)]` selectors with a
+/// `Default` payload, hand-written selectors with an `Initial` impl),
+/// `#[derive(ComponentSubscription)]` fills it in at the component, where the
+/// payload type is known; otherwise there is none, and dereferencing panics when
+/// the pipeline is built, naming the component, the input and the payload
+/// ([`SelInit::get`] gives `None` instead).
+pub struct SelInit<'a, T>(SelInner<'a, T>);
+enum SelInner<'a, T> {
+    Slot(&'a T),
+    Owned(T),
+    Missing { component: &'static str, input: &'static str, payload: &'static str },
+    /// Not yet filled by the derive (library internal).
+    Empty,
+}
 impl<'a, T> SelInit<'a, T> {
+    pub(crate) fn slot(x: &'a T) -> Self {
+        SelInit(SelInner::Slot(x))
+    }
+    pub(crate) fn empty() -> Self {
+        SelInit(SelInner::Empty)
+    }
     /// The initial value, if this input has one.
-    pub fn get(&self) -> Option<&'a T> {
-        self.0
+    pub fn get(&self) -> Option<&T> {
+        match &self.0 {
+            SelInner::Slot(x) => Some(x),
+            SelInner::Owned(x) => Some(x),
+            _ => None,
+        }
     }
 }
-impl<T> Clone for SelInit<'_, T> {
+impl<T: Clone> Clone for SelInit<'_, T> {
     fn clone(&self) -> Self {
-        *self
+        SelInit(match &self.0 {
+            SelInner::Slot(x) => SelInner::Slot(x),
+            SelInner::Owned(x) => SelInner::Owned(x.clone()),
+            SelInner::Missing { component, input, payload } => SelInner::Missing { component, input, payload },
+            SelInner::Empty => SelInner::Empty,
+        })
     }
 }
-impl<T> Copy for SelInit<'_, T> {}
 impl<T: core::fmt::Debug> core::fmt::Debug for SelInit<'_, T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        self.0.fmt(f)
+        self.get().fmt(f)
     }
 }
 impl<T> core::ops::Deref for SelInit<'_, T> {
     type Target = T;
     #[inline]
     fn deref(&self) -> &T {
-        match self.0 {
-            Some(x) => x,
-            None => no_initial_value(),
+        match &self.0 {
+            SelInner::Slot(x) => x,
+            SelInner::Owned(x) => x,
+            SelInner::Missing { component, input, payload } => no_initial_value(component, input, payload),
+            SelInner::Empty => no_initial_value("?", "?", core::any::type_name::<T>()),
         }
     }
 }
 #[cold]
 #[inline(never)]
-fn no_initial_value() -> ! {
+fn no_initial_value(component: &str, input: &str, payload: &str) -> ! {
     panic!(
-        "`new` read a selected input that has no initial value: only an input that can be read in a step where \
-         its selectors do not match is stored and starts from the selector's initial value; this one is always \
-         matched when its subscriber runs (`SelInit::get` tests for it)"
+        "`{component}::new` read the input `{input}` (selected payload `{payload}`), which has no initial value: \
+         implement `Default` for `{payload}` or `Initial` for its selector"
     )
+}
+
+/// What the derive calls to give a selected input its initial value in `new`
+/// (autoref specialization at the component, where the types are concrete:
+/// the chain's [`ChainInitial`] if it exists, else nothing).
+#[doc(hidden)]
+pub mod probe {
+    use super::*;
+    use core::marker::PhantomData;
+    pub struct Probe<C, In>(PhantomData<(C, In)>);
+    impl<C, In> Probe<C, In> {
+        #[inline(always)]
+        pub fn new() -> Self {
+            Probe(PhantomData)
+        }
+    }
+    pub trait ViaInitial<C: SelectedChain<In>, In: 'static> {
+        fn fill<'a, N: Node<Output = In>>(
+            &self,
+            raw: &C::Init<'a, N>,
+            component: &'static str,
+            input: &'static str,
+        ) -> C::Init<'a, N>;
+    }
+    impl<C: SelectedChain<In> + ChainInitial<In>, In: 'static> ViaInitial<C, In> for Probe<C, In> {
+        #[inline]
+        fn fill<'a, N: Node<Output = In>>(&self, raw: &C::Init<'a, N>, _: &'static str, _: &'static str) -> C::Init<'a, N> {
+            let s = C::view::<N>(raw);
+            C::wrap::<N>(match s.0 {
+                SelInner::Empty => SelInit(SelInner::Owned(C::initial())),
+                SelInner::Slot(x) => SelInit(SelInner::Slot(x)),
+                _ => SelInit::empty(),
+            })
+        }
+    }
+    pub trait ViaNothing<C: SelectedChain<In>, In: 'static> {
+        fn fill<'a, N: Node<Output = In>>(
+            &self,
+            raw: &C::Init<'a, N>,
+            component: &'static str,
+            input: &'static str,
+        ) -> C::Init<'a, N>;
+    }
+    impl<C: SelectedChain<In>, In: 'static> ViaNothing<C, In> for &Probe<C, In> {
+        #[inline]
+        fn fill<'a, N: Node<Output = In>>(&self, raw: &C::Init<'a, N>, component: &'static str, input: &'static str) -> C::Init<'a, N> {
+            let s = C::view::<N>(raw);
+            C::wrap::<N>(match s.0 {
+                SelInner::Empty => SelInit(SelInner::Missing {
+                    component,
+                    input,
+                    payload: core::any::type_name::<C::Out>(),
+                }),
+                SelInner::Slot(x) => SelInit(SelInner::Slot(x)),
+                _ => SelInit::empty(),
+            })
+        }
+    }
+    /// A non-empty chain, whose `Init` is a [`SelInit`] (the compiler cannot
+    /// always see that through the associated type in generic code).
+    pub trait SelectedChain<In: 'static>: SelectChain<In> {
+        fn view<'a, N: Node<Output = In>>(raw: &Self::Init<'a, N>) -> SelInit<'a, Self::Out>;
+        fn wrap<'a, N: Node<Output = In>>(s: SelInit<'a, Self::Out>) -> Self::Init<'a, N>;
+    }
+    impl<In: 'static, S: Select<In>, T: SelectChain<S::Out>> SelectedChain<In> for (S, T) {
+        #[inline(always)]
+        fn view<'a, N: Node<Output = In>>(raw: &<Self as SelectChain<In>>::Init<'a, N>) -> SelInit<'a, T::Out> {
+            match raw.0 {
+                SelInner::Slot(x) => SelInit(SelInner::Slot(x)),
+                _ => SelInit::empty(),
+            }
+        }
+        #[inline(always)]
+        fn wrap<'a, N: Node<Output = In>>(s: SelInit<'a, T::Out>) -> <Self as SelectChain<In>>::Init<'a, N> {
+            s
+        }
+    }
 }
 
 /// The value a selector's part has before the selector has ever matched.
 /// `#[derive(Demux)]` selectors implement it with `Default::default()` of the
 /// payload (a variant whose payload is not `Default` has no usable impl, which
-/// only matters if it is read in steps where it does not match). `Some` and `Ok`,
-/// `Err` do likewise; a hand-written selector implements it however
-/// it likes.
+/// only matters if it is read in `new` or in steps where it does not match). `Some`
+/// and `Ok`, `Err` do likewise; a hand-written selector implements it however
+/// it likes. A chain takes the last selector's. A selected input's slot requires
+/// this at compile time; for an input without a slot it is optional: `new` gets it
+/// through [`SelInit`] if the impl exists, else a panic when `new` reads it.
 #[diagnostic::on_unimplemented(
     message = "the selector `{Self}` has no initial value for `{In}`",
     label = "a selected input that is read in steps where its selectors do not match starts from the selector's initial value",

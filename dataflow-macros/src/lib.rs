@@ -1026,6 +1026,26 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         (quote!((#(#tys,)*)), quote!((#(#pats,)*)), quote!(#(#mappers)*))
     };
     let field_vars: Vec<&Ident> = keep.iter().map(|&i| &vars[slot_of[i]]).collect();
+    // What `new` gets for a selected field: the slot's value, else the chain's
+    // `Initial` (autoref specialization: the concrete types are known here), else a
+    // `SelInit` that panics with a clear message when read.
+    let init_fields: Vec<TokenStream2> = keep
+        .iter()
+        .map(|&i| {
+            let s = &subs[i];
+            let v = &vars[slot_of[i]];
+            if s.chain.is_empty() {
+                return quote!(#v);
+            }
+            let (t, c) = (&s.ty, &field_chains[i]);
+            let comp = name.to_string();
+            let input = s.name.as_ref().expect("a plain subscription is named").to_string();
+            quote!({
+                use #krate::probe::{ViaInitial as _, ViaNothing as _};
+                (&#krate::probe::Probe::<#c, <#t as #krate::Node>::Output>::new()).fill::<#t>(&#v, #comp, #input)
+            })
+        })
+        .collect();
 
     // Type parameters may not appear in any field; a marker keeps them used.
     let marker_ty = quote!(::core::marker::PhantomData<(&#lt (), fn() -> (#(#type_params,)*))>);
@@ -1218,7 +1238,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
             #[allow(unused_variables)]
             fn init<'a>(raw: <Self::Deps as #krate::DepList>::Inits<'a>) -> Self::Init<'a> {
                 let #deps_pat = raw;
-                #init_name { #( #field_names: #field_vars, )* #init_requests_default __marker: ::core::marker::PhantomData }
+                #init_name { #( #field_names: #init_fields, )* #init_requests_default __marker: ::core::marker::PhantomData }
             }
             #fill_requests
         }
