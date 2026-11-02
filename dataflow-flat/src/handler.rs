@@ -275,7 +275,7 @@ where
     <HItems<A, N> as HDrive<A, PushPh<A>, H, P, <HItems<A, N> as RgCl>::Cl>>::items(ctx);
     let out = {
         let inputs = <<H as ComponentSubscription>::Deps as GatherIn<A, P>>::gather(ctx.root, &*ctx.outs);
-        <A::States as AtPos<H, P>>::at_mut(&mut *ctx.states).__update(<H as ComponentSubscription>::input(inputs))
+        <A::States as AtPos<H, P>>::at_mut(&mut *ctx.states).update(<H as ComponentSubscription>::input(inputs))
     };
     *<A::Outs as AtPos<<H as Vertex>::Stored, P>>::at_mut(&mut *ctx.outs) = out;
     <SrcSlots<A, P> as Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>>::drive(ctx);

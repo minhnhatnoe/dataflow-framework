@@ -23,7 +23,7 @@ use std::any::type_name;
 use std::marker::PhantomData;
 
 use crate::build::ConstructPass;
-use crate::component::{ComponentSubscription, DepList};
+use crate::component::{Component, ComponentSubscription, DepList};
 use crate::flat::{bound, class, ClassOf, EntryPos, Inner, Leaf, Loc, NthS, NthT, PickEdge, PosSelect, Whole};
 use crate::gather::{GatherCx, GatherIn, GatherInit, Layout, Ready, Source};
 use crate::split::SplitAt;
@@ -184,7 +184,7 @@ where
             let raw = <<C<A, P> as ComponentSubscription>::Deps as GatherInit<A, P>>::gather(&*ctx.states, &*ctx.outs);
             let mut init = <C<A, P> as ComponentSubscription>::init(raw);
             <C<A, P> as ComponentSubscription>::__fill_requests(&mut init, &mut *ctx.pass);
-            <C<A, P> as Comp>::__new(config, init)
+            <C<A, P> as Component>::new(config, init)
         };
         *<A::StatesOpt as AtPos<Option<C<A, P>>, P>>::at_mut(&mut *ctx.states) = Some(state);
         *<A::OutsOpt as AtPos<Option<<C<A, P> as Vertex>::Stored>, P>>::at_mut(&mut *ctx.outs) = Some(out);
@@ -313,7 +313,7 @@ macro_rules! upd_val {
     ($A:ident, $P:tt, $ctx:ident) => {{
         type C<A, const P: usize> = <A as NthT<P>>::T;
         let inputs = <<C<$A, $P> as ComponentSubscription>::Deps as GatherIn<$A, $P>>::gather($ctx.root, &*$ctx.outs);
-        <$A::States as AtPos<C<$A, $P>, $P>>::at_mut(&mut *$ctx.states).__update(<C<$A, $P> as ComponentSubscription>::input(inputs))
+        <$A::States as AtPos<C<$A, $P>, $P>>::at_mut(&mut *$ctx.states).update(<C<$A, $P> as ComponentSubscription>::input(inputs))
     }};
 }
 /// As `upd_val`, for a component with a handle parent: its own state is split off from the states
@@ -323,7 +323,7 @@ macro_rules! upd_view {
         type C<A, const P: usize> = <A as NthT<P>>::T;
         let (cx, me) = <$A::States as SplitAt<$P>>::split_at(&mut *$ctx.states);
         let inputs = <<C<$A, $P> as ComponentSubscription>::Deps as GatherCx<$A, $P>>::gather($ctx.root, &*$ctx.outs, &cx);
-        me.__update(<C<$A, $P> as ComponentSubscription>::input(inputs))
+        <C<$A, $P> as Component>::update(me, <C<$A, $P> as ComponentSubscription>::input(inputs))
     }};
 }
 
@@ -944,10 +944,11 @@ where
     <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P>,
     A::States: AtPos<<A as NthT<P>>::T, P>,
     A::Outs: AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>,
+    A::Outs: AtPos<<<A as NthT<P>>::T as Component>::Output, P>,
     SrcSlots<A, P>: RgCl,
     SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
 {
-    type Out = <<A as NthT<P>>::T as Vertex>::Stored;
+    type Out = <<A as NthT<P>>::T as Component>::Output;
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
     fn run_sw<F: SwFn<A, Self::Out>>(ctx: &mut PushCtx<'_, A>) {

@@ -70,10 +70,10 @@ impl ConstructPass {
             Some(b) => *b.downcast::<R>().expect("keyed by listener"),
         }
     }
-    pub(crate) fn take_config<C: crate::node::Comp>(&mut self) -> C::Cfg {
+    pub(crate) fn take_config<C: Component>(&mut self) -> C::Config {
         match self.configs.remove(&TypeId::of::<C>()) {
-            None => C::Cfg::default(),
-            Some(entry) => *entry.config.downcast::<C::Cfg>().expect("keyed by component type"),
+            None => C::Config::default(),
+            Some(entry) => *entry.config.downcast::<C::Config>().expect("keyed by component type"),
         }
     }
 }

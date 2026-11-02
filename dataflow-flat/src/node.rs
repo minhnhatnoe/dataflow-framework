@@ -155,16 +155,14 @@ pub trait HandleView: Vertex<Kind = HandleKind> {
     fn __view<'a>(&'a self, handle: &'a Self::Stored) -> <Self as Edge>::Read<'a>;
 }
 
-/// A component, by value or handle: what the drivers call to construct it and to run it. Derived
-/// (`#[derive(ComponentSubscription)]` forwards to `Component` or, with `#[handle]`, to
-/// `HandleComponent`).
+/// A node that is a component, with its stored value seen as its `Component::Output`. The drivers
+/// call `Component::new` and `Component::update` through this bound, with no wrapper function in
+/// between (a wrapper per component is one more item for the compiler to collect and for LLVM to
+/// keep). A handle component gets its `Component` impl from the derive, with the handle as the
+/// `Output`.
 #[doc(hidden)]
-pub trait Comp: crate::component::ComponentSubscription + Vertex {
-    /// `Component::Config` or `HandleComponent::Config`.
-    type Cfg: Default + 'static;
-    fn __new(config: Self::Cfg, init: Self::Init<'_>) -> (Self, Self::Stored);
-    fn __update(&mut self, input: Self::Input<'_>) -> Self::Stored;
-}
+pub trait Comp: crate::component::Component + Vertex<Stored = <Self as crate::component::Component>::Output> {}
+impl<C> Comp for C where C: crate::component::Component + Vertex<Stored = <C as crate::component::Component>::Output> {}
 
 // ---------------------------------------------------------------------------
 // Stored selected values

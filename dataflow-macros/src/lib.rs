@@ -1212,16 +1212,17 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
                     <#name #nty_generics as #krate::HandleComponent>::output(self, handle)
                 }
             }
-            impl #nimpl_generics #krate::Comp for #name #nty_generics #node_where {
-                type Cfg = <#name #nty_generics as #krate::HandleComponent>::Config;
+            impl #nimpl_generics #krate::Component for #name #nty_generics #node_where {
+                type Config = <#name #nty_generics as #krate::HandleComponent>::Config;
+                type Output = <#name #nty_generics as #krate::HandleComponent>::Handle;
                 #[cfg_attr(not(debug_assertions), inline(always))]
                 #[cfg_attr(debug_assertions, inline)]
-                fn __new(config: Self::Cfg, init: <Self as #krate::ComponentSubscription>::Init<'_>) -> (Self, Self::Stored) {
+                fn new(config: Self::Config, init: <Self as #krate::ComponentSubscription>::Init<'_>) -> (Self, Self::Output) {
                     <#name #nty_generics as #krate::HandleComponent>::new(config, init)
                 }
                 #[cfg_attr(not(debug_assertions), inline(always))]
                 #[cfg_attr(debug_assertions, inline)]
-                fn __update(&mut self, input: <Self as #krate::ComponentSubscription>::Input<'_>) -> Self::Stored {
+                fn update(&mut self, input: <Self as #krate::ComponentSubscription>::Input<'_>) -> Self::Output {
                     <#name #nty_generics as #krate::HandleComponent>::update(self, input)
                 }
             }
@@ -1243,19 +1244,6 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
                 type Requests = #requests_ty;
                 const KIND: u8 = #krate::KIND_COMPONENT;
                 #node_items
-            }
-            impl #nimpl_generics #krate::Comp for #name #nty_generics #node_where {
-                type Cfg = <#name #nty_generics as #krate::Component>::Config;
-                #[cfg_attr(not(debug_assertions), inline(always))]
-                #[cfg_attr(debug_assertions, inline)]
-                fn __new(config: Self::Cfg, init: <Self as #krate::ComponentSubscription>::Init<'_>) -> (Self, Self::Stored) {
-                    <#name #nty_generics as #krate::Component>::new(config, init)
-                }
-                #[cfg_attr(not(debug_assertions), inline(always))]
-                #[cfg_attr(debug_assertions, inline)]
-                fn __update(&mut self, input: <Self as #krate::ComponentSubscription>::Input<'_>) -> Self::Stored {
-                    <#name #nty_generics as #krate::Component>::update(self, input)
-                }
             }
         }
     };
