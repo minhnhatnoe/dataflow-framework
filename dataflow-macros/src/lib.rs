@@ -738,13 +738,13 @@ fn chain_ty(chain: &[Type]) -> TokenStream2 {
     t
 }
 
-/// `#[derive(ComponentSubscription)]` with `#[subscribe(..)]`. An entry with no
-/// `:` (`Average`), or a pattern with `_` as the leaf (`Some(Tag::<Btc>(_)): Ws`),
-/// is *handled*: the component implements `UpdateHandler<Entry>` for it instead
-/// of reading it in `update`, and it is not a field of `Input` or `Init`. For
-/// a selected handled entry the derive generates a marker type
-/// `<struct_snake>_edges::<Name>` (the innermost selector's name) that keys the
-/// `UpdateHandler` impl.
+/// `#[derive(ComponentSubscription)]` with `#[subscribe(..)]`. Every entry needs an
+/// `UpdateHandler<Entry>` impl: `#[derive(UpdateHandler)]` next to this derive gives all of them
+/// (inactive), or write them by hand. An entry with no `:` (`Average`), or a pattern with `_` as
+/// the leaf (`Some(Tag::<Btc>(_)): Ws`), is *unnamed*: it is not a field of `Input` or `Init`, and
+/// only its handler sees its value. The key of an impl is the node type for a plain entry; for a
+/// selected entry the derive generates a marker type `<struct_snake>_edges::<Name>` (the
+/// binding's name in camel case, or the innermost selector's name for `_` and unit selectors).
 #[proc_macro_derive(ComponentSubscription, attributes(subscribe, listener, handle))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

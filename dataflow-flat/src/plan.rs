@@ -2658,6 +2658,45 @@ mod handler_trace {
     impl UpdateHandler<Y> for G { fn on_update(&mut self, _: Self::Input<'_>, _: &u8) {} }
     impl UpdateHandler<Z> for G { const ACTIVE: bool = false; }
 
+    /// Unnamed entries (trigger only) of a derived component, and of one whose hand-written impls
+    /// are all `ACTIVE = false`: an ordinary component, the same push program, no handler run.
+    #[derive(ComponentSubscription, UpdateHandler)]
+    #[subscribe(X, Y)]
+    pub struct PD;
+    impl Component for PD {
+        type Config = ();
+        type Output = u8;
+        fn new((): (), _: Self::Init<'_>) -> (Self, u8) { (PD, 0) }
+        fn update(&mut self, _: Self::Input<'_>) -> u8 { 0 }
+    }
+    #[derive(ComponentSubscription)]
+    #[subscribe(X, Y)]
+    pub struct PH;
+    impl Component for PH {
+        type Config = ();
+        type Output = u8;
+        fn new((): (), _: Self::Init<'_>) -> (Self, u8) { (PH, 0) }
+        fn update(&mut self, _: Self::Input<'_>) -> u8 { 0 }
+    }
+    impl UpdateHandler<X> for PH { const ACTIVE: bool = false; }
+    impl UpdateHandler<Y> for PH { const ACTIVE: bool = false; }
+
+    #[test]
+    fn inactive_edges_make_an_ordinary_component() {
+        let d = <Anchor<Poll, (PD,)> as Planned>::PLAN;
+        let h = <Anchor<Poll, (PH,)> as Planned>::PLAN;
+        d.check();
+        h.check();
+        for plan in [d, h] {
+            // Plan indices are in first-reached order: the anchor, the component, X, Y, Poll.
+            assert_eq!(plan.len(), 5);
+            assert_eq!(plan.n_handled(1), 0);
+        }
+        assert_eq!(d.shape_digest(), h.shape_digest());
+        // One active edge makes it a handler.
+        assert_eq!(<Anchor<Poll, (H,)> as Planned>::PLAN.n_handled(1), 2);
+    }
+
     /// Inside a switch leaf the fired edges are static: one item per leaf and no tests.
     #[test]
     fn leaf_items_are_static() {
