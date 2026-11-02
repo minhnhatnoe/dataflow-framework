@@ -263,12 +263,23 @@ pub struct PushPh<A>(PhantomData<A>);
 /// `RunIfAt::run_if`; a macro, not a fn, so it costs no mono item per component).
 macro_rules! run_body {
     ($A:ident, $P:ident, $ctx:ident) => {{
+        run_body_pre!($A, $P, $ctx, |_o| ());
+    }};
+}
+/// `run_body` that also evaluates `$pre` on the value `update` returned, before it is
+/// stored, and gives the result back (the fused run and switch takes the key here).
+macro_rules! run_body_pre {
+    ($A:ident, $P:tt, $ctx:ident, |$o:ident| $pre:expr) => {{
         type C<A, const P: usize> = <A as NthT<P>>::T;
         // The inputs borrow the stored outputs and the root only while
         // `update` runs; the write to the output comes after.
         let out = {
             let inputs = <<C<$A, $P> as ComponentSubscription>::Deps as GatherIn<$A, $P>>::gather($ctx.root, &*$ctx.outs);
             <$A::States as AtPos<C<$A, $P>, $P>>::at_mut(&mut *$ctx.states).update(<C<$A, $P> as ComponentSubscription>::input(inputs))
+        };
+        let pre = {
+            let $o = &out;
+            $pre
         };
         *<$A::Outs as AtPos<<C<$A, $P> as Node>::Output, $P>>::at_mut(&mut *$ctx.outs) = out;
         // Stored selected values whose source is this component: written when their
@@ -277,6 +288,7 @@ macro_rules! run_body {
         if CondAt::<$A, $P>::FLAG != NO_FLAG {
             $ctx.fired.set(CondAt::<$A, $P>::FLAG);
         }
+        pre
     }};
 }
 
@@ -348,6 +360,7 @@ pub struct PnC<A, const N: usize>(PhantomData<A>);
 impl<A: Planned, const N: usize> PnC<A, N> {
     pub const KIND: u8 = A::PLAN.pg_kind_of(N);
     pub const A0: usize = A::PLAN.pg_a_of(N);
+    pub const B0: usize = A::PLAN.pg_b_of(N);
     pub const SP: usize = A::PLAN.sw_pos(N);
     pub const SI: usize = A::PLAN.sw_entry(N);
     pub const SJ: usize = A::PLAN.sw_depth(N);
@@ -420,6 +433,11 @@ impl PgKindOf<3> for () {
 }
 impl PgKindOf<4> for () {
     type Ty = HRunK;
+}
+#[doc(hidden)]
+pub struct RunSwK;
+impl PgKindOf<5> for () {
+    type Ty = RunSwK;
 }
 #[doc(hidden)]
 pub trait ExecK<A: Layout, Ph, K> {
@@ -634,6 +652,108 @@ where
     fn exec_k(ctx: &mut PushCtx<'_, A>) {
         let key = <Pn<A, N> as SwitchKey<A, Ph>>::key(ctx.root, &*ctx.outs);
         <NodeRg<A, N> as BstExec<A, Ph, <NodeRg<A, N> as RgCl>::Cl>>::bst(ctx, key);
+    }
+}
+
+/// The switch node `M` driven by a key taken from a value of type `O` (the output of
+/// the component run just before it, which is the switch's source).
+#[doc(hidden)]
+pub trait SwitchPre<A: Layout, Ph, O: 'static> {
+    fn key(o: &O) -> u32;
+    fn bst(ctx: &mut PushCtx<'_, A>, key: u32);
+}
+impl<A: Layout, Ph, O: 'static, const M: usize> SwitchPre<A, Ph, O> for Pn<A, M>
+where
+    Pn<A, M>: SwInfo<A, Ph>,
+    <Pn<A, M> as SwInfo<A, Ph>>::Ch: ChainKey<O, { PnC::<A, M>::SJ }>,
+    NodeRg<A, M>: RgCl,
+    NodeRg<A, M>: BstExec<A, Ph, <NodeRg<A, M> as RgCl>::Cl>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn key(o: &O) -> u32 {
+        <<Pn<A, M> as SwInfo<A, Ph>>::Ch as ChainKey<O, { PnC::<A, M>::SJ }>>::key(o)
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn bst(ctx: &mut PushCtx<'_, A>, key: u32) {
+        <NodeRg<A, M> as BstExec<A, Ph, <NodeRg<A, M> as RgCl>::Cl>>::bst(ctx, key);
+    }
+}
+
+/// What a fused run does with the value `update` returned: take the switch key from it, and
+/// afterwards run the decision tree.
+#[doc(hidden)]
+pub trait SwFn<A: Layout, O: 'static> {
+    fn key(o: &O) -> u32;
+    fn bst(ctx: &mut PushCtx<'_, A>, key: u32);
+}
+#[doc(hidden)]
+pub struct Fused<Ph, S>(PhantomData<(Ph, S)>);
+impl<A: Layout, Ph, S: SwitchPre<A, Ph, O>, O: 'static> SwFn<A, O> for Fused<Ph, S> {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn key(o: &O) -> u32 {
+        S::key(o)
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn bst(ctx: &mut PushCtx<'_, A>, key: u32) {
+        S::bst(ctx, key)
+    }
+}
+
+/// A run fused with the switch on its output: the key comes from the value `update`
+/// returned, not from the stored copy, so the jump does not wait for the store.
+#[doc(hidden)]
+pub trait RunSwAt<Ph, const P: usize>: Layout {
+    /// The output of the component at `P`.
+    type Out: 'static;
+    fn run_sw<F: SwFn<Self, Self::Out>>(ctx: &mut PushCtx<'_, Self>);
+}
+impl<A: Layout, const P: usize> RunSwAt<PushPh<A>, P> for A
+where
+    A: NthT<P>,
+    <A as NthT<P>>::T: Comp,
+    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P>,
+    A::States: AtPos<<A as NthT<P>>::T, P>,
+    A::Outs: AtPos<<<A as NthT<P>>::T as Node>::Output, P>,
+    A::Outs: AtPos<<<A as NthT<P>>::T as Component>::Output, P>,
+    SrcSlots<A, P>: RgCl,
+    SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
+{
+    type Out = <<A as NthT<P>>::T as Component>::Output;
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn run_sw<F: SwFn<A, Self::Out>>(ctx: &mut PushCtx<'_, A>) {
+        let key = run_body_pre!(A, P, ctx, |o| F::key(o));
+        F::bst(ctx, key);
+    }
+}
+/// Switch node `Self` fused after the run of the component at `P`.
+#[doc(hidden)]
+pub trait FuLink<A: Layout, Ph, const P: usize> {
+    fn go(ctx: &mut PushCtx<'_, A>);
+}
+impl<A: Layout, Ph, const P: usize, const M: usize> FuLink<A, Ph, P> for Pn<A, M>
+where
+    A: RunSwAt<Ph, P>,
+    Pn<A, M>: SwitchPre<A, Ph, <A as RunSwAt<Ph, P>>::Out>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn go(ctx: &mut PushCtx<'_, A>) {
+        <A as RunSwAt<Ph, P>>::run_sw::<Fused<Ph, Pn<A, M>>>(ctx)
+    }
+}
+impl<A: Layout, Ph, const N: usize> ExecK<A, Ph, RunSwK> for Pn<A, N>
+where
+    Pn<A, { PnC::<A, N>::B0 }>: FuLink<A, Ph, { PnC::<A, N>::A0 }>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn exec_k(ctx: &mut PushCtx<'_, A>) {
+        <Pn<A, { PnC::<A, N>::B0 }> as FuLink<A, Ph, { PnC::<A, N>::A0 }>>::go(ctx)
     }
 }
 

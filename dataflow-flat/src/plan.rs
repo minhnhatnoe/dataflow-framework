@@ -83,6 +83,10 @@ pub(crate) const PG_SWITCH: u8 = 3;
 /// A handler component's run: the `on_update` of the handled edges listed for
 /// the node, then `update` (see `Plan::mk_hrun`).
 pub(crate) const PG_HRUN: u8 = 4;
+/// A run of component `a` fused with the switch node `b` on its output (depth 0): the
+/// key is taken from the value `update` returned, before it is stored, so the dispatch
+/// does not wait for a store-to-load round trip.
+pub(crate) const PG_RUNSW: u8 = 5;
 /// Items (handled edges that may fire) of all handler runs in the program.
 const HPOOL: usize = 1 << 17;
 
@@ -1746,7 +1750,17 @@ impl Plan {
                 j += 1;
             }
             let n = self.emit_switch(k, j, x, prev);
-            self.push_item(n);
+            let fuse = prev == NONE && self.ib_len > mark && !self.failed && {
+                let last = self.ib[self.ib_len - 1] as usize;
+                self.pg_kind[last] == PG_RUN && self.by_cpos[self.pg_a[last] as usize] == x
+            };
+            if fuse {
+                let last = self.ib[self.ib_len - 1] as usize;
+                let f = self.new_node(PG_RUNSW, self.pg_a[last], n);
+                self.ib[self.ib_len - 1] = f;
+            } else {
+                self.push_item(n);
+            }
             k = j;
         }
         let count = self.ib_len - mark;
