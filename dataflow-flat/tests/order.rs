@@ -200,3 +200,60 @@ fn wide_components_keep_listing_order_across_nodes() {
     w22.extend(xs(1..20));
     check!(W22, "W22", w22.clone());
 }
+
+// ---------------------------------------------------------------------------
+// A switch whose branches end in the same runs (the plan compiles them once)
+// ---------------------------------------------------------------------------
+
+mod shared_tail {
+    use super::*;
+    use dataflow_flat::Demux;
+
+    #[derive(Clone, Copy, Root, Demux)]
+    pub enum Pkt {
+        A(u32),
+        B(u32),
+        Tick,
+    }
+    macro_rules! sel {
+        ($name:ident, [$($sub:tt)*]) => {
+            #[derive(ComponentSubscription)]
+            #[subscribe($($sub)*)]
+            pub struct $name;
+            impl Component for $name {
+                type Config = ();
+                type Output = u32;
+                fn new((): (), _: Self::Init<'_>) -> (Self, u32) { ($name, 0) }
+                fn update(&mut self, _: Self::Input<'_>) -> u32 {
+                    LOG.lock().unwrap().push(stringify!($name));
+                    0
+                }
+            }
+        };
+    }
+    sel!(PatA, [Pkt::A(p): Pkt]);
+    sel!(PatB, [Pkt::B(p): Pkt]);
+    // joined across the two branches, then runs only they reach
+    sel!(Join, [a: PatA, b: PatB]);
+    sel!(Next, [j: Join]);
+    sel!(Last, [n: Next, j: Join]);
+    sel!(Sink, [l: Last]);
+}
+
+#[test]
+fn shared_tail_keeps_order_and_runs_once() {
+    use shared_tail::*;
+    let _g = SERIAL.lock().unwrap();
+    take();
+    let mut p = Pipeline::<Pkt, (Sink,)>::build(Configs::new()).unwrap();
+    assert_eq!(take(), Vec::<&str>::new());
+    for _ in 0..2 {
+        p.push(Pkt::A(1));
+        assert_eq!(take(), ["PatA", "Join", "Next", "Last", "Sink"]);
+        p.push(Pkt::B(2));
+        assert_eq!(take(), ["PatB", "Join", "Next", "Last", "Sink"]);
+        // no branch is taken: nothing runs
+        p.push(Pkt::Tick);
+        assert_eq!(take(), Vec::<&str>::new());
+    }
+}

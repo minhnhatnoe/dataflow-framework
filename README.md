@@ -623,6 +623,8 @@ With a different training seed: small 90.6 to 86.2 (-4.8%, baseline -2.4%), tiny
 
 ### What costs time
 
+* **Shared tails (`PG_TAIL`).** A component joined across exclusive branches (a market's depth and trade updates feeding the same cross, quoters and sinks) used to be compiled once per branch, so the tail's code existed twice per market. The plan now finds the plain runs that end every branch of a switch (`Plan::share_tail`, at least `TAIL_MIN` = 2) and emits them once as a node that every branch calls (`drive::exec_tail`, `#[inline(never)]` in release). Order is unchanged. Measured against 2ebfcdd with the generated `enum` app: 4,079 components 97.0 to 93.0 ns per packet (gap to the hand-written baseline 10.7 to 6.7 ns, build 117 to 101 s); typical no change outside noise (gap 3.2 to 2.5 ns); `perps` (12,412) 116.81 to 109.33 ns minimum (gap 26.8-28.4 to 15.6-18.7 ns), release build 537 to 472 s, peak 12.08 to 8.64 GB, text 10.48 to 9.55 MB. The rest of the gap is not explained; the leading suspect is the storage layout (a market's states and outputs are in separate blocks per component type, the hand-written code keeps them in one struct).
+
 * A body edit in the app crate re-runs no plan or trait query and recompiles 1 to 4 of about 80 codegen units. A body edit in the *library* crate re-runs many constant evaluations (about 2.9 s at typical).
 * Typical mono items per component: about 48 (ARITY 16; 92 before the shared projection steps of the storage descent).
 * Keyed dispatch compiles to compares plus jump tables, whose depth grows with the number of variants; at thousands of variants it dominates release time.
