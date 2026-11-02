@@ -80,6 +80,17 @@ impl<Q: Rg, const K: usize> PosAt<Q, K> {
 #[doc(hidden)]
 pub trait Phase {
     type Ctx<'c>;
+    /// Whether the subtrees of the driver are functions of their own (phases that run once, at
+    /// construction: LLVM then never sees one function the size of the whole graph).
+    const OUTLINE: bool = false;
+}
+
+/// A subtree of the driver as a function of its own.
+#[doc(hidden)]
+#[cfg_attr(not(debug_assertions), inline(never))]
+#[cfg_attr(debug_assertions, inline)]
+pub fn drive_out<A: Planned, Ph: Phase, Cl, Q: Drive<A, Ph, Cl>>(ctx: &mut Ph::Ctx<'_>) {
+    Q::drive(ctx)
 }
 
 /// The work of phase `Ph` at component position `P`.
@@ -129,7 +140,11 @@ macro_rules! drive_inner {
             #[cfg_attr(not(debug_assertions), inline(always))]
             #[cfg_attr(debug_assertions, inline)]
             fn drive(ctx: &mut Ph::Ctx<'_>) {
-                $(<Ch<Q, $k> as Drive<A, Ph, <Ch<Q, $k> as RgCl>::Cl>>::drive(ctx);)*
+                $(if Ph::OUTLINE {
+                    drive_out::<A, Ph, <Ch<Q, $k> as RgCl>::Cl, Ch<Q, $k>>(ctx);
+                } else {
+                    <Ch<Q, $k> as Drive<A, Ph, <Ch<Q, $k> as RgCl>::Cl>>::drive(ctx);
+                })*
             }
         }
     };
@@ -150,6 +165,7 @@ pub struct ConstructCtx<'c, A: Layout> {
 }
 impl<A: Layout> Phase for ConstructPh<A> {
     type Ctx<'c> = ConstructCtx<'c, A>;
+    const OUTLINE: bool = true;
 }
 
 impl<A: Layout, const P: usize> StepAt<ConstructPh<A>, P> for A
@@ -364,6 +380,7 @@ impl<A: Planned, const N: usize> PnC<A, N> {
     pub const SP: usize = A::PLAN.sw_pos(N);
     pub const SI: usize = A::PLAN.sw_entry(N);
     pub const SJ: usize = A::PLAN.sw_depth(N);
+    pub const HAS_SW: bool = A::PLAN.prog_has_switch(N);
 }
 /// The root node of the program of `A`.
 #[doc(hidden)]
@@ -606,6 +623,31 @@ where
 pub trait BstExec<A: Layout, Ph, Cl>: Rg {
     fn bst(ctx: &mut PushCtx<'_, A>, key: u32) -> bool;
 }
+/// A switch arm that has no switch below it, as a function of its own in release builds: LLVM
+/// then optimizes many small functions instead of one the size of the whole push. The cost is
+/// one call per packet (the arms above it stay inline).
+#[doc(hidden)]
+#[cfg_attr(not(debug_assertions), inline(always))]
+#[cfg_attr(debug_assertions, inline)]
+pub fn exec_arm<A: Layout, Ph, const N: usize>(ctx: &mut PushCtx<'_, A>)
+where
+    Pn<A, N>: Exec<A, Ph>,
+{
+    if PnC::<A, N>::HAS_SW {
+        <Pn<A, N> as Exec<A, Ph>>::exec(ctx)
+    } else {
+        exec_out::<A, Ph, N>(ctx)
+    }
+}
+#[doc(hidden)]
+#[cfg_attr(not(debug_assertions), inline(never))]
+#[cfg_attr(debug_assertions, inline)]
+pub fn exec_out<A: Layout, Ph, const N: usize>(ctx: &mut PushCtx<'_, A>)
+where
+    Pn<A, N>: Exec<A, Ph>,
+{
+    <Pn<A, N> as Exec<A, Ph>>::exec(ctx)
+}
 macro_rules! bst_leaf {
     ($n:literal; $($k:literal)*) => {
         impl<A: Layout, Ph, Q: Rg> BstExec<A, Ph, Leaf<$n>> for Q
@@ -617,7 +659,7 @@ macro_rules! bst_leaf {
             #[allow(unused_variables)]
             fn bst(ctx: &mut PushCtx<'_, A>, key: u32) -> bool {
                 $(if key == ChOf::<A, Q, $k>::KEY {
-                    <Pn<A, { ChOf::<A, Q, $k>::NODE }> as Exec<A, Ph>>::exec(ctx);
+                    exec_arm::<A, Ph, { ChOf::<A, Q, $k>::NODE }>(ctx);
                     return true;
                 })*
                 false
@@ -800,6 +842,7 @@ impl<A: Layout> Phase for SlotWriteBy<A> {
 pub struct SlotInitPh<A>(PhantomData<A>);
 impl<A: Layout> Phase for SlotInitPh<A> {
     type Ctx<'c> = ConstructCtx<'c, A>;
+    const OUTLINE: bool = true;
 }
 
 /// The work of a slot node at storage position `P`.

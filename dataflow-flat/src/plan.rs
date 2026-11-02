@@ -2236,6 +2236,25 @@ impl Plan {
     pub(crate) const fn sw_depth(&self, n: usize) -> usize {
         self.pg_e[n] as usize
     }
+    /// Whether the program below node `n` (including `n`) has a switch.
+    pub(crate) const fn prog_has_switch(&self, n: usize) -> bool {
+        let kind = self.pg_kind[n];
+        if kind == PG_SWITCH || kind == PG_RUNSW {
+            return true;
+        }
+        if kind == PG_SEQ {
+            let a = self.pg_a[n] as usize;
+            let b = self.pg_b[n] as usize;
+            let mut i = 0;
+            while i < b {
+                if self.prog_has_switch(self.ch_node[a + i] as usize) {
+                    return true;
+                }
+                i += 1;
+            }
+        }
+        false
+    }
     pub(crate) const fn ch_node_of(&self, k: usize) -> usize {
         self.ch_node[k] as usize
     }

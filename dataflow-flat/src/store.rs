@@ -316,6 +316,8 @@ where
     <R as Fields<M, LO, HI>>::F: Finish<Done = <R as Fields<M::Done, LO, HI>>::F>,
 {
     type Done = Blk<R, M::Done, LO, HI>;
+    // A function per block: construction runs once, and LLVM must not see one function the size of the graph.
+    #[inline(never)]
     fn finish(self) -> Self::Done {
         Blk(self.0.finish())
     }

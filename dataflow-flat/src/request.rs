@@ -159,6 +159,7 @@ pub struct ReqCtx<'c> {
 }
 impl<A: Layout> Phase for ReqPh<A> {
     type Ctx<'c> = ReqCtx<'c>;
+    const OUTLINE: bool = true;
 }
 
 impl<A: Layout, const P: usize> StepAt<ReqPh<A>, P> for A
