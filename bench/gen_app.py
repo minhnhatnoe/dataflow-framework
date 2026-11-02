@@ -742,10 +742,21 @@ pub use hand::Hand;
 pub use arms::run_batch;
 pub use all::run_all_batch;
 """)
-    sample = lambda e: sender_sum(M, e, lambda k: f"h.m[{e}][{k}].quote")
+    # BASE_SOA=1 (experiment): one Vec per field (one block per component type), like the framework's storage
+    # BASE_SOA=2: two Vecs only, states and outputs (the framework keeps its states and outputs in two trees)
+    SOA = int(os.environ.get("BASE_SOA") or 0) if ENUM else 0
+    ST = {"book", "trades", "vwap", "vol", "quoter"}
+    if SOA == 2:
+        mf = lambda e, k, f: f"h.m[{e}].{'s' if f in ST else 'o'}[{k}].{f}"
+    elif SOA:
+        mf = lambda e, k, f: f"h.m[{e}].{f}[{k}]"
+    else:
+        mf = lambda e, k, f: f"h.m[{e}][{k}].{f}"
+    mv = (lambda e, k: f"h.m[{e}].at({k})") if SOA else (lambda e, k: f"h.m[{e}][{k}]")
+    sample = lambda e: sender_sum(M, e, lambda k: mf(e, k, "quote"))
     accx = lambda i: f"h.x[{i}]"
-    accq = lambda e, k: f"h.m[{e}][{k}].quote"
-    big_lines = big_math(M, lambda j: f"h.m[{M.big_deps[j][0]}][{M.big_deps[j][1]}].fair")
+    accq = lambda e, k: mf(e, k, "quote")
+    big_lines = big_math(M, lambda j: mf(M.big_deps[j][0], M.big_deps[j][1], "fair"))
     xof = lambda e: "vec![" + ", ".join(f"Some({M.cross_of[(e, k)]})" if (e, k) in M.cross_of else "None" for k in range(M.n[e])) + "]"
     all_fn = "" if ENUM else """    /// Everything, as phase-1a master would run it (the guards make the stale parts no-ops).
     #[inline(always)]
@@ -763,17 +774,38 @@ pub use all::run_all_batch;
     }"""
     last_field = "" if ENUM else "    pub last: [Frame; 3],\n"
     last_init = "" if ENUM else "            last: [Frame::default(); 3],\n"
+    import re
+    FIELDS = [("book", "BookCore"), ("trades", "TradeCore"), ("vwap", "VwapCore"), ("vol", "VolCore"),
+              ("quoter", "QuoterCore"), ("bt", "BookTop"), ("tt", "TradeTop"), ("mid", "u64"), ("imb", "i64"),
+              ("spr", "u64"), ("vw", "u64"), ("vl", "u64"), ("mom", "i64"), ("fair", "FairOut"), ("quote", "Quote")]
+    if SOA == 2:
+        sf = [x for x in FIELDS if x[0] in ST]; of = [x for x in FIELDS if x[0] not in ST]
+        mkt_def = ("pub struct Mkt<'a> { " + ", ".join(f"pub {n}: &'a mut {t}" for n, t in FIELDS) + " }\n"
+                   "#[derive(Default)]\npub struct MS { " + ", ".join(f"pub {n}: {t}" for n, t in sf) + " }\n"
+                   "#[derive(Default)]\npub struct MO { " + ", ".join(f"pub {n}: {t}" for n, t in of) + " }\n"
+                   "pub struct Soa { pub s: Vec<MS>, pub o: Vec<MO> }\n"
+                   "impl Soa {\n    pub fn new(n: u32) -> Self { Soa { s: (0..n).map(|_| MS::default()).collect(), o: (0..n).map(|_| MO::default()).collect() } }\n"
+                   "    #[inline(always)]\n    pub fn at(&mut self, k: usize) -> Mkt<'_> { let (s, o) = (&mut self.s[k], &mut self.o[k]); Mkt { "
+                   + ", ".join(f"{n}: &mut {'s' if n in ST else 'o'}.{n}" for n, _ in FIELDS) + " } }\n}\n")
+        mkt_impl = "impl Mkt<'_> {"
+    elif SOA:
+        # methods work on a view of &mut fields: `self.x` becomes `(*self.x)`
+        mkt_def = ("pub struct Mkt<'a> { " + ", ".join(f"pub {n}: &'a mut {t}" for n, t in FIELDS) + " }\n"
+                   "pub struct Soa { " + ", ".join(f"pub {n}: Vec<{t}>" for n, t in FIELDS) + " }\n"
+                   "impl Soa {\n    pub fn new(n: u32) -> Self { Soa { "
+                   + ", ".join(f"{n}: (0..n).map(|_| Default::default()).collect()" for n, _ in FIELDS) + " } }\n"
+                   "    #[inline(always)]\n    pub fn at(&mut self, k: usize) -> Mkt<'_> { Mkt { "
+                   + ", ".join(f"{n}: &mut self.{n}[k]" for n, _ in FIELDS) + " } }\n}\n")
+        mkt_impl = "impl Mkt<'_> {"
+    else:
+        mkt_def = ("#[derive(Default)]\npub struct Mkt { " + ", ".join(f"pub {n}: {t}" for n, t in FIELDS) + " }\n")
+        mkt_impl = "impl Mkt {"
     write(f"{b}/src/hand.rs", f"""//! State of the hand-written baseline.
 use marketlib::*;
 use marketlib::stats::*;
 
-#[derive(Default)]
-pub struct Mkt {{
-    pub book: BookCore, pub trades: TradeCore, pub vwap: VwapCore, pub vol: VolCore, pub quoter: QuoterCore,
-    pub bt: BookTop, pub tt: TradeTop, pub mid: u64, pub imb: i64, pub spr: u64, pub vw: u64, pub vl: u64,
-    pub mom: i64, pub fair: FairOut, pub quote: Quote,
-}}
-impl Mkt {{
+{mkt_def}
+{mkt_impl}
     #[inline(always)]
     pub fn on_depth(&mut self, d: &DepthUpd) {{
         self.bt = self.book.apply(d);
@@ -799,7 +831,7 @@ impl Mkt {{
 {all_fn}
 }}
 pub struct Hand {{
-    pub m: [Vec<Mkt>; 3],
+    pub m: [{"Soa" if SOA else "Vec<Mkt>"}; 3],
     pub x: Vec<XOut>,
     pub xof: [Vec<Option<usize>>; 3],
 {last_field}    pub send: [DigestCore; 3],
@@ -808,7 +840,7 @@ pub struct Hand {{
 }}
 impl Hand {{
     pub fn new() -> Self {{
-        let mk = |n: u32| (0..n).map(|_| Mkt::default()).collect::<Vec<_>>();
+        let mk = |n: u32| {"Soa::new(n)" if SOA else "(0..n).map(|_| Mkt::default()).collect::<Vec<_>>()"};
         Hand {{
             m: [mk({ns[0]}), mk({ns[1]}), mk({ns[2]})],
             x: vec![XOut::default(); {len(M.cross)}],
@@ -842,6 +874,13 @@ pub fn step_risk(h: &mut Hand) {{ let d = risk_digest(h).wrapping_mul(1000); h.r
 #[inline(always)]
 pub fn step_big(h: &mut Hand) {{ let d = big_digest(h); h.big.step(d, &BIG) }}
 """)
+    if SOA:
+        hp = f"{b}/src/hand.rs"
+        t = open(hp).read()
+        i, j = t.index("impl Mkt<'_> {"), t.index("pub struct Hand")
+        names = "|".join(n for n, _ in FIELDS)
+        t = t[:i] + re.sub(r"self\.(%s)\b" % names, r"(*self.\1)", t[i:j]) + t[j:]
+        open(hp, "w").write(t)
     # cone arms
     arms = ["use crate::hand::*;", "use marketlib::*;", ""]
     big_set = set(M.big_deps)
@@ -850,20 +889,20 @@ pub fn step_big(h: &mut Hand) {{ let d = big_digest(h); h.big.step(d, &BIG) }}
     for e in range(3):
         for k in range(ns[e]):
             lines = [f"#[inline(always)]\nfn m_{e}_{k}(h: &mut Hand, body: &Body) {{",
-                     f"    match body {{ Body::Depth(d) => h.m[{e}][{k}].on_depth(d), Body::Trade(t) => h.m[{e}][{k}].on_trade(t) }}"]
+                     f"    match body {{ Body::Depth(d) => {mv(e, k)}.on_depth(d), Body::Trade(t) => {mv(e, k)}.on_trade(t) }}"]
             ran_q, fire_risk, senders = [], False, set()
             if (e, k) in M.cross_of:
                 xi = M.cross_of[(e, k)]
                 mem = M.cross[xi]
-                args = ", ".join(f"&h.m[{ee}][{kk}].fair" for ee, kk in mem)
+                args = ", ".join(f"&{mf(ee, kk, 'fair')}" for ee, kk in mem)
                 lines.append(f"    h.x[{xi}] = cross{len(mem)}({args});")
                 lines.append(f"    let x = h.x[{xi}];")
                 for ee, kk in mem:
-                    lines.append(f"    h.m[{ee}][{kk}].requote({(ee << 32) | kk}, {ee}, Some(&x));")
+                    lines.append(f"    {mv(ee, kk)}.requote({(ee << 32) | kk}, {ee}, Some(&x));")
                     ran_q.append((ee, kk))
                 fire_risk = xi in risk_x
             else:
-                lines.append(f"    h.m[{e}][{k}].requote({(e << 32) | k}, {e}, None);")
+                lines.append(f"    {mv(e, k)}.requote({(e << 32) | k}, {e}, None);")
                 ran_q.append((e, k))
             for q in ran_q:
                 senders.add(q[0])
