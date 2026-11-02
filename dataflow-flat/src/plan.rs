@@ -2410,10 +2410,10 @@ mod trace {
             }
         };
     }
-    scomp!(X, [p: Poll => K0]);
-    scomp!(Y, [p: Poll => K1]);
+    scomp!(X, [K0(p): Poll]);
+    scomp!(Y, [K1(p): Poll]);
     scomp!(Z, [x: X, y: Y]);
-    scomp!(W, [z: Z, p: Poll => K0]);
+    scomp!(W, [z: Z, K0(p): Poll]);
 
     #[test]
     fn conditions_terms_and_flags() {
@@ -2482,8 +2482,8 @@ mod handler_trace {
             }
         };
     }
-    scomp!(X, [p: Poll => K0]);
-    scomp!(Y, [p: Poll => K1]);
+    scomp!(X, [K0(p): Poll]);
+    scomp!(Y, [K1(p): Poll]);
     scomp!(Z, [p: Poll]);
 
     #[derive(Handler)]
@@ -2582,19 +2582,19 @@ mod shapes {
     key!(K3, 5);
     key!(K4, 7);
     key!(K5, 9);
-    comp!(X0, [p: Poll => K0]);
-    comp!(X1, [p: Poll => K1]);
-    comp!(X2, [p: Poll => K2]);
-    comp!(X3, [p: Poll => K3]);
-    comp!(X4, [p: Poll => K4]);
-    comp!(X5, [p: Poll => K5]);
+    comp!(X0, [K0(p): Poll]);
+    comp!(X1, [K1(p): Poll]);
+    comp!(X2, [K2(p): Poll]);
+    comp!(X3, [K3(p): Poll]);
+    comp!(X4, [K4(p): Poll]);
+    comp!(X5, [K5(p): Poll]);
     comp!(Z, [p: Poll]);
     comp!(Join, [a: X0, b: X1, c: X2, d: X3, e: X4, f: X5]);
     comp!(Mixed, [z: Z, a: X0, b: X3]);
     comp!(Tail, [j: Join, m: Mixed]);
     comp!(Plain, [z: Z]);
     // two-level: X0 under K0 then a nested keyed read
-    comp!(Deep, [x: X0, p: Poll => K0]);
+    comp!(Deep, [x: X0, K0(p): Poll]);
 
     #[derive(Handler)]
     #[handles(X0, X1, X2, X3, X4, X5)]

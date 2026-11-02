@@ -3,7 +3,7 @@
 //!
 //! ```ignore
 //! #[derive(Handler)]
-//! #[handles(Quoter<Btc>, Quoter<Eth>)]      // handled edges (plain, or `f: P => Sel..`)
+//! #[handles(Quoter<Btc>, Quoter<Eth>)]      // handled edges (plain, or `Sel(f): P`)
 //! #[subscribe(limits: RiskLimits)]          // plain inputs, read in `finish`
 //! struct Oms { .. }
 //!

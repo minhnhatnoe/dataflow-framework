@@ -2,7 +2,7 @@
 //!
 //! The non-generic-core pattern: the logic lives in [`BookCore`], compiled once.
 //! The generic `Book<X, S>` is only a wrapper that carries the types (and
-//! therefore the subscription `X::Ws => On<S>`), so the 2 x N instances add
+//! therefore the subscription `On::<S>(b): X::Ws`), so the 2 x N instances add
 //! almost nothing to compile time.
 
 use std::cell::RefCell;

@@ -4,7 +4,7 @@
 usage: bench/gen_handler.py N OUTDIR
 
 One root `Msg { key, v }` -> `Feed` (Option<Frame>, keyed) -> `Quoter<Sn>` for N symbols
-(`Feed => Some, On<Sn>`, exclusive keys) -> one joining node, in three flavours selected by cargo
+(`Some(On::<Sn>(u)): Feed`, exclusive keys) -> one joining node, in three flavours selected by cargo
 features of the generated crate:
 
   handler    `Oms`, a handler component: `on_update` per fired quoter, `finish`
@@ -87,7 +87,7 @@ impl Component for Feed {{
 
 /// (sequence, value)
 #[derive(ComponentSubscription)]
-#[subscribe(u: Feed => Some, On<S>)]
+#[subscribe(Some(On::<S>(u)): Feed)]
 pub struct Quoter<S: Symbol>(std::marker::PhantomData<S>);
 impl<S: Symbol> Component for Quoter<S> {{
     type Config = ();

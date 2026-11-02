@@ -5,10 +5,10 @@ usage: bench/gen_enum_keys.py N OUTDIR
 
 Writes four crates under OUTDIR (each its own workspace, path dependency on dataflow-flat):
 
-  f  variant F: the listener outputs `Frame { key: Option<u32>, tob }` (Keyed); `Book<S: Symbol>` reads `Ws => On<S>`
+  f  variant F: the listener outputs `Frame { key: Option<u32>, tob }` (Keyed); `Book<S: Symbol>` reads `On::<S>(t): Ws`
   e  variant E: the listener outputs `enum FrameN { S0(Tob), .. }`; one marker per symbol (`markets::S0`) with a
      hand-written `impl Select<FrameN>` whose `key_of` is ONE shared function; `Book<S: Select<FrameN, Out = Tob>>`
-     reads `Ws => S`
+     reads `S(t): Ws`
   k  variant E plus `const KEYED: bool = true` in every impl and `#[key_listener]` on Ws\n  d  variant E with `#[derive(Demux)]` on the enum as it stands (compile time only; selectors are `framen::S0`)
   h  hand-written baseline: a `match` on the symbol with the books in an array
 
@@ -217,7 +217,7 @@ impl Component for Ws {{
 }}
 
 #[derive(ComponentSubscription)]
-#[subscribe(t: Ws => On<S>)]
+#[subscribe(On::<S>(t): Ws)]
 pub struct Book<S: Symbol> {{ n: u64, _p: core::marker::PhantomData<S> }}
 impl<S: Symbol> Component for Book<S> {{
     type Config = ();
@@ -251,7 +251,7 @@ impl Component for Ws {{
 }}
 
 #[derive(ComponentSubscription)]
-#[subscribe(t: Ws => S)]
+#[subscribe(S(t): Ws)]
 pub struct Book<S: Select<{FN}, Out = Tob>> {{ n: u64, _p: core::marker::PhantomData<S> }}
 impl<S: Select<{FN}, Out = Tob>> Component for Book<S> {{
     type Config = ();

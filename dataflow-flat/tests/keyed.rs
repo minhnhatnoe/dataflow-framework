@@ -121,7 +121,7 @@ impl Component for Ws3 {
 }
 
 #[derive(ComponentSubscription)]
-#[subscribe(u: Ws => Some, On<S>)]
+#[subscribe(Some(On::<S>(u)): Ws)]
 pub struct Book<S: Symbol>(std::marker::PhantomData<S>);
 impl<S: Symbol> Component for Book<S> {
     type Config = ();
@@ -137,7 +137,7 @@ impl<S: Symbol> Component for Book<S> {
 
 /// Reads the same `On<S>` as `Book<S>`, and the book itself.
 #[derive(ComponentSubscription)]
-#[subscribe(u: Ws => Some, On<S>, b: Book<S>)]
+#[subscribe(Some(On::<S>(u)): Ws, b: Book<S>)]
 pub struct Vwap<S: Symbol>(std::marker::PhantomData<S>);
 impl<S: Symbol> Component for Vwap<S> {
     type Config = ();
@@ -168,7 +168,7 @@ impl Component for Join {
 }
 
 #[derive(ComponentSubscription)]
-#[subscribe(f: Ws2 => On<Sol>)]
+#[subscribe(On::<Sol>(f): Ws2)]
 pub struct Direct;
 impl Component for Direct {
     type Config = ();

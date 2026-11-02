@@ -75,7 +75,7 @@ impl Component for Ws {
 
 /// A quoter per symbol; its initial output is 1000 + key.
 #[derive(ComponentSubscription)]
-#[subscribe(u: Ws => Some, On<S>)]
+#[subscribe(Some(On::<S>(u)): Ws)]
 pub struct Quoter<S: Symbol>(PhantomData<S>);
 impl<S: Symbol> Component for Quoter<S> {
     type Config = ();
@@ -396,7 +396,7 @@ pub enum Pkt {
 }
 
 #[derive(ComponentSubscription)]
-#[subscribe(p: Pkt => pkt::A)]
+#[subscribe(pkt::A(p): Pkt)]
 pub struct OnA;
 impl Component for OnA {
     type Config = ();
@@ -410,7 +410,7 @@ impl Component for OnA {
     }
 }
 #[derive(ComponentSubscription)]
-#[subscribe(p: Pkt => pkt::B)]
+#[subscribe(pkt::B(p): Pkt)]
 pub struct OnB;
 impl Component for OnB {
     type Config = ();
@@ -510,7 +510,7 @@ fn edges_with_conditional_parents_are_tested_by_flag() {
 // ---------------------------------------------------------------------------
 
 #[derive(Handler)]
-#[handles(btc: Ws => Some, On<Btc>, eth: Ws => Some, On<Eth>)]
+#[handles(Some(On::<Btc>(btc)): Ws, Some(On::<Eth>(eth)): Ws)]
 #[handles(Quoter<Sol>)]
 pub struct Fills;
 impl Collect for Fills {

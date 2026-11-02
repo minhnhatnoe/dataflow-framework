@@ -2,7 +2,7 @@
 # usage: python3 scripts/gen_keybench.py [E=2] [S=4] [K=3] [packets=1000]   -> writes dataflow-flat/examples/keybench.rs
 # A keyed-selector graph: a root `Packet { ex, key, v }`, per exchange e a `#[key_listener]` component Ws<e> (output
 # Option<Frame>, a Keyed value). For every (exchange e, symbol s) a chain of K components, the first subscribing through
-# the selector chain `Ws<e> => Some, On<Sym<s>>`; per symbol a join `Best<s>` over the E exchanges' chains
+# the selector chain `Some(On::<Sym<s>>(p)): Ws<e>`; per symbol a join `Best<s>` over the E exchanges' chains
 # (E must be 1: two listeners are never known to be exclusive, so the plan rejects a join of their branches);
 # the joins feed ceil(S/60) sinks `Sink<g>` (a condition has at most MAX_TERMS = 256 terms). A deterministic packet sequence is pre-generated; the framework is
 # compared with a hand-written nested `match` that stores each output in a field. Both sides must agree.
@@ -43,7 +43,7 @@ def last(e, s): return f"L{K-1}_{e}_{s}" if K > 1 else f"Book_{e}_{s}"
 for e in range(E):
     for s in range(S):
         o.append(f"""    #[derive(ComponentSubscription)]
-    #[subscribe(p: Ws{e} => Some, On<Sym{s}>)]
+    #[subscribe(Some(On::<Sym{s}>(p)): Ws{e})]
     pub struct Book_{e}_{s}(u64);
     impl Component for Book_{e}_{s} {{
         type Config = (); type Output = u64;

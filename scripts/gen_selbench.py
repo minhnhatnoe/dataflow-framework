@@ -25,7 +25,7 @@ def last(e, s): return f"L{K-1}_{e}_{s}" if K > 1 else f"Book_{e}_{s}"
 for e in range(E):
     for s in range(S):
         o.append(f"""    #[derive(ComponentSubscription)]
-    #[subscribe(p: Packet => packet::E{e}, ex{e}_msg::S{s})]
+    #[subscribe(packet::E{e}(ex{e}_msg::S{s}(p)): Packet)]
     pub struct Book_{e}_{s}(u64);
     impl Component for Book_{e}_{s} {{
         type Config = (); type Output = u64;

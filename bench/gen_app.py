@@ -17,11 +17,11 @@ Modes:
        (key/kind/seq checks) so that results equal the cone-only semantics. The baseline is built in two
        flavours: `run_batch` (cone only: the target) and `run_all_batch` (every component per packet).
   enum selectors via one `#[derive(Demux)]` enum per exchange with a variant per market
-       (`#[subscribe(u: W => <S as Symbol>::Sel, body::Depth)]`); works on phase 1b. The baseline is a
+       (`#[subscribe(<S as Symbol>::Sel(body::Depth(u)): W)]`); works on phase 1b. The baseline is a
        `match` on the same enum. Every component runs only when its edges fire.
   req  `enum`, but each exchange's feed component is a `#[listener]` whose `Requests` counts the distinct
        selectors the graph reads from it (`Request<S>::add`); measures the cost of the request pass.
-  on   the spec's keyed selector: `#[subscribe(u: W => On<S>, body::Depth)]` plus `Keyed` for the frame.
+  on   the spec's keyed selector: `#[subscribe(On::<S>(body::Depth(u)): W)]` plus `Keyed` for the frame.
        Not on master yet: generated against the spec, UNTESTED.
 
 Layout of what is generated (per market: Book, Trades, Mid, Imbalance, Spread, Vwap, Vol, Momentum, Fair, Quoter):
@@ -456,19 +456,19 @@ impl DigestCore {{
 
     # components
     if ENUM:
-        book_sub, trade_sub = "u: W => <S as Symbol>::Sel, body::Depth", "u: W => <S as Symbol>::Sel, body::Trade"
+        book_sub, trade_sub = "<S as Symbol>::Sel(body::Depth(u)): W", "<S as Symbol>::Sel(body::Trade(u)): W"
         book_upd = trade_upd = "self.core.apply(i.u)"
         ws_use = "use crate::wire::{body, wire};\n"
-        lsub = lambda v: f"w: Wire => wire::{v}"
+        lsub = lambda v: f"wire::{v}(w): Wire"
         feed_def = """/// A listener component: a node whose output is the exchange's event enum, the one `S` selects from.
 pub trait Feed<S: Symbol>: Node<Output = <S as Symbol>::Ev> {}
 impl<S: Symbol, W: Node<Output = <S as Symbol>::Ev>> Feed<S> for W {}
 """
     elif ON:
-        book_sub, trade_sub = "u: W => On<S>, body::Depth", "u: W => On<S>, body::Trade"
+        book_sub, trade_sub = "On::<S>(body::Depth(u)): W", "On::<S>(body::Trade(u)): W"
         book_upd = trade_upd = "self.core.apply(i.u)"
         ws_use = "use dataflow_flat::On;\nuse crate::wire::{body, wire};\n"
-        lsub = lambda v: f"w: Wire => wire::{v}"
+        lsub = lambda v: f"wire::{v}(w): Wire"
         feed_def = "/// A listener component: a node whose output is the exchange's latest frame.\npub trait Feed<S>: Node<Output = Frame> {}\n"
     else:
         book_sub, trade_sub = "u: W", "u: W"

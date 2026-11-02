@@ -14,7 +14,7 @@
 //! # Selectors and conditions
 //!
 //! A subscription may carry a chain of *selectors* applied to the parent's
-//! output, left to right: `#[subscribe(upd: Venue => Some, payload::Depth)]`
+//! output, left to right: `#[subscribe(Some(payload::Depth(upd)): Venue)]`
 //! (see [`Select`]; `#[derive(Demux)]` on an enum makes one selector per
 //! variant, `Some`/`None` are in [`option`], a guard is a hand-written `Select`
 //! with `KEY = GUARD`). The field of the input is the chain's final part. An

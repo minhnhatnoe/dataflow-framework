@@ -296,8 +296,8 @@ EOF
 CMD[non_exclusive_join]=build
 PATTERN[non_exclusive_join]='E0080.*J joins branches that can fire in the same step'
 BODY[non_exclusive_join]="$SELECTORS
-comp!(A, [p: Poll => G1]);
-comp!(B, [p: Poll => G2]);
+comp!(A, [G1(p): Poll]);
+comp!(B, [G2(p): Poll]);
 comp!(J, [a: A, b: B]);
 fn main() { let _ = Pipeline::<Poll, (J,)>::build(Configs::new()); }"
 
@@ -305,8 +305,8 @@ fn main() { let _ = Pipeline::<Poll, (J,)>::build(Configs::new()); }"
 CMD[exclusive_join_ok]=build
 PATTERN[exclusive_join_ok]='NOERROR'
 BODY[exclusive_join_ok]="$SELECTORS
-comp!(A, [p: Poll => K0]);
-comp!(B, [p: Poll => K1]);
+comp!(A, [K0(p): Poll]);
+comp!(B, [K1(p): Poll]);
 comp!(J, [a: A, b: B]);
 fn main() { let _ = Pipeline::<Poll, (J,)>::build(Configs::new()); }"
 
@@ -321,13 +321,13 @@ impl Select<Poll> for K2 { type Out = Poll; const KEY: u32 = 2; fn select(x: &Po
 impl Select<Poll> for K3 { type Out = Poll; const KEY: u32 = 3; fn select(x: &Poll) -> Option<&Poll> { Some(x) } fn key_of(_: &Poll) -> u32 { 3 } }
 impl Select<Poll> for K4 { type Out = Poll; const KEY: u32 = 4; fn select(x: &Poll) -> Option<&Poll> { Some(x) } fn key_of(_: &Poll) -> u32 { 4 } }
 impl Select<Poll> for K5 { type Out = Poll; const KEY: u32 = 5; fn select(x: &Poll) -> Option<&Poll> { Some(x) } fn key_of(_: &Poll) -> u32 { 5 } }
-comp!(A0, [p: Poll => K0]);
-comp!(A1, [p: Poll => K1]);
-comp!(A2, [p: Poll => K2]);
-comp!(A4, [p: Poll => K4]);
-comp!(A5, [p: Poll => K5]);
-comp!(D1, [p: Poll => K3, G1]);
-comp!(D2, [p: Poll => K3, G2]);
+comp!(A0, [K0(p): Poll]);
+comp!(A1, [K1(p): Poll]);
+comp!(A2, [K2(p): Poll]);
+comp!(A4, [K4(p): Poll]);
+comp!(A5, [K5(p): Poll]);
+comp!(D1, [K3(G1(p)): Poll]);
+comp!(D2, [K3(G2(p)): Poll]);
 comp!(J, [a0: A0, a1: A1, a2: A2, d1: D1, d2: D2, a4: A4, a5: A5]);
 fn main() { let _ = Pipeline::<Poll, (J,)>::build(Configs::new()); }"
 
@@ -340,13 +340,13 @@ impl Select<Poll> for K2 { type Out = Poll; const KEY: u32 = 2; fn select(x: &Po
 impl Select<Poll> for K3 { type Out = Poll; const KEY: u32 = 3; fn select(x: &Poll) -> Option<&Poll> { Some(x) } fn key_of(_: &Poll) -> u32 { 3 } }
 impl Select<Poll> for K4 { type Out = Poll; const KEY: u32 = 4; fn select(x: &Poll) -> Option<&Poll> { Some(x) } fn key_of(_: &Poll) -> u32 { 4 } }
 impl Select<Poll> for K5 { type Out = Poll; const KEY: u32 = 5; fn select(x: &Poll) -> Option<&Poll> { Some(x) } fn key_of(_: &Poll) -> u32 { 5 } }
-comp!(A0, [p: Poll => K0]);
-comp!(A1, [p: Poll => K1]);
-comp!(A2, [p: Poll => K2]);
-comp!(A4, [p: Poll => K4]);
-comp!(A5, [p: Poll => K5]);
-comp!(D1, [p: Poll => K3, K0]);
-comp!(D2, [p: Poll => K3, K1]);
+comp!(A0, [K0(p): Poll]);
+comp!(A1, [K1(p): Poll]);
+comp!(A2, [K2(p): Poll]);
+comp!(A4, [K4(p): Poll]);
+comp!(A5, [K5(p): Poll]);
+comp!(D1, [K3(K0(p)): Poll]);
+comp!(D2, [K3(K1(p)): Poll]);
 comp!(J, [a0: A0, a1: A1, a2: A2, d1: D1, d2: D2, a4: A4, a5: A5]);
 fn main() { let _ = Pipeline::<Poll, (J,)>::build(Configs::new()); }"
 
@@ -354,8 +354,8 @@ fn main() { let _ = Pipeline::<Poll, (J,)>::build(Configs::new()); }"
 CMD[demux_reader_not_implied]=build
 PATTERN[demux_reader_not_implied]='E0080.*J reads .*Poll through selectors in steps where they do not match; subscribe to a component that stores it'
 BODY[demux_reader_not_implied]="$SELECTORS
-comp!(A, [p: Poll => K0]);
-comp!(J, [a: A, p: Poll => K1]);
+comp!(A, [K0(p): Poll]);
+comp!(J, [a: A, K1(p): Poll]);
 fn main() { let _ = Pipeline::<Poll, (J,)>::build(Configs::new()); }"
 
 # Rule 6 through selectors: B is reached from the root only via a selector on a component nothing connects.
@@ -371,7 +371,7 @@ impl Component for Orphan {
     fn update(&mut self, _: Self::Input<'_>) -> Option<u64> { None }
 }
 #[derive(ComponentSubscription)]
-#[subscribe(s: Src, o: Orphan => Some)]
+#[subscribe(s: Src, Some(o): Orphan)]
 pub struct B;
 impl Component for B {
     type Config = ();
@@ -387,7 +387,7 @@ CMD[selector_wrong_input]=check
 PATTERN[selector_wrong_input]='E0277.*(selector chain.*cannot be applied|SelectChain<u64>)'
 read -r -d '' BODY[selector_wrong_input] <<'EOF'
 #[derive(ComponentSubscription)]
-#[subscribe(x: Src => Some)]
+#[subscribe(Some(x): Src)]
 pub struct A;
 impl Component for A {
     type Config = ();
@@ -414,7 +414,7 @@ impl Component for Orphan {
     fn update(&mut self, _: Self::Input<'_>) -> Option<u64> { None }
 }
 #[derive(ComponentSubscription)]
-#[subscribe(o: Orphan => Some, s: Src)]
+#[subscribe(Some(o): Orphan, s: Src)]
 pub struct B;
 impl Component for B {
     type Config = ();
@@ -433,7 +433,7 @@ use dataflow_flat::{On, Symbol};
 pub struct Btc;
 impl Symbol for Btc { const KEY: u32 = 0; const NAME: &'static str = "Btc"; }
 #[derive(ComponentSubscription)]
-#[subscribe(x: Src => On<Btc>)]
+#[subscribe(On::<Btc>(x): Src)]
 pub struct A;
 impl Component for A {
     type Config = ();
@@ -469,7 +469,7 @@ impl Component for Ws {
     fn update(&mut self, _: Self::Input<'_>) -> Frame { Frame(0, 0) }
 }
 #[derive(ComponentSubscription)]
-#[subscribe(a: Ws => On<Btc>, b: Ws => On<Xbt>)]
+#[subscribe(On::<Btc>(a): Ws, On::<Xbt>(b): Ws)]
 pub struct A;
 impl Component for A {
     type Config = ();
@@ -505,8 +505,8 @@ CMD[handler_missing_update]=check
 PATTERN[handler_missing_update]='E0277.*does not handle the edge|does not handle the edge.*E0277'
 BODY[handler_missing_update]="$SELECTORS
 $HANDLERS
-comp!(A, [p: Poll => K0]);
-comp!(B, [p: Poll => K1]);
+comp!(A, [K0(p): Poll]);
+comp!(B, [K1(p): Poll]);
 handler!(H, [#[handles(A, B)]]);
 impl UpdateHandler<A> for H { fn on_update(&mut self, buf: &mut u64, v: &u64) { *buf += *v; } }
 fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }"
@@ -516,8 +516,8 @@ CMD[handler_non_exclusive_join]=build
 PATTERN[handler_non_exclusive_join]='E0080.*H joins branches that can fire in the same step'
 BODY[handler_non_exclusive_join]="$SELECTORS
 $HANDLERS
-comp!(A, [p: Poll => G1]);
-comp!(B, [p: Poll => G2]);
+comp!(A, [G1(p): Poll]);
+comp!(B, [G2(p): Poll]);
 handler!(H, [#[handles(A, B)]]);
 impl UpdateHandler<A> for H { fn on_update(&mut self, buf: &mut u64, v: &u64) { *buf += *v; } }
 impl UpdateHandler<B> for H { fn on_update(&mut self, buf: &mut u64, v: &u64) { *buf += *v; } }
@@ -528,9 +528,9 @@ CMD[handler_exclusive_ok]=build
 PATTERN[handler_exclusive_ok]='NOERROR'
 BODY[handler_exclusive_ok]="$SELECTORS
 $HANDLERS
-comp!(A, [p: Poll => K0]);
-comp!(B, [p: Poll => K1]);
-handler!(H, [#[handles(A, B)] #[handles(sel: Poll => K0)]]);
+comp!(A, [K0(p): Poll]);
+comp!(B, [K1(p): Poll]);
+handler!(H, [#[handles(A, B)] #[handles(K0(sel): Poll)]]);
 impl UpdateHandler<A> for H { fn on_update(&mut self, buf: &mut u64, v: &u64) { *buf += *v; } }
 impl UpdateHandler<B> for H { fn on_update(&mut self, buf: &mut u64, v: &u64) { *buf += *v; } }
 impl UpdateHandler<h_edges::Sel> for H { fn on_update(&mut self, buf: &mut u64, v: &Poll) { *buf += 1; } }
@@ -541,7 +541,7 @@ CMD[handler_selected_input]=check
 PATTERN[handler_selected_input]="can't use selectors"
 BODY[handler_selected_input]="$SELECTORS
 $HANDLERS
-handler!(H, [#[subscribe(p: Poll => K0)]]);
+handler!(H, [#[subscribe(K0(p): Poll)]]);
 fn main() {}"
 
 # A plain input that is the root has no value at build, when `finish` runs for the initial output.
@@ -574,7 +574,43 @@ pat_case pattern_literal 'Some(3)' 'literal patterns are not supported'
 pat_case pattern_wildcard 'Some(_)' 'a wildcard `_` is not a selector'
 pat_case pattern_wildcard_selector '_(x)' 'a wildcard `_` is not a selector'
 pat_case pattern_reference 'Some(&x)' 'references are not supported'
-pat_case pattern_unit_variant 'Some(Foo::Unit)' 'the innermost pattern must be a plain name to bind'
+
+# `=>` is gone: the message says how to write the pattern.
+CMD[pattern_arrow]=check
+PATTERN[pattern_arrow]='`=>` is gone: write the selectors as a pattern'
+BODY[pattern_arrow]='
+#[derive(ComponentSubscription)]
+#[subscribe(x: Src => Some)]
+pub struct A;
+fn main() {}'
+
+# A bare uppercase name is a unit selector; one that names no type is rustc's E0425 "cannot find type" (at the struct).
+CMD[unit_selector_unknown]=check
+PATTERN[unit_selector_unknown]='E0425.*cannot find type `Disconnected` in this scope'
+BODY[unit_selector_unknown]='
+#[derive(ComponentSubscription)]
+#[subscribe(Disconnected: Src)]
+pub struct A;
+fn main() {}'
+
+# A unit selector on a variant that carries data compiles: the edge fires on that variant, the payload sits in a hidden input field.
+CMD[unit_selector_data_variant]=check
+PATTERN[unit_selector_data_variant]=NOERROR
+read -r -d '' BODY[unit_selector_data_variant] <<'EOT'
+#[derive(Root, dataflow_flat::Demux)]
+pub enum E { Gone, Data(u64) }
+use e::Data;
+#[derive(ComponentSubscription)]
+#[subscribe(Data: E, E::Gone: E)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (A, 0) }
+    fn update(&mut self, _: Self::Input<'_>) -> u64 { 0 }
+}
+fn main() {}
+EOT
 
 # Accepted: `Enum::Variant`, Option and Result patterns, nested.
 CMD[pattern_ok]=check
@@ -687,7 +723,7 @@ ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        selector_wrong_input orphan_first on_not_keyed symbols_share_key
        handler_missing_update handler_non_exclusive_join handler_exclusive_ok handler_selected_input handler_root_input
        pattern_struct pattern_multi_field pattern_range pattern_range_literal pattern_guard pattern_or pattern_literal
-       pattern_wildcard pattern_wildcard_selector pattern_reference pattern_unit_variant pattern_ok
+       pattern_wildcard pattern_wildcard_selector pattern_reference pattern_arrow unit_selector_unknown unit_selector_data_variant pattern_ok
        listener_missing_request listener_request_ok)
 
 run_case() {

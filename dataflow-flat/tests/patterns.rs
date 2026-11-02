@@ -1,7 +1,7 @@
-//! Subscriptions written as enum patterns (`Some(Btc(t)): Ws`): sugar over the
-//! selector chains of the `=>` form. Values, firing on the right variant,
+//! Subscriptions written as enum patterns (`Some(Btc(t)): Ws`): the only
+//! selector syntax. Values, firing on the right variant,
 //! nesting, `Option` / `Result`, markers shared by two enums, a generic
-//! selector, and equality with the `=>` form. No `#![feature]` here.
+//! selector, and unit selectors without a binding. No `#![feature]` here.
 
 use std::marker::PhantomData;
 use std::sync::Mutex;
@@ -42,10 +42,10 @@ macro_rules! comp {
 }
 
 // ---------------------------------------------------------------------------
-// One level, and equality with the `=>` form
+// One level, written as `Enum::Variant` and as the generated marker path
 // ---------------------------------------------------------------------------
 
-#[derive(Root, Demux)]
+#[derive(Clone, Copy, Root, Demux)]
 pub enum Pkt {
     A(u32),
     B(u32),
@@ -58,30 +58,30 @@ mod one {
         SEEN.lock().unwrap().push(("PatA", *i.p));
         *i.p * 10
     });
-    comp!(ArrowA, [p: Pkt => pkt::A], u32, |i| {
-        SEEN.lock().unwrap().push(("ArrowA", *i.p));
+    comp!(MarkerA, [pkt::A(p): Pkt], u32, |i| {
+        SEEN.lock().unwrap().push(("MarkerA", *i.p));
         *i.p * 10
     });
     // a leading path
     comp!(PatB, [super::Pkt::B(p): Pkt], u32, |i| *i.p * 100);
-    comp!(All, [a: PatA, b: PatB, c: ArrowA], (u32, u32, u32), |i| (*i.a, *i.b, *i.c));
+    comp!(All, [a: PatA, b: PatB, c: MarkerA], (u32, u32, u32), |i| (*i.a, *i.b, *i.c));
 }
 
 #[test]
-fn fires_only_on_its_variant_and_equals_the_arrow_form() {
+fn fires_only_on_its_variant_and_equals_the_marker_form() {
     let _g = SERIAL.lock().unwrap();
     let mut p = Pipeline::<Pkt, (one::All,)>::build(Configs::new()).unwrap();
     take();
     p.push(Pkt::A(3));
-    assert_eq!(take(), ["PatA", "ArrowA", "All"]);
-    assert_eq!(seen(), [("PatA", 3), ("ArrowA", 3)]);
+    assert_eq!(take(), ["PatA", "MarkerA", "All"]);
+    assert_eq!(seen(), [("PatA", 3), ("MarkerA", 3)]);
     p.push(Pkt::B(2));
     assert_eq!(take(), ["PatB", "All"]);
     p.push(Pkt::Tick);
     assert_eq!(take(), Vec::<&str>::new());
     p.push(Pkt::A(5));
-    assert_eq!(take(), ["PatA", "ArrowA", "All"]);
-    assert_eq!(seen(), [("PatA", 5), ("ArrowA", 5)]);
+    assert_eq!(take(), ["PatA", "MarkerA", "All"]);
+    assert_eq!(seen(), [("PatA", 5), ("MarkerA", 5)]);
 }
 
 // ---------------------------------------------------------------------------
@@ -255,4 +255,56 @@ fn generic_selector() {
     assert_eq!(take(), ["Bin", "Btc", "SinkGen"]);
     p.push(Both2 { b: Some(BinanceFrame::Eth(3)), c: None });
     assert_eq!(take(), ["Bin", "Eth", "SinkGen"]);
+}
+
+// ---------------------------------------------------------------------------
+// Unit selectors: no binding, the edge has a hidden name
+// ---------------------------------------------------------------------------
+
+#[derive(Root)]
+pub struct Opt {
+    v: Option<Pkt>,
+}
+
+mod unit {
+    use super::*;
+    use pkt::Tick;
+    // bare, with an empty input (nothing to read)
+    comp!(OnTick, [Tick: Pkt], (), |_i| {});
+    // path form
+    comp!(OnTickPath, [Pkt::Tick: Pkt], (), |_i| {});
+    // a unit selector next to a named input
+    comp!(Mixed, [Tick: Pkt, a: OnTick], bool, |_i| true);
+    comp!(Both, [a: OnTick, b: OnTickPath, c: Mixed], bool, |i| *i.c);
+    comp!(Parse, [m: Opt], Option<Pkt>, |i| i.m.v);
+    // `None` as a bare unit selector
+    comp!(OnNone, [None: Parse], (), |_i| {});
+    // nested: `Some(<unit variant>)`
+    comp!(OnSomeTick, [Some(Tick): Parse], (), |_i| {});
+}
+
+#[test]
+fn unit_variant_fires_with_empty_input() {
+    let _g = SERIAL.lock().unwrap();
+    let mut p = Pipeline::<Pkt, (unit::Both,)>::build(Configs::new()).unwrap();
+    take();
+    p.push(Pkt::A(1));
+    assert_eq!(take(), Vec::<&str>::new());
+    p.push(Pkt::Tick);
+    assert_eq!(take(), ["OnTick", "OnTickPath", "Mixed", "Both"]);
+    p.push(Pkt::B(1));
+    assert_eq!(take(), Vec::<&str>::new());
+}
+
+#[test]
+fn none_and_nested_unit_selectors() {
+    let _g = SERIAL.lock().unwrap();
+    let mut p = Pipeline::<Opt, (unit::OnNone, unit::OnSomeTick)>::build(Configs::new()).unwrap();
+    take();
+    p.push(Opt { v: Some(Pkt::A(1)) });
+    assert_eq!(take(), ["Parse"]);
+    p.push(Opt { v: None });
+    assert_eq!(take(), ["Parse", "OnNone"]);
+    p.push(Opt { v: Some(Pkt::Tick) });
+    assert_eq!(take(), ["Parse", "OnSomeTick"]);
 }

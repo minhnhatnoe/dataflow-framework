@@ -247,10 +247,12 @@ struct Subscription {
     /// Required for `#[subscribe]`; a `#[handles]` entry may be unnamed.
     name: Option<Ident>,
     ty: Type,
-    /// Selectors applied to the node's output, left to right (`=> A, B`).
+    /// Selectors applied to the node's output, outermost first (`A(B(name))`).
     chain: Vec<Type>,
     /// A handled edge (`#[handles]` of a `Handler`).
     handled: bool,
+    /// A unit selector `Sel: Source`: the edge has a hidden name, assigned from its index.
+    unit: bool,
 }
 
 impl Subscription {
@@ -260,18 +262,17 @@ impl Subscription {
 }
 
 /// The entries of one `#[handles(..)]`: `Type` (a plain edge keyed by its node
-/// type) or `name: Type [=> selectors]` (keyed by a marker the derive generates).
+/// type) or a subscription `name: Type` / `Sel(name): Type` (keyed by a marker the derive generates).
 fn parse_handles(input: ParseStream) -> syn::Result<Vec<Subscription>> {
     let mut out = Vec::new();
     while !input.is_empty() {
-        let named = input.peek(Ident) && input.peek2(Token![:]) && !input.peek2(Token![::]);
-        if named {
+        if peek_named(input) || peek_pattern_sub(input) {
             let mut s: Subscription = input.parse()?;
             s.handled = true;
             out.push(s);
         } else {
             let ty: Type = input.parse()?;
-            out.push(Subscription { name: None, ty, chain: Vec::new(), handled: true });
+            out.push(Subscription { name: None, ty, chain: Vec::new(), handled: true, unit: false });
         }
         if input.peek(Token![,]) {
             input.parse::<Token![,]>()?;
@@ -280,61 +281,68 @@ fn parse_handles(input: ParseStream) -> syn::Result<Vec<Subscription>> {
     Ok(out)
 }
 
+/// A lowercase (or `_`-led) identifier followed by a single colon: a named input.
+/// An uppercase one is a unit selector (`Disconnected: Ws`).
+fn peek_named(input: ParseStream) -> bool {
+    if !(input.peek(Ident) && input.peek2(Token![:]) && !input.peek2(Token![::])) {
+        return false;
+    }
+    match input.cursor().ident() {
+        Some((id, _)) => !id.to_string().starts_with(|c: char| c.is_uppercase()),
+        None => false,
+    }
+}
+
+/// `Pattern: Source` where the pattern is a selector (uppercase single name, a
+/// path, or `Sel(..)`), as opposed to `name: Source`.
+fn peek_pattern_sub(input: ParseStream) -> bool {
+    let f = input.fork();
+    parse_pat(&f).is_ok() && f.peek(Token![:]) && !f.peek(Token![::])
+}
+
 impl Parse for Subscription {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        // `name: Source [=> selectors]` starts with an identifier and a single
-        // colon; anything else is a pattern `Sel(Sel(name)): Source`.
-        if !(input.peek(Ident) && input.peek2(Token![:]) && !input.peek2(Token![::])) {
+        let (name, chain, unit) = if peek_named(input) {
+            let name: Ident = input.parse()?;
+            input.parse::<Token![:]>()?;
+            (name, Vec::new(), false)
+        } else {
             let pat = parse_pat(input)?;
             input.parse::<Token![:]>()?;
-            let ty: Type = input.parse()?;
-            let (name, chain) = pattern_chain(pat)?;
-            return Ok(Subscription { name: Some(name), ty, chain, handled: false });
-        }
-        let name: Ident = input.parse()?;
-        input.parse::<Token![:]>()?;
-        let ty = input.parse()?;
-        let mut chain = Vec::new();
-        if input.peek(Token![=>]) {
-            input.parse::<Token![=>]>()?;
-            loop {
-                chain.push(selector(input.parse::<Type>()?));
-                // `, name: Type` starts the next subscription; any other
-                // `, Type` continues the chain.
-                if !input.peek(Token![,]) {
-                    break;
-                }
-                let fork = input.fork();
-                fork.parse::<Token![,]>()?;
-                let next_is_subscription =
-                    fork.is_empty()
-                        || (fork.peek(Ident) && fork.peek2(Token![:]) && !fork.peek2(Token![::]))
-                        || {
-                            let f = fork.fork();
-                            parse_pat(&f).is_ok() && f.peek(Token![:]) && !f.peek(Token![::])
-                        };
-                if next_is_subscription {
-                    break;
-                }
-                input.parse::<Token![,]>()?;
+            match pattern_chain(pat)? {
+                (Some(name), chain) => (name, chain, false),
+                (None, chain) => (Ident::new("__unit_sel", proc_macro2::Span::call_site()), chain, true),
             }
+        };
+        let ty: Type = input.parse()?;
+        if input.peek(Token![=>]) {
+            return Err(syn::Error::new(
+                input.span(),
+                format!(
+                    "`=>` is gone: write the selectors as a pattern, `Sel1(Sel2({name})): {}` instead of `{name}: {} => Sel1, Sel2` (a selector with nothing to bind is `Sel: {}`)",
+                    quote!(#ty),
+                    quote!(#ty),
+                    quote!(#ty),
+                ),
+            ));
         }
-        Ok(Subscription { name: Some(name), ty, chain, handled: false })
+        Ok(Subscription { name: Some(name), ty, chain, handled: false, unit })
     }
 }
 
 /// A subscription pattern: selectors outermost first, the binding innermost.
 enum Pat {
     Bind(Ident),
-    Variant(syn::Path, Box<Pat>),
+    /// A selector path (with an optional `<T as Trait>::` prefix); `None` inside is a unit selector.
+    Variant(Option<syn::QSelf>, syn::Path, Option<Box<Pat>>),
 }
 
 fn pat_err<T>(at: impl quote::ToTokens, msg: &str) -> syn::Result<T> {
     Err(syn::Error::new_spanned(at, format!("subscription pattern: {msg}")))
 }
 
-/// Parses `Sel(Sel(name))`. Only enum-variant style patterns with exactly one
-/// field are accepted; everything else is rejected with a message.
+/// Parses `Sel(Sel(name))` or a unit selector `Sel`. Only enum-variant style
+/// patterns with at most one field are accepted; everything else is rejected with a message.
 fn parse_pat(input: ParseStream) -> syn::Result<Pat> {
     if input.peek(Token![&]) || input.peek(Token![&&]) {
         return pat_err(input.cursor().token_stream(), "references are not supported (a pattern matches the value, which is borrowed already)");
@@ -351,7 +359,7 @@ fn parse_pat(input: ParseStream) -> syn::Result<Pat> {
     if input.peek(Token![..]) || input.peek(Token![..=]) {
         return pat_err(input.cursor().token_stream(), "range or rest patterns are not supported");
     }
-    let path = syn::Path::parse_mod_style(input)?;
+    let syn::ExprPath { qself, path, .. } = input.call(|i| syn::ExprPath::parse(i))?;
     let pat = if input.peek(syn::token::Paren) {
         let content;
         let paren = syn::parenthesized!(content in input);
@@ -365,17 +373,23 @@ fn parse_pat(input: ParseStream) -> syn::Result<Pat> {
         if !content.is_empty() {
             reject_trailing(&content)?;
         }
-        Pat::Variant(path, Box::new(inner))
+        Pat::Variant(qself, path, Some(Box::new(inner)))
     } else if input.peek(syn::token::Brace) {
         return pat_err(path, "struct patterns are not supported; only tuple-variant patterns `Selector(name)`");
     } else if input.peek(Token![..]) || input.peek(Token![..=]) || input.peek(Token![...]) {
         return pat_err(path, "range patterns are not supported");
     } else if input.peek(Token![@]) {
         return pat_err(path, "`name @ pattern` is not supported");
-    } else if path.leading_colon.is_none() && path.segments.len() == 1 && path.segments[0].arguments.is_empty() {
+    } else if qself.is_none()
+        && path.leading_colon.is_none()
+        && path.segments.len() == 1
+        && path.segments[0].arguments.is_empty()
+        && !path.segments[0].ident.to_string().starts_with(|c: char| c.is_uppercase())
+    {
         Pat::Bind(path.segments[0].ident.clone())
     } else {
-        return pat_err(path, "the innermost pattern must be a plain name to bind (a unit variant has nothing to bind: use `name: Source => Selector`)");
+        // no field to bind: a unit selector (`Disconnected`, `Event::Disconnected`, `None`)
+        Pat::Variant(qself, path, None)
     };
     reject_trailing_if_nested(input)?;
     Ok(pat)
@@ -397,8 +411,9 @@ fn reject_trailing(input: ParseStream) -> syn::Result<()> {
     pat_err(input.cursor().token_stream(), "unexpected tokens in pattern")
 }
 
-/// `Sel1(Sel2(name))` as the name and the chain `[Sel1, Sel2]`.
-fn pattern_chain(mut pat: Pat) -> syn::Result<(Ident, Vec<Type>)> {
+/// `Sel1(Sel2(name))` as the name and the chain `[Sel1, Sel2]`; a unit selector
+/// (`Sel1(Sel2)`) has no name.
+fn pattern_chain(mut pat: Pat) -> syn::Result<(Option<Ident>, Vec<Type>)> {
     let mut chain = Vec::new();
     loop {
         match pat {
@@ -406,11 +421,14 @@ fn pattern_chain(mut pat: Pat) -> syn::Result<(Ident, Vec<Type>)> {
                 if chain.is_empty() {
                     return pat_err(name, "a bare name is not a pattern");
                 }
-                return Ok((name, chain));
+                return Ok((Some(name), chain));
             }
-            Pat::Variant(path, inner) => {
-                chain.push(selector(pattern_selector(path)));
-                pat = *inner;
+            Pat::Variant(qself, path, inner) => {
+                chain.push(selector(pattern_selector(qself, path)));
+                match inner {
+                    Some(i) => pat = *i,
+                    None => return Ok((None, chain)),
+                }
             }
         }
     }
@@ -422,7 +440,10 @@ fn pattern_chain(mut pat: Pat) -> syn::Result<(Ident, Vec<Type>)> {
 /// uppercase letter) is the marker the `Demux` derive generated,
 /// `[path::]enum_snake::Variant`; `Option::Some` / `Result::Ok` are the
 /// library's; any other path (`module::Marker`) is a type as written.
-fn pattern_selector(path: syn::Path) -> Type {
+fn pattern_selector(qself: Option<syn::QSelf>, path: syn::Path) -> Type {
+    if qself.is_some() {
+        return Type::Path(syn::TypePath { qself, path });
+    }
     let n = path.segments.len();
     if n >= 2 {
         let pen = &path.segments[n - 2].ident;
@@ -518,13 +539,18 @@ fn expand(input: DeriveInput, handler: bool) -> syn::Result<TokenStream2> {
                 if let Some(s) = list.iter().find(|s| !s.chain.is_empty()) {
                     return Err(syn::Error::new_spanned(
                         &s.ty,
-                        "a handler's plain `#[subscribe]` inputs can't use selectors (`finish` is also called at build); use `#[handles(name: Type => Selector)]` for a selected edge",
+                        "a handler's plain `#[subscribe]` inputs can't use selectors (`finish` is also called at build); use `#[handles(Selector(name): Type)]` for a selected edge",
                     ));
                 }
             }
             subs.extend(list);
         } else if handler && attr.path().is_ident("handles") {
             subs.extend(attr.parse_args_with(parse_handles)?);
+        }
+    }
+    for (i, s) in subs.iter_mut().enumerate() {
+        if s.unit {
+            s.name = Some(format_ident!("__unit_sel{}", i));
         }
     }
     for (i, a) in subs.iter().enumerate() {
@@ -1008,8 +1034,6 @@ mod tests {
         let (n, c) = chain_of("Some(Btc(t)): Ws");
         assert_eq!(n, "t");
         assert_eq!(c, ["::dataflow_flat::option::Some", "Btc"]);
-        // the same chain as the `=>` form
-        assert_eq!(chain_of("t: Ws => Some, Btc"), (n, c));
     }
 
     #[test]
@@ -1024,12 +1048,20 @@ mod tests {
     }
 
     #[test]
-    fn old_form_still_parses_in_lists() {
+    fn mixed_lists() {
         let p = syn::punctuated::Punctuated::<Subscription, Token![,]>::parse_terminated;
-        let l = syn::parse::Parser::parse_str(p, "a: A => Some, B, Some(B(c)): C, d: D").unwrap();
-        let names: Vec<_> = l.iter().map(|s| s.name.as_ref().unwrap().to_string()).collect();
-        assert_eq!(names, ["a", "c", "d"]);
-        assert_eq!(l[0].chain.len(), 2);
+        let l = syn::parse::Parser::parse_str(p, "a: A, Some(B(c)): C, Gone: W, Ev::Gone: W, None: S, d: D, On::<S>(e): X").unwrap();
+        let names: Vec<_> = l.iter().map(|s| s.unit).collect();
+        assert_eq!(names, [false, false, true, true, true, false, false]);
+        assert_eq!(l[1].chain.len(), 2);
+        assert_eq!(l[2].chain.len(), 1);
+        assert_eq!(chain_of("On::<S>(e): X").1, ["On::<S>"]);
+        assert_eq!(chain_of("<S as Symbol>::Sel(u): X").1, ["<SasSymbol>::Sel"]);
+    }
+
+    #[test]
+    fn arrow_is_rejected() {
+        assert!(msg("a: A => Some, B").contains("`=>` is gone"));
     }
 
     fn msg(src: &str) -> String {
@@ -1048,7 +1080,6 @@ mod tests {
         assert!(msg("Foo(_): Ws").contains("wildcard"));
         assert!(msg("_(x): Ws").contains("wildcard"));
         assert!(msg("Foo(&x): Ws").contains("references"));
-        assert!(msg("Foo(Bar::Unit): Ws").contains("plain name"));
         assert!(msg("Foo(): Ws").contains("exactly one field"));
     }
 
@@ -1124,7 +1155,7 @@ mod tests {
 
 /// `#[derive(Demux)]` on an enum: a module named after the enum in snake_case
 /// with one selector (a zero-sized type implementing `Select<Enum>`) per
-/// variant, usable in subscriptions: `#[subscribe(p: Packets => packet::Depth)]`.
+/// variant, usable in subscriptions: `#[subscribe(packet::Depth(p): Packets)]`.
 /// Variants must be unit variants (the selected part is `()`) or tuple variants
 /// with exactly one field (the selected part is that field). The key of a
 /// selector is the index of its variant.

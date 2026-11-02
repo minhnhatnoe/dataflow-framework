@@ -4,7 +4,7 @@
 //! output, left to right:
 //!
 //! ```ignore
-//! #[subscribe(upd: BinanceWs => Some, payload::Depth)]
+//! #[subscribe(Some(payload::Depth(upd)): BinanceWs)]
 //! ```
 //!
 //! A selector is a zero-sized type implementing [`Select<In>`]: it tests a
@@ -218,7 +218,7 @@ pub trait Keyed {
 /// [`KeyListener`](crate::KeyListener) are its requests.
 ///
 /// ```ignore
-/// #[subscribe(u: Ws => Some, On<Btc>)]
+/// #[subscribe(Some(On::<Btc>(u)): Ws)]
 /// ```
 pub struct On<S>(core::marker::PhantomData<fn() -> S>);
 

@@ -16,7 +16,7 @@ pub static OUT: AtomicU64 = AtomicU64::new(0);
 mod flat {
     use super::*;
     #[derive(ComponentSubscription)]
-    #[subscribe(p: Packet => packet::E0, ex0_msg::S0)]
+    #[subscribe(packet::E0(ex0_msg::S0(p)): Packet)]
     pub struct Book_0_0(u64);
     impl Component for Book_0_0 {
         type Config = (); type Output = u64;
@@ -40,7 +40,7 @@ mod flat {
         fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = (self.0 ^ *input.b).rotate_left(5).wrapping_add(2); self.0 }
     }
     #[derive(ComponentSubscription)]
-    #[subscribe(p: Packet => packet::E0, ex0_msg::S1)]
+    #[subscribe(packet::E0(ex0_msg::S1(p)): Packet)]
     pub struct Book_0_1(u64);
     impl Component for Book_0_1 {
         type Config = (); type Output = u64;
@@ -64,7 +64,7 @@ mod flat {
         fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = (self.0 ^ *input.b).rotate_left(5).wrapping_add(2); self.0 }
     }
     #[derive(ComponentSubscription)]
-    #[subscribe(p: Packet => packet::E0, ex0_msg::S2)]
+    #[subscribe(packet::E0(ex0_msg::S2(p)): Packet)]
     pub struct Book_0_2(u64);
     impl Component for Book_0_2 {
         type Config = (); type Output = u64;
@@ -88,7 +88,7 @@ mod flat {
         fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = (self.0 ^ *input.b).rotate_left(5).wrapping_add(2); self.0 }
     }
     #[derive(ComponentSubscription)]
-    #[subscribe(p: Packet => packet::E0, ex0_msg::S3)]
+    #[subscribe(packet::E0(ex0_msg::S3(p)): Packet)]
     pub struct Book_0_3(u64);
     impl Component for Book_0_3 {
         type Config = (); type Output = u64;
@@ -112,7 +112,7 @@ mod flat {
         fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = (self.0 ^ *input.b).rotate_left(5).wrapping_add(2); self.0 }
     }
     #[derive(ComponentSubscription)]
-    #[subscribe(p: Packet => packet::E1, ex1_msg::S0)]
+    #[subscribe(packet::E1(ex1_msg::S0(p)): Packet)]
     pub struct Book_1_0(u64);
     impl Component for Book_1_0 {
         type Config = (); type Output = u64;
@@ -136,7 +136,7 @@ mod flat {
         fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = (self.0 ^ *input.b).rotate_left(5).wrapping_add(2); self.0 }
     }
     #[derive(ComponentSubscription)]
-    #[subscribe(p: Packet => packet::E1, ex1_msg::S1)]
+    #[subscribe(packet::E1(ex1_msg::S1(p)): Packet)]
     pub struct Book_1_1(u64);
     impl Component for Book_1_1 {
         type Config = (); type Output = u64;
@@ -160,7 +160,7 @@ mod flat {
         fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = (self.0 ^ *input.b).rotate_left(5).wrapping_add(2); self.0 }
     }
     #[derive(ComponentSubscription)]
-    #[subscribe(p: Packet => packet::E1, ex1_msg::S2)]
+    #[subscribe(packet::E1(ex1_msg::S2(p)): Packet)]
     pub struct Book_1_2(u64);
     impl Component for Book_1_2 {
         type Config = (); type Output = u64;
@@ -184,7 +184,7 @@ mod flat {
         fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = (self.0 ^ *input.b).rotate_left(5).wrapping_add(2); self.0 }
     }
     #[derive(ComponentSubscription)]
-    #[subscribe(p: Packet => packet::E1, ex1_msg::S3)]
+    #[subscribe(packet::E1(ex1_msg::S3(p)): Packet)]
     pub struct Book_1_3(u64);
     impl Component for Book_1_3 {
         type Config = (); type Output = u64;

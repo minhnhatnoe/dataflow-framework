@@ -52,16 +52,16 @@ pub enum Pkt {
 
 mod basic {
     use super::*;
-    comp!(OnA, [p: Pkt => pkt::A], u32, |i| *i.p * 10);
-    comp!(OnB, [p: Pkt => pkt::B], u32, |i| *i.p * 100);
+    comp!(OnA, [pkt::A(p): Pkt], u32, |i| *i.p * 10);
+    comp!(OnB, [pkt::B(p): Pkt], u32, |i| *i.p * 100);
     comp!(AfterA, [a: OnA], u32, |i| *i.a + 1);
     // An exclusive join: reads both; the one that did not run supplies its stored output.
     comp!(Join, [a: AfterA, b: OnB], (u32, u32), |i| (*i.a, *i.b));
-    comp!(OnTick, [t: Pkt => pkt::Tick], (), |i| {
+    comp!(OnTick, [pkt::Tick(t): Pkt], (), |i| {
         let _: &() = i.t;
     });
     // Absorption: the condition {A} is implied by both edges.
-    comp!(Absorb, [a: OnA, p: Pkt => pkt::A], u32, |i| *i.a + *i.p);
+    comp!(Absorb, [a: OnA, pkt::A(p): Pkt], u32, |i| *i.a + *i.p);
     // A plain root edge makes the component run on every push.
     comp!(Always, [p: Pkt], u32, |i| match i.p {
         Pkt::A(x) | Pkt::B(x) => *x,
@@ -132,8 +132,8 @@ pub struct Msg {
 mod opt {
     use super::*;
     comp!(Parse, [m: Msg], Option<u32>, |i| i.m.v);
-    comp!(Got, [x: Parse => Some], u32, |i| *i.x + 1);
-    comp!(Missing, [x: Parse => None], u32, |_i| 999);
+    comp!(Got, [Some(x): Parse], u32, |i| *i.x + 1);
+    comp!(Missing, [None(x): Parse], u32, |_i| 999);
     comp!(Either, [g: Got, m: Missing], (u32, u32), |i| (*i.g, *i.m));
 }
 
@@ -166,9 +166,9 @@ pub enum Outer {
 mod nested {
     use super::*;
     // Two selectors in one chain, then a different leaf of the same prefix.
-    comp!(BinDepth, [p: Outer => outer::Binance, inner::Depth], u32, |i| *i.p);
-    comp!(BinTrade, [p: Outer => outer::Binance, inner::Trade], u64, |i| *i.p);
-    comp!(CoinDepth, [p: Outer => outer::Coinbase, inner::Depth], u32, |i| *i.p);
+    comp!(BinDepth, [outer::Binance(inner::Depth(p)): Outer], u32, |i| *i.p);
+    comp!(BinTrade, [outer::Binance(inner::Trade(p)): Outer], u64, |i| *i.p);
+    comp!(CoinDepth, [outer::Coinbase(inner::Depth(p)): Outer], u32, |i| *i.p);
     // Joins of exclusive leaves at different levels.
     comp!(AnyDepth, [b: BinDepth, c: CoinDepth], u32, |i| *i.b + *i.c);
     comp!(AnyBin, [d: BinDepth, t: BinTrade], (u32, u64), |i| (*i.d, *i.t));
@@ -215,7 +215,7 @@ impl Select<Num> for Big {
 
 mod guard {
     use super::*;
-    comp!(Loud, [n: Num => Big], u32, |i| *i.n * 2);
+    comp!(Loud, [Big(n): Num], u32, |i| *i.n * 2);
     comp!(Plain, [n: Num], u32, |i| i.n.0);
     comp!(After, [l: Loud], u32, |i| *i.l + 1);
 }
