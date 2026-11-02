@@ -107,6 +107,8 @@ pub trait DepList: 'static {
     type Inputs<'a>;
     /// The nested tuple `new` is handed.
     type Inits<'a>;
+    /// The number of entries in the tree.
+    const LEN: usize;
 }
 
 macro_rules! dep_list_leaf {
@@ -114,6 +116,7 @@ macro_rules! dep_list_leaf {
         impl<$($E: Node, $C: SelectChain<$E::Output>, const $I: usize,)*> DepList for ($(Sub<$E, $C, $I>,)*) {
             type Inputs<'a> = ($(&'a <$C as SelectChain<$E::Output>>::Out,)*);
             type Inits<'a> = ($(<$C as SelectChain<$E::Output>>::Init<'a, $E>,)*);
+            const LEN: usize = [$(stringify!($E),)* ""].len() - 1;
         }
     };
 }
@@ -124,6 +127,7 @@ macro_rules! dep_list_inner {
         impl<$($K: DepList,)*> DepList for ($($K,)*) {
             type Inputs<'a> = ($($K::Inputs<'a>,)*);
             type Inits<'a> = ($($K::Inits<'a>,)*);
+            const LEN: usize = 0 $(+ $K::LEN)*;
         }
     };
 }

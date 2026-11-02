@@ -23,7 +23,7 @@ use std::any::type_name;
 use std::marker::PhantomData;
 
 use crate::build::ConstructPass;
-use crate::component::{Component, ComponentSubscription};
+use crate::component::{Component, ComponentSubscription, DepList};
 use crate::flat::{bound, class, ClassOf, EntryPos, Inner, Leaf, Loc, NthS, NthT, PickEdge, PosSelect, Whole};
 use crate::gather::{GatherIn, GatherInit, Layout, Ready, Source};
 use crate::select::{ChainInitial, ChainKey, Keep, SelectChain};
@@ -328,8 +328,43 @@ where
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
     fn run(ctx: &mut PushCtx<'_, A>) {
-        run_body!(A, P, ctx);
+        if WIDE_RUN::<A, P>() {
+            run_wide::<A, P>(ctx);
+        } else {
+            run_body!(A, P, ctx);
+        }
     }
+}
+
+/// Components with at least this many subscriptions run through a function of their own in
+/// release builds: their gather is as long as their inputs, and inlined into every switch arm and
+/// tail that runs them the push grows with the square of the graph.
+#[doc(hidden)]
+pub const WIDE_INPUTS: usize = 24;
+#[doc(hidden)]
+#[allow(non_snake_case)]
+#[cfg_attr(not(debug_assertions), inline(always))]
+#[cfg_attr(debug_assertions, inline)]
+pub fn WIDE_RUN<A: Layout + NthT<P>, const P: usize>() -> bool
+where
+    <A as NthT<P>>::T: ComponentSubscription,
+{
+    !cfg!(debug_assertions) && <<<A as NthT<P>>::T as ComponentSubscription>::Deps as DepList>::LEN >= WIDE_INPUTS
+}
+#[doc(hidden)]
+#[cfg_attr(not(debug_assertions), inline(never))]
+#[cfg_attr(debug_assertions, inline)]
+pub fn run_wide<A: Layout, const P: usize>(ctx: &mut PushCtx<'_, A>)
+where
+    A: NthT<P>,
+    <A as NthT<P>>::T: Comp,
+    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P>,
+    A::States: AtPos<<A as NthT<P>>::T, P>,
+    A::Outs: AtPos<<<A as NthT<P>>::T as Node>::Output, P>,
+    SrcSlots<A, P>: RgCl,
+    SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
+{
+    run_body!(A, P, ctx);
 }
 
 /// Run the component at `P` if one of its edges fired (the flag-based guard).
@@ -351,7 +386,11 @@ where
     #[cfg_attr(debug_assertions, inline)]
     fn run_if(ctx: &mut PushCtx<'_, A>) {
         if <<<A as NthT<P>>::T as ComponentSubscription>::Deps as Ready<A>>::ready(ctx.root, &*ctx.outs, &ctx.fired) {
-            run_body!(A, P, ctx);
+            if WIDE_RUN::<A, P>() {
+                run_wide::<A, P>(ctx);
+            } else {
+                run_body!(A, P, ctx);
+            }
         }
     }
 }
