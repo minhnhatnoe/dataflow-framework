@@ -291,11 +291,32 @@ pub(crate) const fn cap(w: usize) -> usize {
 /// `cap(HI - LO)` positions), so this is arithmetic, not a test of every child.
 #[doc(hidden)]
 pub struct FieldIdx<const LO: usize, const HI: usize, const P: usize>;
-impl<const LO: usize, const HI: usize, const P: usize> FieldIdx<LO, HI, P> {
-    pub const K: usize = field_idx(LO, HI, P);
+/// Field index as a type. The constant is inside an impl of `(LO, HI, P)` only,
+/// so it is evaluated once per block position, not once per (storage, value).
+#[doc(hidden)]
+pub struct Ix<const K: usize>;
+#[doc(hidden)]
+pub trait FieldSel {
+    type Ix;
 }
-pub(crate) const fn field_idx(lo: usize, hi: usize, p: usize) -> usize {
-    assert!(lo <= p && p < hi, "position not in this block");
+impl<const LO: usize, const HI: usize, const P: usize> FieldSel for FieldIdx<LO, HI, P>
+where
+    (): IxOf<{ field_idx(LO, HI, P) }>,
+{
+    type Ix = <() as IxOf<{ field_idx(LO, HI, P) }>>::Ix;
+}
+#[doc(hidden)]
+pub trait IxOf<const K: usize> {
+    type Ix;
+}
+impl<const K: usize> IxOf<K> for () {
+    type Ix = Ix<K>;
+}
+#[doc(hidden)]
+pub const fn field_idx(lo: usize, hi: usize, p: usize) -> usize {
+    if p < lo || p >= hi {
+        return usize::MAX; // not in this block: no `Field` impl, so a type error, not a const panic
+    }
     if hi - lo <= ARITY {
         p - lo
     } else {
