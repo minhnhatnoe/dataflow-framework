@@ -4,13 +4,13 @@
 //! Run with `cargo run -p dataflow-flat --example diamond`.
 //!
 //! Diamond:  Tick -> Src -> Double, Src -> Square, (Double, Square) -> Sum (the sink)
-use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline, Root};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Pipeline, Root};
 
 /// The event: one tick per push.
 #[derive(Root)]
 pub struct Tick;
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(tick: Tick)]
 pub struct Src {
     n: u64,
@@ -23,7 +23,7 @@ impl Component for Src {
     fn update(&mut self, _: Self::Input<'_>) -> u64 { self.n += 1; self.n }
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(x: Src)]
 pub struct Double;
 
@@ -34,7 +34,7 @@ impl Component for Double {
     fn update(&mut self, input: Self::Input<'_>) -> u64 { input.x * 2 }
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(x: Src)]
 pub struct Square;
 
@@ -45,7 +45,7 @@ impl Component for Square {
     fn update(&mut self, input: Self::Input<'_>) -> u64 { input.x * input.x }
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(
     doubled: Double,
     squared: Square,

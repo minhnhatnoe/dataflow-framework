@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
-use dataflow_flat::{Component, ComponentSubscription, Node, Root};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Node, Root};
 
 // --- Line: the root. One value per push; nothing of it is stored ------------
 
@@ -16,7 +16,7 @@ pub struct TokenizeConfig {
     pub lowercase: bool,
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(line: Line)]
 pub struct Tokenize {
     config: TokenizeConfig,
@@ -43,7 +43,7 @@ impl Component for Tokenize {
 
 // --- WordCount: unit config (`()` is `Default`), so it needs no entry in Configs
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(tokens: Tokenize)]
 pub struct WordCount;
 
@@ -71,7 +71,7 @@ pub struct TopWordsConfig {
     pub n: usize,
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(counts: WordCount)]
 pub struct TopWords {
     config: TopWordsConfig,
@@ -95,7 +95,7 @@ impl Component for TopWords {
 
 // --- Longest ---------------------------------------------------------------
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(tokens: Tokenize)]
 pub struct Longest;
 
@@ -114,7 +114,7 @@ impl Component for Longest {
 
 // --- Len<U>: generic over any component that produces Vec<String> ----------
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(items: U)]
 pub struct Len<U: Node<Output = Vec<String>>>(PhantomData<U>);
 
@@ -135,7 +135,7 @@ impl<U: Node<Output = Vec<String>>> Component for Len<U> {
 
 // --- Report: three subscriptions --------------------------------------------
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(
     top: TopWords,
     longest: Longest,
@@ -163,7 +163,7 @@ impl Component for Report {
 
 // --- Printer: the sink. A component whose output is `()` ------------------
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(
     report: Report,
     token_count: Len<Tokenize>,

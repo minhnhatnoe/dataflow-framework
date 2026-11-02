@@ -111,13 +111,13 @@ fn callback(input: TokenStream) -> Ident {
     syn::parse(input).expect("expected the name of a macro_rules! macro")
 }
 
-/// `leaf_shapes!(cb)`: `cb!([A0 C0 I0 A1 C1 I1 ..]);` for each leaf size 0..=LEAF
-/// (an entry is a node, its selector chain and its position constant).
+/// `leaf_shapes!(cb)`: `cb!([A0 C0 I0 X0 A1 C1 I1 X1 ..]);` for each leaf size 0..=LEAF
+/// (an entry is a node, its selector chain, its position constant and its handler hook).
 #[proc_macro]
 pub fn leaf_shapes(input: TokenStream) -> TokenStream {
     let cb = callback(input);
     let items = (0..=LEAF).map(|n| {
-        let rows = (0..n).flat_map(|i| [format_ident!("A{}", i), format_ident!("C{}", i), format_ident!("I{}", i)]);
+        let rows = (0..n).flat_map(|i| [format_ident!("A{}", i), format_ident!("C{}", i), format_ident!("I{}", i), format_ident!("X{}", i)]);
         quote!(#cb!([#(#rows)*]);)
     });
     quote!(#(#items)*).into()
@@ -358,8 +358,12 @@ struct Subscription {
     ty: Type,
     /// Selectors applied to the node's output, outermost first (`A(B(name))`).
     chain: Vec<Type>,
-    /// A handled entry: a bare type, or a pattern with `_` as the leaf.
+    /// An unnamed entry: a bare type, or a pattern with `_` as the leaf. It is not a field of
+    /// `Input`; its value goes to `on_update` only.
     handled: bool,
+    /// The name of the generated marker that keys the `UpdateHandler` impl of a selected entry
+    /// (`<struct>_edges::<Name>`); set by `expand`.
+    marker: Option<String>,
     /// The first token of the entry: errors about the entry point at it.
     span: Span,
     /// A unit selector `Sel: Source`: the edge has a hidden name, assigned from its index.
@@ -401,7 +405,7 @@ impl Parse for Subscription {
         if bare {
             // No `:`: a handled entry keyed by the node type.
             let ty: Type = input.parse()?;
-            return Ok(Subscription { name: None, ty, chain: Vec::new(), handled: true, unit: false, span });
+            return Ok(Subscription { name: None, ty, chain: Vec::new(), handled: true, marker: None, unit: false, span });
         }
         let (name, chain, unit, handled) = if peek_named(input) {
             let name: Ident = input.parse()?;
@@ -431,7 +435,7 @@ impl Parse for Subscription {
                 ),
             ));
         }
-        Ok(Subscription { name: Some(name), ty, chain, handled, unit, span })
+        Ok(Subscription { name: Some(name), ty, chain, handled, marker: None, unit, span })
     }
 }
 
@@ -786,6 +790,26 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
             s.name = Some(format_ident!("__unit_sel{}", i));
         }
     }
+    // The markers of the selected entries: the binding's name, or for an entry with nothing to
+    // bind (a unit selector) the innermost selector's name.
+    {
+        let mut taken: Vec<String> = Vec::new();
+        for (i, s) in subs.iter_mut().enumerate() {
+            if s.chain.is_empty() {
+                continue;
+            }
+            let mut m = if s.unit {
+                camel(&marker_ident(s.chain.last().expect("a unit selector has a selector"), s.span).to_string())
+            } else {
+                camel(&s.name_str())
+            };
+            if taken.contains(&m) {
+                m = format!("{m}{i}");
+            }
+            taken.push(m.clone());
+            s.marker = Some(m);
+        }
+    }
     for (i, a) in subs.iter().enumerate() {
         if let Some(an) = &a.name {
             if subs[..i].iter().any(|b| b.name.as_ref() == Some(an)) {
@@ -824,9 +848,9 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         })
         .collect();
     let marker_of = |s: &Subscription| -> TokenStream2 {
-        match &s.name {
+        match &s.marker {
             Some(n) => {
-                let m = format_ident!("{}", camel(&n.to_string()));
+                let m = format_ident!("{}", n);
                 if ty_args0.is_empty() {
                     quote!(#edges_mod::#m)
                 } else {
@@ -862,9 +886,11 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
             // A plain subscription needs no predicate (and an extra obligation per
             // subscription measurably slows type checking).
             if !s.chain.is_empty() || s.handled {
-                // Selectors and handled entries need a node whose subscribers read `&Output`
-                // (not a `#[handle]` component yet): `Node` carries the error message.
-                wc.predicates.push(parse_quote!(#ty: #krate::Node));
+                // Selectors need a node whose subscribers read `&Output` (not a `#[handle]`
+                // component yet): `Node` carries the error message.
+                if !s.chain.is_empty() {
+                    wc.predicates.push(parse_quote!(#ty: #krate::Node));
+                }
                 wc.predicates
                     .push(parse_quote!(#chain: #krate::SelectChain<<#ty as #krate::Vertex>::Stored>));
             }
@@ -931,14 +957,18 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     // reference. (Two spellings of one type, e.g. via an alias, stay two
     // entries, told apart by their position; the plan stores the type once.)
     let mut unique: Vec<(String, &Type, &TokenStream2)> = Vec::new();
+    // The hook of each unique entry: the handler of the owner for the entry's marker.
+    let mut hooks: Vec<TokenStream2> = Vec::new();
     let mut slot_of: Vec<usize> = Vec::new();
     // The marker of a handled unique entry.
-    for (t, c) in field_types.iter().zip(&field_chains) {
+    for ((t, c), s) in field_types.iter().zip(&field_chains).zip(&subs) {
         let key = format!("{} => {}", quote!(#t), c);
         let i = match unique.iter().position(|(k, _, _)| *k == key) {
             Some(i) => i,
             None => {
                 unique.push((key, t, c));
+                let m = marker_of(s);
+                hooks.push(quote!(#krate::By<#name #ty_generics, #m>));
                 unique.len() - 1
             }
         };
@@ -957,7 +987,8 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         let deps_ty = tree.render(&|i| {
             let t = types[i];
             let c = chains[i];
-            quote!(#krate::Sub<#t, #c, #i>)
+            let x = &hooks[i];
+            quote!(#krate::Sub<#t, #c, #i, #x>)
         });
         let deps_pat = tree.render(&|i| {
             let v = &vars[i];
@@ -1014,8 +1045,9 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
                     tys.push(tree.render(&|i| {
                         let t = types[i];
                         let c = chains[i];
+                        let x = &hooks[i];
                         let pos = base + ids.iter().position(|&x| x == i).unwrap();
-                        quote!(#krate::Sub<#t, #c, #pos>)
+                        quote!(#krate::Sub<#t, #c, #pos, #x>)
                     }));
                     pats.push(tree.render(&|i| {
                         let v = &vars[i];
@@ -1075,6 +1107,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
                         pub struct #mapper<#(#decl_params),*>(::core::marker::PhantomData<fn() -> (#(#type_params,)*)>);
                         impl #mimpl #krate::Map<#elem> for #mapper<#(#ty_args0),*> #mwhere {
                             type Out = #body;
+                            type Owner = #name #ty_generics;
                         }
                     });
                 }
@@ -1136,12 +1169,8 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
 
 
     // `Node` for a component. Its bounds are the component's own.
-    let handler = !fors.is_empty() || subs.iter().any(|s| s.handled);
     let listener = input.attrs.iter().any(|a| a.path().is_ident("listener"));
     let mut node_items = quote!();
-    if handler {
-        node_items = quote!(#node_items const HANDLER: bool = true;);
-    }
     let requests_ty = if listener {
         quote!(<#name #ty_generics as #krate::Listener>::Requests)
     } else {
@@ -1167,10 +1196,10 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     };
 
     let handle = input.attrs.iter().any(|a| a.path().is_ident("handle"));
-    if handle && (listener || handler) {
+    if handle && listener {
         return Err(syn::Error::new_spanned(
             name,
-            "`#[handle]` cannot be combined with `#[listener]`, handled entries or `for` entries yet",
+            "`#[handle]` cannot be combined with `#[listener]` yet",
         ));
     }
     let (nimpl_generics, nty_generics, _) = generics.split_for_impl();
@@ -1195,7 +1224,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
             impl #nimpl_generics #krate::__private::Sealed for #name #nty_generics #light_where {}
 
             impl #nimpl_generics #krate::Edge for #name #nty_generics #light_where {
-                type Read<'a> = <#name #nty_generics as #krate::HandleComponent>::Output<'a> where Self: 'a;
+                type Read<'a> = <#name #nty_generics as #krate::HandleComponent>::View<'a> where Self: 'a;
             }
             impl #nimpl_generics #krate::Vertex for #name #nty_generics #node_where {
                 type Stored = <#name #nty_generics as #krate::HandleComponent>::Handle;
@@ -1209,7 +1238,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
                 #[cfg_attr(not(debug_assertions), inline(always))]
                 #[cfg_attr(debug_assertions, inline)]
                 fn __view<'a>(&'a self, handle: &'a Self::Stored) -> <Self as #krate::Edge>::Read<'a> {
-                    <#name #nty_generics as #krate::HandleComponent>::output(self, handle)
+                    <#name #nty_generics as #krate::HandleComponent>::view(self, handle)
                 }
             }
             impl #nimpl_generics #krate::Component for #name #nty_generics #node_where {
@@ -1269,8 +1298,8 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
             _ => None,
         })
         .collect();
-    for s in subs.iter().filter(|s| s.handled && s.name.is_some()) {
-        let m = format_ident!("{}", camel(&s.name_str()));
+    for s in subs.iter().filter(|s| s.marker.is_some()) {
+        let m = format_ident!("{}", s.marker.as_ref().unwrap());
         let ty = &s.ty;
         let chain = chain_ty(&s.chain);
         let full = marker_of(s);
@@ -1279,7 +1308,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         });
         marker_items.push(quote! {
             impl #impl_generics #krate::HandledEdge for #full #where_clause {
-                type Value = <#chain as #krate::SelectChain<<#ty as #krate::Vertex>::Stored>>::Out;
+                type Arg<'a> = &'a <#chain as #krate::SelectChain<<#ty as #krate::Vertex>::Stored>>::Out;
             }
         });
     }
@@ -1296,7 +1325,6 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     };
     let checks: Vec<TokenStream2> = subs
         .iter()
-        .filter(|s| s.handled)
         .map(|s| {
             let m = marker_of(s);
             let sp = s.span;
@@ -1374,6 +1402,31 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
 
 /// `#[derive(Root)]`: the type fed to `Pipeline::push`. It is a node with no
 /// subscriptions whose output is the value itself; nothing of it is stored.
+/// `#[derive(UpdateHandler)]`: the component has no handlers. One blanket impl,
+/// `impl<E: HandledEdge> UpdateHandler<E> for C { const ACTIVE: bool = false; }`, answers for every
+/// entry of its `#[subscribe(..)]`, so the plan treats the component as an ordinary one. It can't be
+/// combined with a hand-written `impl UpdateHandler<E> for C`: the two overlap (`E0119`).
+#[proc_macro_derive(UpdateHandler)]
+pub fn derive_update_handler(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let krate = quote!(::dataflow_flat);
+    let name = &input.ident;
+    let (_, ty_generics, _) = input.generics.split_for_impl();
+    let mut generics = input.generics.clone();
+    generics.params.push(parse_quote!(__E: #krate::HandledEdge));
+    {
+        let wc = generics.make_where_clause();
+        wc.predicates.push(parse_quote!(#name #ty_generics: #krate::ComponentSubscription));
+    }
+    let (impl_generics, _, where_clause) = generics.split_for_impl();
+    quote! {
+        impl #impl_generics #krate::UpdateHandler<__E> for #name #ty_generics #where_clause {
+            const ACTIVE: bool = false;
+        }
+    }
+    .into()
+}
+
 #[proc_macro_derive(Root)]
 pub fn derive_root(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

@@ -9,12 +9,12 @@ use crate::sinks::Sinks;
 /// the sinks, constructed and ready to take pushes.
 ///
 /// ```
-/// use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline, Root};
+/// use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Pipeline, Root};
 ///
 /// #[derive(Root)]
 /// struct Tick;
 ///
-/// #[derive(ComponentSubscription)]
+/// #[derive(ComponentSubscription, UpdateHandler)]
 /// #[subscribe(tick: Tick)]
 /// struct Count;
 /// impl Component for Count {

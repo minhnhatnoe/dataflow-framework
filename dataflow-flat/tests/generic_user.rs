@@ -1,7 +1,7 @@
 //! Generic user code over `Pipeline<R, S>`: one nameable bound, `S: Sinks<R>`,
 //! and no `generic_const_exprs` feature gate in the user crate (this file has
 //! none).
-use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline, Root, Sinks};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Pipeline, Root, Sinks};
 use std::sync::atomic::{AtomicU32, Ordering::SeqCst};
 
 pub fn drive<R, S: Sinks<R>>(p: &mut Pipeline<R, S>, steps: impl IntoIterator<Item = R>) {
@@ -24,7 +24,7 @@ pub struct Num(u32);
 
 static TOTAL: AtomicU32 = AtomicU32::new(0);
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(n: Num)]
 pub struct Leaf;
 impl Component for Leaf {
@@ -38,7 +38,7 @@ impl Component for Leaf {
     }
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(a: Leaf)]
 pub struct App;
 impl Component for App {

@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
-use dataflow_flat::{Component, ComponentSubscription, Select};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Select};
 
 use crate::market::*;
 
@@ -31,7 +31,7 @@ thread_local! {
 }
 
 /// Runs only for packets of exchange `X` with symbol `S`.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(S(t)): <X as Exchange>::Ws)]
 pub struct Book<X: Exchange, S: Market + Select<X::Frame, Out = Tob>> {
     core: BookCore,

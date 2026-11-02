@@ -17,14 +17,14 @@
 //! mapper type implementing [`Map`] for the body of the `for` (`S -> Quoter<S>`),
 //! and the component's subscription tree gets the segment
 //! `<Catalog as MapDeps<Mapper, BASE>>::Out`: the catalog's own tree with every
-//! element replaced by the entry `Sub<Quoter<S>, Hd<Quoter<S>, ()>, position>`.
+//! element replaced by the entry `Sub<Quoter<S>, Hd<Quoter<S>, ()>, position, By<Owner, Quoter<S>>>`.
 //! The shape stays an `ARITY`-sized tree; positions are dense per catalog, in
 //! catalog order, which is the listing order.
 
 use core::marker::PhantomData;
 
 use crate::component::{DepList, Sub};
-use crate::handler::Hd;
+use crate::handler::{By, Hd};
 use crate::node::Vertex;
 
 /// A pair of types: the element of a [`Product`] or a [`Zip`], and what
@@ -47,6 +47,8 @@ pub trait Catalog: 'static {
 pub trait Map<A>: 'static {
     /// The node subscribed to for the element `A`.
     type Out: Vertex;
+    /// The component whose `UpdateHandler<Out>` impl handles the entry.
+    type Owner: 'static;
 }
 
 /// The subscription tree of a catalog under a mapper `F`, with positions from `B`.
@@ -67,7 +69,7 @@ pub trait Ent<F, A, const POS: usize> {
     type S;
 }
 impl<F: Map<A>, A, const POS: usize> Ent<F, A, POS> for () {
-    type S = Sub<<F as Map<A>>::Out, Hd<<F as Map<A>>::Out, ()>, POS>;
+    type S = Sub<<F as Map<A>>::Out, Hd<<F as Map<A>>::Out, ()>, POS, By<<F as Map<A>>::Owner, <F as Map<A>>::Out>>;
 }
 
 // -- plain tuples -----------------------------------------------------------------------------------
@@ -81,7 +83,7 @@ macro_rules! tuple_leaf {
         where
             $(F: Map<$A>, (): Ent<F, $A, { BASE + $i }>,)*
         {
-            type Out = ($(Sub<<F as Map<$A>>::Out, Hd<<F as Map<$A>>::Out, ()>, { BASE + $i }>,)*);
+            type Out = ($(Sub<<F as Map<$A>>::Out, Hd<<F as Map<$A>>::Out, ()>, { BASE + $i }, By<<F as Map<$A>>::Owner, <F as Map<$A>>::Out>>,)*);
         }
     };
 }
@@ -135,7 +137,7 @@ macro_rules! zip_leaf {
         where
             $(F: Map<M<$A, $B>>, (): Ent<F, M<$A, $B>, { BASE + $i }>,)*
         {
-            type Out = ($(Sub<<F as Map<M<$A, $B>>>::Out, Hd<<F as Map<M<$A, $B>>>::Out, ()>, { BASE + $i }>,)*);
+            type Out = ($(Sub<<F as Map<M<$A, $B>>>::Out, Hd<<F as Map<M<$A, $B>>>::Out, ()>, { BASE + $i }, By<<F as Map<M<$A, $B>>>::Owner, <F as Map<M<$A, $B>>>::Out>>,)*);
         }
     };
 }
@@ -177,7 +179,7 @@ macro_rules! row_leaf {
         where
             $(F: Map<M<X, $A>>, (): Ent<F, M<X, $A>, { BASE + $i }>,)*
         {
-            type Out = ($(Sub<<F as Map<M<X, $A>>>::Out, Hd<<F as Map<M<X, $A>>>::Out, ()>, { BASE + $i }>,)*);
+            type Out = ($(Sub<<F as Map<M<X, $A>>>::Out, Hd<<F as Map<M<X, $A>>>::Out, ()>, { BASE + $i }, By<<F as Map<M<X, $A>>>::Owner, <F as Map<M<X, $A>>>::Out>>,)*);
         }
     };
 }

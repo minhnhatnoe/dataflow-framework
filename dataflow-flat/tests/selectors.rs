@@ -5,7 +5,7 @@
 
 use std::sync::Mutex;
 
-use dataflow_flat::{Component, ComponentSubscription, Configs, Demux, Pipeline, Root, Select, GUARD};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Demux, Pipeline, Root, Select, GUARD};
 
 static LOG: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 // Tests in one binary run in parallel; each test holds this lock and clears the log.
@@ -22,7 +22,7 @@ fn log(s: &'static str) {
 /// logs its name when it runs.
 macro_rules! comp {
     ($(#[$m:meta])* $name:ident, [$($sub:tt)*], $out:ty, |$i:ident| $body:expr) => {
-        #[derive(ComponentSubscription)]
+        #[derive(ComponentSubscription, UpdateHandler)]
         #[subscribe($($sub)*)]
         pub struct $name;
         impl Component for $name {

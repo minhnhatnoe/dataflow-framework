@@ -65,7 +65,7 @@ pub enum Frame {
     Other(u64),
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(m: Msg)]
 pub struct Ws;
 impl Component for Ws {
@@ -87,7 +87,7 @@ impl Component for Ws {
 }
 
 /// A quoter per symbol; its initial output is 1000 + key.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(S(u)): Ws)]
 pub struct Quoter<S: Symbol>(PhantomData<S>);
 impl<S: Symbol> Component for Quoter<S> {
@@ -104,7 +104,7 @@ impl<S: Symbol> Component for Quoter<S> {
 }
 
 /// Constant-ish plain input of the handlers below: runs on every push.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(m: Msg)]
 pub struct Limits;
 impl Component for Limits {
@@ -153,14 +153,14 @@ impl Drop for Oms {
     }
 }
 impl<S: Symbol> UpdateHandler<Quoter<S>> for Oms {
-    fn on_update(&mut self, v: &u64) {
+    fn on_update(&mut self, _input: Self::Input<'_>, v: &u64) {
         log(format!("Oms.on<{}>", S::NAME));
         self.pending.push(format!("{}={}", S::NAME, v));
     }
 }
 
 /// Something downstream that sees the handler's output (and its initial one).
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(o: Oms)]
 pub struct Report;
 impl Component for Report {
@@ -272,15 +272,18 @@ impl Component for OmsL {
         (acc.0 + *i.limits, acc.1)
     }
 }
+impl UpdateHandler<Limits> for OmsL {
+    const ACTIVE: bool = false;
+}
 impl<S: Symbol> UpdateHandler<Quoter<S>> for OmsL {
-    fn on_update(&mut self, v: &u64) {
+    fn on_update(&mut self, _input: Self::Input<'_>, v: &u64) {
         log(format!("OmsL.on<{}>", S::NAME));
         self.acc.0 += *v;
         self.acc.1 += 1;
     }
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(o: OmsL)]
 pub struct ReportL;
 impl Component for ReportL {
@@ -318,7 +321,7 @@ fn named_inputs_reach_update_and_unfired_edges_are_skipped() {
 
 macro_rules! comp {
     ($name:ident, [$($sub:tt)*]) => {
-        #[derive(ComponentSubscription)]
+        #[derive(ComponentSubscription, UpdateHandler)]
         #[subscribe($($sub)*)]
         pub struct $name;
         impl Component for $name {
@@ -360,7 +363,7 @@ impl Component for Mix {
 }
 macro_rules! handles {
     ($($t:ident),*) => { $(impl UpdateHandler<$t> for Mix {
-        fn on_update(&mut self, v: &u64) {
+        fn on_update(&mut self, _input: Self::Input<'_>, v: &u64) {
             log(concat!("Mix.on ", stringify!($t)));
             self.acc += *v;
         }
@@ -391,7 +394,7 @@ pub enum Pkt {
     Tick,
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(pkt::A(p): Pkt)]
 pub struct OnA;
 impl Component for OnA {
@@ -405,7 +408,7 @@ impl Component for OnA {
         *i.p
     }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(pkt::B(p): Pkt)]
 pub struct OnB;
 impl Component for OnB {
@@ -419,7 +422,7 @@ impl Component for OnB {
         *i.p
     }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Pkt)]
 pub struct Every;
 impl Component for Every {
@@ -450,17 +453,20 @@ impl Component for Flags {
         std::mem::take(&mut self.acc)
     }
 }
+impl UpdateHandler<Every> for Flags {
+    const ACTIVE: bool = false;
+}
 impl UpdateHandler<OnA> for Flags {
-    fn on_update(&mut self, v: &u32) {
+    fn on_update(&mut self, _input: Self::Input<'_>, v: &u32) {
         self.acc.push(format!("a={v}"));
     }
 }
 impl UpdateHandler<OnB> for Flags {
-    fn on_update(&mut self, v: &u32) {
+    fn on_update(&mut self, _input: Self::Input<'_>, v: &u32) {
         self.acc.push(format!("b={v}"));
     }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(f: Flags)]
 pub struct FlagsOut;
 pub static SEEN: Mutex<Vec<Vec<String>>> = Mutex::new(Vec::new());
@@ -518,25 +524,25 @@ impl Component for Fills {
     }
 }
 impl UpdateHandler<fills_edges::Btc> for Fills {
-    fn on_update(&mut self, v: &u64) {
+    fn on_update(&mut self, _input: Self::Input<'_>, v: &u64) {
         log("Fills.btc");
         self.acc.push(format!("btc:{v}"));
     }
 }
 impl UpdateHandler<fills_edges::Eth> for Fills {
-    fn on_update(&mut self, v: &u64) {
+    fn on_update(&mut self, _input: Self::Input<'_>, v: &u64) {
         log("Fills.eth");
         self.acc.push(format!("eth:{v}"));
     }
 }
 impl UpdateHandler<Quoter<Sol>> for Fills {
-    fn on_update(&mut self, v: &u64) {
+    fn on_update(&mut self, _input: Self::Input<'_>, v: &u64) {
         log("Fills.sol");
         self.acc.push(format!("sol:{v}"));
     }
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(f: Fills)]
 pub struct FillsOut;
 impl Component for FillsOut {

@@ -53,7 +53,7 @@ impl Component for Oms {{
     fn update(&mut self, _: Self::Input<'_>) -> (u64, u64) {{ std::mem::take(&mut self.acc) }}
 }}
 %UPDATE_HANDLER%
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(o: Oms)]
 pub struct Probe {{ d: u64 }}
 impl Component for Probe {{
@@ -193,7 +193,7 @@ ws_arms = "\n".join(f"            {i} => {FN}::S{i}(tob)," for i in range(n))
 
 def ws_and_book(selprefix_unused=None):
     return f"""
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Packet)]
 pub struct Ws;
 impl Component for Ws {{
@@ -210,7 +210,7 @@ impl Component for Ws {{
     }}
 }}
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(S(t): Ws)]
 pub struct Book<S: Select<{FN}, Out = Tob>> {{ n: u64, _p: core::marker::PhantomData<S> }}
 impl<S: Select<{FN}, Out = Tob>> Component for Book<S> {{
@@ -222,7 +222,7 @@ impl<S: Select<{FN}, Out = Tob>> Component for Book<S> {{
 
 UH_E = f"""impl<S: Select<{FN}, Out = Tob>> UpdateHandler<Book<S>> for Oms {{
     #[inline(always)]
-    fn on_update(&mut self, t: &Tob) {{ fold(&mut self.acc, t) }}
+    fn on_update(&mut self, _: Self::Input<'_>, t: &Tob) {{ fold(&mut self.acc, t) }}
 }}"""
 
 key_arms = "\n".join(f"        {FN}::S{i}(..) => {i}," for i in range(n))

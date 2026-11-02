@@ -5,7 +5,7 @@
 use std::marker::PhantomData;
 use std::sync::Mutex;
 
-use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline, Root};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Pipeline, Root};
 
 #[derive(Root)]
 pub struct Poll;
@@ -20,7 +20,7 @@ fn take() -> Vec<&'static str> {
 
 macro_rules! comp {
     ($name:ident, [$($n:ident: $d:ty),*]) => {
-        #[derive(ComponentSubscription)]
+        #[derive(ComponentSubscription, UpdateHandler)]
         #[subscribe($($n: $d),*)]
         pub struct $name;
         impl Component for $name {
@@ -43,7 +43,7 @@ mod words {
     comp!(TopWords, [counts: WordCount]);
     comp!(Longest, [tokens: Tokenize]);
     comp!(Report, [top: TopWords, longest: Longest, line: Source]);
-    #[derive(ComponentSubscription)]
+    #[derive(ComponentSubscription, UpdateHandler)]
     #[subscribe(items: U)]
     pub struct Len<U: Component + dataflow_flat::Node>(PhantomData<U>);
     impl<U: Component + dataflow_flat::Node> Component for Len<U> {
@@ -217,7 +217,7 @@ mod shared_tail {
     }
     macro_rules! sel {
         ($name:ident, [$($sub:tt)*]) => {
-            #[derive(ComponentSubscription)]
+            #[derive(ComponentSubscription, UpdateHandler)]
             #[subscribe($($sub)*)]
             pub struct $name;
             impl Component for $name {

@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use dataflow_flat::{Component, ComponentSubscription, Listener, Request, Root};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Listener, Request, Root};
 
 use crate::market::*;
 
@@ -44,7 +44,7 @@ impl Wire {
 }
 
 /// Reads the card: `Output = Option<Packet>`, `None` when the poll found nothing.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(_p: Poll)]
 pub struct Nic {
     wire: Wire,
@@ -79,7 +79,7 @@ impl<S: BinanceStream> Request<S> for Streams {
 /// Subscribes to `Some(Packet::Binance(m))` of `Nic` (`Some`, then `packet::Binance`): it runs only for a
 /// Binance packet. `#[listener]` tells the plan that this component wants to be
 /// told, at build and before `new`, the markets its subscribers read from it.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(Packet::Binance(m)): Nic)]
 #[listener]
 #[allow(dead_code)] // kept: a real listener owns its connection
@@ -122,7 +122,7 @@ impl<S: CoinbaseProduct> Request<S> for Products {
 }
 
 /// The same for Coinbase, with its own framing.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(Packet::Coinbase(m)): Nic)]
 #[listener]
 #[allow(dead_code)]

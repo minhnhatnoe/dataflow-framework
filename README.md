@@ -47,13 +47,13 @@ These came from the person who asked for the framework, roughly in the order the
 ## Quick start
 
 ```rust
-use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline, Root};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Pipeline, Root};
 
 /// The root: the value passed to `push`. It exists only during the push.
 #[derive(Root)]
 pub struct Tick(pub u64);
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(tick: Tick)]
 pub struct Total {
     sum: u64,
@@ -71,7 +71,7 @@ impl Component for Total {
 }
 
 /// A sink: an ordinary component nobody subscribes to.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(total: Total)]
 pub struct Printer;
 impl Component for Printer {
@@ -108,7 +108,7 @@ total 16
 | Path | What |
 |---|---|
 | `dataflow-flat/` | The library: plan, storage, construction and push (`src/`), tests (`tests/`), examples |
-| `dataflow-macros/` | `#[derive(ComponentSubscription)]` with `#[subscribe(..)]`, `#[derive(Root)]`, `#[derive(Demux)]`, the `catalog!` macro and the callback macros that generate the per-shape impls |
+| `dataflow-macros/` | `#[derive(ComponentSubscription)]` with `#[subscribe(..)]`, `#[derive(UpdateHandler)]`, `#[derive(Root)]`, `#[derive(Demux)]`, the `catalog!` macro and the callback macros that generate the per-shape impls |
 | `bench/` | Generators for benchmark apps (`gen_app.py` is the main one; see [Performance](#performance-and-compile-time)) |
 | `scripts/` | `check_errors.sh` (one tiny crate per class of user mistake), `measure.py`, `bench.sh`, `gen_selbench.py` |
 | `handoff/` | Design notes and session logs (`event-spec.md`, `README.md`, `session-2.md`), small profiling tools |
@@ -119,7 +119,7 @@ total 16
 **Nodes.** Everything you can subscribe to is a node. There are two kinds you write:
 
 * The **root**, `#[derive(Root)]` on a struct or enum, is the value of one `push`. It has no state and no subscriptions, fires on every push, and exists only during that push. A pipeline has exactly one root type `R`.
-* **Components**: `#[derive(ComponentSubscription)]` with `#[subscribe(..)]`, plus `impl Component`. A component's latest output is *stored* in the pipeline and persists between pushes.
+* **Components**: `#[derive(ComponentSubscription, UpdateHandler)]` with `#[subscribe(..)]`, plus `impl Component`. A component's latest output is *stored* in the pipeline and persists between pushes. (`UpdateHandler` is the derive for a component with no handlers; see [Handlers](#handlers).)
 
 A **sink** is a component whose output is usually `()`. `Pipeline::<R, (Sink1, Sink2)>::build(configs)` takes a tuple of 1 to 15 sinks; the graph is everything upstream of them. There is no application component.
 
@@ -152,7 +152,7 @@ The framework never invents an `Option` for an input. A component that wants "no
 The `#[subscribe(..)]` list is a list of entries. A subscription is a Rust-looking pattern on the parent's output, written the way a `match` arm would be, followed by `:` and the parent node. The pattern says which part of the parent's output the component reads, and the edge fires only when the pattern matches.
 
 ```rust
-use dataflow_flat::{Component, ComponentSubscription, Configs, Demux, Pipeline, Root};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Demux, Pipeline, Root};
 
 #[derive(Root)]
 pub struct Poll;
@@ -169,7 +169,7 @@ pub enum Packet {
     Coinbase(CoinbaseMsg),
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(_poll: Poll)]
 pub struct Nic { n: u64 }
 impl Component for Nic {
@@ -187,7 +187,7 @@ impl Component for Nic {
 }
 
 /// Runs only for Binance packets. `m` is `&BinanceMsg`.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(Packet::Binance(m)): Nic)]
 pub struct BinanceBook;
 impl Component for BinanceBook {
@@ -200,7 +200,7 @@ impl Component for BinanceBook {
     }
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(Packet::Coinbase(m)): Nic)]
 pub struct CoinbaseBook;
 impl Component for CoinbaseBook {
@@ -214,7 +214,7 @@ impl Component for CoinbaseBook {
 }
 
 /// An exclusive join: a packet is from one exchange.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(b: BinanceBook, c: CoinbaseBook)]
 pub struct Best;
 impl Component for Best {
@@ -254,9 +254,9 @@ The third push found nothing (`None`): `Nic` ran and fired, but neither pattern 
 | `S(t): Src` | `S` is a generic parameter of the component that implements `Select<..>`. |
 | `Ok(v): Parse`, `Err(e): Parse` | `Result` selectors. `Some(x)` and `None` are the `Option` selectors. These four names are the library's, not the prelude's variants. |
 | `Disconnected: Ws` | A *unit selector*: no field to bind. The edge fires on the variant; it has no field in `Input`. Needs `Disconnected` in scope as a type (`use event::Disconnected;`), or write the path `Event::Disconnected: Ws`. |
-| `Quoter<Btc>` (no colon) | A *handled* entry, delivered to `on_update` (see [Handlers](#handlers)). |
-| `Btc(_): Ws` | A selected handled entry: `_` as the leaf. |
-| `for S in Catalog { Quoter<S> }` | One handled entry per element of a catalog. |
+| `Quoter<Btc>` (no colon) | An *unnamed* entry: not a field of `Input`, only its `UpdateHandler` impl sees it (see [Handlers](#handlers)). |
+| `Btc(_): Ws` | A selected unnamed entry: `_` as the leaf. |
+| `for S in Catalog { Quoter<S> }` | One unnamed entry per element of a catalog. |
 
 **The uppercase-is-selector rule.** Before the `:`, an identifier that starts with a lowercase letter or `_` is the *name* of a plain input. An identifier that starts with an uppercase letter is a selector. That is why `limits: Limits` and `Disconnected: Ws` parse differently, and why a named input cannot start with an uppercase letter. Inside a pattern, the last, lowercase identifier is the binding that becomes a field of the input. A path whose second-to-last segment starts with an uppercase letter, `Packet::Binance`, means the marker the `Demux` derive generated for that variant, `packet::Binance` (the enum name in snake case); `Option::Some` and `Result::Ok` mean the library's; any other path (`markets::Btc`) is a type as written.
 
@@ -304,7 +304,7 @@ trait Select<In>: 'static {
 Reading `Packet::Binance(m)` is `packet::Binance(m)`. For a market catalog you usually want *one* marker per market shared by many enums (each exchange's frame has a `Btc` variant). `#[demux(markers = path)]` makes the derive implement `Select` for the existing types `path::Variant` instead of generating new ones, and re-exports them in the enum's module so `Frame::Btc` still names the same type:
 
 ```rust
-use dataflow_flat::{Component, ComponentSubscription, Configs, Demux, Pipeline, Root, Select};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Demux, Pipeline, Root, Select};
 use std::marker::PhantomData;
 
 /// One marker per market, shared by every exchange's frame enum.
@@ -326,12 +326,12 @@ pub enum CoinbaseFrame { Btc(Tob), Eth(Tob) }
 // `BinanceWs` (not shown) has Output = Option<BinanceFrame>.
 
 /// `S` is any marker that selects a `Tob` out of a `BinanceFrame`: Btc, Eth, ...
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(S(t)): BinanceWs)]
 pub struct Book<S: Select<BinanceFrame, Out = Tob>>(PhantomData<S>);
 // impl Component for Book<S> { .. update returns i.t.bid .. }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(btc: Book<markets::Btc>, eth: Book<markets::Eth>)]
 pub struct Sink;
 ```
@@ -357,12 +357,12 @@ A component can subscribe to several alternatives of one source and run for any 
 #[derive(Root, Demux, Clone, Debug)]
 pub enum Wire { Btc(f64), Eth(f64), Disconnected }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Wire::Btc(a): Wire, Wire::Eth(b): Wire)]
 pub struct Spread;
 // update: a - b, printing both
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Wire::Disconnected: Wire)]
 pub struct Alarm;
 ```
@@ -390,16 +390,24 @@ Rules:
 * **Last value.** For each (source, selector chain) that some subscriber reads in steps where the chain does not match, the plan keeps one slot, shared by all such subscribers, written right after the source runs (at the start of the push for the root) when the chain matches. An input that is always matched when its subscriber runs has no slot and is read straight from the source.
 * **Initial value, and `new`.** Every selected input has an initial value that `new` is given (`init.a`, which dereferences to the part): `Default::default()` of the payload for `#[derive(Demux)]` selectors, `Some`, `Ok` and `Err`, and `Initial::initial()` for a hand-written selector (`impl Initial<In> for Sel`). `None` and unit selectors have the part `()`. The derive fills the field in the user's crate, where the chain and payload are concrete types: it uses the chain's `Initial` if there is one, else the field is a `SelInit` that panics when dereferenced, naming the component, the input and the payload (`SelInit::get` gives `None` instead). This cannot be a compile error, since `new` reads the field at run time. Limit: a component that is generic over its selector or its payload sees only type parameters there, so no `Initial` is found, and `new` panics if it reads such an input unless the edge has a slot (the slot's value wins).
 * **`Default` and `Clone`.** `Clone` is required only for an input that is stored (the value is cloned out of the source's output); a payload that is read only when matched needs neither. A missing `Clone` is: ``error[E0277]: `NoClone` is read through selectors in steps where they do not match, so it is stored, and must implement `Clone` ``. A missing initial value: ``error[E0277]: the trait bound `NoDef: Default` is not satisfied``.
-* Handled entries are never read in `update` and never stored.
+* Unnamed entries are never read in `update` and never stored. (A named entry with an active handler is read in `update` as always, and also given to `on_update`.)
 
 ## Handlers
 
-A **handler** is an ordinary component with unnamed entries in its `#[subscribe(..)]`. A named entry is read in `update`; an unnamed entry is delivered to `on_update`, one call per fired edge, which is what an order manager wants: only the quoters that changed this step matter.
+Every entry of a component's `#[subscribe(..)]`, named or not, has an `UpdateHandler<E>` impl, where `E` is the entry's key (below). The impl says whether the component wants a call when that edge fires: `on_update(&mut self, input, v)`, once per push in which the edge fired, in the execution order of the parents, **before `update`**, in the same step. `input` is the same `Self::Input<'_>` that `update` is about to get (every named entry current, including the ones that did not fire in this push or whose selector did not match); `v` is the value of the edge. A component with no handlers at all, the common case, derives one blanket impl:
+
+```rust
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(limits: Limits, feed: Feed)]
+pub struct Quoter { .. }
+```
+
+`#[derive(UpdateHandler)]` is `impl<E: HandledEdge> UpdateHandler<E> for Quoter { const ACTIVE: bool = false; }`: no entry calls anything, and the component is an ordinary one in the push program (nothing is generated for it). A component with handlers writes them by hand, one impl per entry:
 
 ```rust
 use dataflow_flat::{catalog, UpdateHandler};
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription)]               // no `UpdateHandler` derive
 #[subscribe(limits: Limits, Quoter<markets::Btc>, Quoter<markets::Eth>)]
 pub struct Oms {
     pending: Vec<(&'static str, i64)>,   // recycled between pushes
@@ -418,28 +426,36 @@ impl Component for Oms {
         n
     }
 }
+impl UpdateHandler<Limits> for Oms {}    // a named entry needs an impl too; the empty one does nothing
 impl<S: Symbol + Select<Tick, Out = Quote>> UpdateHandler<Quoter<S>> for Oms {
-    fn on_update(&mut self, px: &i64) {
-        self.pending.push((S::NAME, *px));
+    fn on_update(&mut self, input: Self::Input<'_>, px: &i64) {
+        if *px < input.limits.max_px {
+            self.pending.push((S::NAME, *px));
+        }
     }
 }
 ```
 
-When a handler runs (the OR rule over *all* its entries, named and unnamed), each handled edge that fired in this push gets `on_update` in the execution order of the parents, then `update` runs once. Nothing is called at build: `new` returns the initial output. Edges that did not fire are never read, so a handler may list branches that are not implied by its condition. The exclusive-join rule still applies to its entries. Inside each branch of the push the set of fired handled edges is known statically, so the code is `on_update` for exactly those and then `update`: no flags and no loop over the entries.
+* **The key `E` of an entry.** A plain entry, named (`limits: Limits`) or not (`Quoter<Btc>`), is keyed by its node type. A selected entry, named (`Some(Sol(sol)): Ws`) or not (`Btc(_): Ws`), is keyed by a marker the derive generates in a module named after the struct: for `struct Tape` it is `tape_edges::Btc`. The marker's name is the binding's name in camel case (`sol` gives `tape_edges::Sol`; `_` takes the innermost selector's name, and so does a unit selector; for a generic selector `Tag::<Btc>` it is the type argument's name). Two unit selectors that would get one name are told apart by their position (`Name2`).
+* **The value `v`.** It follows the source. A by-value parent gives `&Output` (`&i64` above). A handle parent (`#[handle]`, below) gives exactly its `View<'a>`: `u64` for an owned view, `&'a u64` for a borrowed one. A selected entry gives the selected part, by reference, and `E`'s `Arg<'a>` (`HandledEdge::Arg`) is that type.
+* **`ACTIVE`.** `UpdateHandler` has `const ACTIVE: bool = true` and `on_update` has an empty default body. `impl UpdateHandler<E> for C {}` therefore means a call that does nothing; `const ACTIVE: bool = false` in the impl says the plan need not make it. The plan reads `ACTIVE` once per edge: a component with no active edge is an ordinary one in the push program. Unnamed entries are not fields of `Input`; a named entry stays one whether it is active or not, so `input.limits` and `v` can both be read in a call for it.
+* **A missing impl** is ``error[E0277]: `Oms` subscribes to `Limits` without an `UpdateHandler<Limits>` impl``, pointing at the struct (`cargo check` already shows it), with a note that says to derive `UpdateHandler` or to write the impl. **`#[derive(UpdateHandler)]` with a hand-written impl** is Rust's own ``error[E0119]: conflicting implementations of trait `UpdateHandler<Limits>` for type `Oms` ``: the blanket impl the derive wrote overlaps every hand-written one. Remove the derive from a component that has handlers (the derive is for components that have none); there is no way to combine them, a hand-written impl for every entry with `const ACTIVE: bool = false` is the same thing.
+* **An unnamed entry whose impl is `ACTIVE = false`** is a trigger only: the component runs when the edge fires, and nothing reads the value.
 
-* **Unnamed entries.** A bare type is keyed by the node type (`UpdateHandler<Quoter<Btc>>`); a generic impl such as the one above covers a family.
-* **Selected handled entries.** `Btc(_): Ws` (the leaf is `_`) is keyed by a marker the derive generates in a module named after the struct: for `struct Tape` it is `tape_edges::Btc`, named after the innermost selector (for a generic selector `Tag::<Btc>` it takes the type argument's name). `on_update` gets the selected part:
+When a handler runs (the OR rule over *all* its entries, named and unnamed), each active edge that fired in this push gets `on_update` in the execution order of the parents, then `update` runs once. Nothing is called at build: `new` returns the initial output. Edges that did not fire are never called; an unnamed edge is not read at all, so a handler may list branches that are not implied by its condition. The exclusive-join rule still applies to its entries. Inside each branch of the push the set of fired active edges is known statically, so the code is `on_update` for exactly those and then `update`: no flags and no loop over the entries.
+
+* **Selected entries.** `Btc(_): Ws` (the leaf is `_`) or `Some(Sol(sol)): Ws` (named). `on_update` gets the selected part:
 
     ```rust
     #[derive(ComponentSubscription)]
     #[subscribe(markets::Btc(_): Tick, markets::Sol(_): Tick)]
     pub struct Tape { seen: Vec<i64> }
-    // impl UpdateHandler<tape_edges::Btc> for Tape { fn on_update(&mut self, q: &Quote) { .. } }
+    // impl UpdateHandler<tape_edges::Btc> for Tape { fn on_update(&mut self, _: Self::Input<'_>, q: &Quote) { .. } }
     // impl UpdateHandler<tape_edges::Sol> for Tape { .. }
     ```
 
-    Two handled entries ending in the same selector name are an error (``two handled entries end in the selector `K0` ``). A missing impl is ``error[E0277]: `H` subscribes to `B` without a handler for it``, with a note that shows the impl to write.
-* **`for` entries over a catalog.** Writing a hundred `Quoter<..>` entries by hand is not an option, so `for S in Catalog { Node<S> }` expands to one bare handled entry per element, in catalog order (which is listing order):
+    Two unnamed selected entries ending in the same selector name are an error (``two handled entries end in the selector `K0` ``).
+* **`for` entries over a catalog.** Writing a hundred `Quoter<..>` entries by hand is not an option, so `for S in Catalog { Node<S> }` expands to one unnamed entry per element, in catalog order (which is listing order):
 
     ```rust
     pub type AllSymbols = catalog![markets::Btc, markets::Eth, markets::Sol];
@@ -447,21 +463,23 @@ When a handler runs (the OR rule over *all* its entries, named and unnamed), eac
     #[derive(ComponentSubscription)]
     #[subscribe(limits: Limits, for S: Symbol + Select<Tick, Out = Quote> in AllSymbols { Quoter<S> })]
     pub struct Oms2 { pending: Vec<(&'static str, i64)> }
-    // the same `impl<S: ..> UpdateHandler<Quoter<S>> for Oms2` as above
+    // the same `impl<S: ..> UpdateHandler<Quoter<S>> for Oms2` as above, and `impl UpdateHandler<Limits> for Oms2 {}`
     ```
 
     A catalog is a nested tuple built by `catalog![A, B, C]`, or one of the combinators, which take catalogs: `Concat<A, B>` (the elements of `A`, then `B`), `Product<A, B>` (all pairs, row by row), `Zip<A, B>` (position-wise pairs; `A` and `B` must have the same shape). Pairs are `M<X, S>`, destructured in the `for`: `for (X: Tag, S: Symbol) in Product<Venues, Coins> { Book<X, S> }`, and `((X, S), Y)` for nesting. The derive cannot see what a catalog contains, so it generates a mapper from the body; there is no filtering. An enum with `#[derive(Demux)]` is a catalog of its markers (`mkt::All`, below). The body must be one node type (`a `for` body is one node type`), and a pattern with more than a pair is rejected (``a `for` pattern destructures a pair: `(X, S)` ``).
+* **Handle components** take part like any other: a handle parent's `View<'a>` is the value `v`, and a `#[handle]` component can have handlers and `for` entries of its own. The component is then updated through the split of the states (`SplitAt`) and `on_update` gets `input` read from the same context as `update` does.
+* **Cost.** The edge's flag is tested only where the plan cannot know statically that the edge fired. Inside a `Switch` arm the fired edge is known, so there is no test; `on_update`'s `input` is gathered at the call, and an empty body leaves nothing behind after inlining. An `impl UpdateHandler<E> for C {}` (default `ACTIVE = true`) makes the plan treat the component as a handler (it is `PG_HRUN` instead of `PG_RUN`, with one item per edge that can fire), even though each call does nothing; set `ACTIVE = false` on entries that never need a call.
 
 ### Handler buffer guidance
 
-The buffer a handler collects into lives on `self`, is allocated once, and is emptied in `update`:
+The buffer a handler collects into lives on `self`, is allocated once, and is emptied in `update`. `on_update` gets `input` as a separate argument, so reading `input.limits` while pushing into `self.pending` borrows nothing of `self`:
 
 * allocate it in `new`: `Vec::with_capacity(n)`;
 * empty it in `update` with `drain(..)` (to consume the items) or `clear()`;
 * **do not** use `std::mem::take(&mut self.pending)` on a `Vec`: it leaves an empty `Vec` with no capacity behind, so the next push allocates again;
 * **do not** return a `Vec` as the component's `Output`: the output is stored and replaced on every run, so each push allocates and frees a `Vec`. Return a count, a small `Copy` summary, or keep the data on `self` and have sinks read it by side effect.
 
-Some tests do use `mem::take` and a `Vec` output for brevity; they are not performance code.
+Some tests do use `mem::take` and a `Vec` output for brevity; they are not performance code. A buffer a handler fills from `on_update` can also be handed to a downstream component without allocation by recycling: `update` swaps in an emptied buffer, e.g. `std::mem::replace(&mut self.pending, std::mem::take(&mut self.spare))`, where `spare` is the `Vec` the downstream component gave back (it keeps its capacity).
 
 ### How the `for` form feels
 
@@ -486,7 +504,7 @@ Checked by building `Oms2` above. It works and the expansion is as cheap as the 
     pub enum Mkt { A(u64), B(u64), C(u64) }
     // `MktWs` has Output = Option<Mkt>.
 
-    #[derive(ComponentSubscription)]
+    #[derive(ComponentSubscription, UpdateHandler)]
     #[subscribe(Some(S(u)): MktWs)]
     pub struct Leg<S: Select<Mkt, Out = u64>>(PhantomData<S>);
     // Component for Leg<S>: update returns *u * 10
@@ -513,7 +531,7 @@ impl<S: Stream> Request<S> for Streams {
     fn add(&mut self) { self.0.push(S::STREAM); }
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 #[listener]
 pub struct Ws { streams: Vec<&'static str> }
@@ -545,44 +563,44 @@ subscribing to ["solusdt@bookTicker", "btcusdt@bookTicker"]
 A by-value component stores its output and its subscribers read `&Output`. A **handle component** stores a small *handle* instead, and its subscribers read a *view* the component computes from its own state and that handle, each time a subscriber runs. The output never has to be built as a value and moved into the pipeline: `update` changes the state in place and returns the handle. Mark the struct with `#[handle]` next to the derive and implement `HandleComponent` instead of `Component`:
 
 ```rust
-use dataflow_flat::{ComponentSubscription, HandleComponent};
+use dataflow_flat::{ComponentSubscription, UpdateHandler, HandleComponent};
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(tick: Tick)]
 #[handle]
 pub struct Ring { arr: [u64; 4], n: usize }
 impl HandleComponent for Ring {
     type Config = ();
     type Handle = usize;                 // the slot of the last write; stored between pushes
-    type Output<'a> = &'a u64;           // what a subscriber's field is, exactly
+    type View<'a> = &'a u64;           // what a subscriber's field is, exactly
     fn new((): (), _: Self::Init<'_>) -> (Self, usize) { (Ring { arr: [0; 4], n: 0 }, 0) }
     fn update(&mut self, i: Self::Input<'_>) -> usize {
         self.n += 1;
         self.arr[self.n % 4] = i.tick.0;
         self.n % 4
     }
-    fn output<'a>(&'a self, h: &'a usize) -> &'a u64 { &self.arr[*h] }
+    fn view<'a>(&'a self, h: &'a usize) -> &'a u64 { &self.arr[*h] }
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(r: Ring, tick: Tick)]
 pub struct Reader;                       // an ordinary component
 impl Component for Reader {
     // ...
     fn update(&mut self, i: Self::Input<'_>) -> u64 {
-        let last: &u64 = i.r;            // `Output<'a>` of `Ring`, with no `&` added
+        let last: &u64 = i.r;            // `View<'a>` of `Ring`, with no `&` added
         *last + i.tick.0
     }
 }
 ```
 
-* **The field is `Output<'a>`.** Owned (`type Output<'a> = u64;`) or a reference or a struct that borrows (`&'a Level`, `Depth<'a>`): the field of a subscriber is that type and nothing is added to it. A by-value parent is still `&Output`. `new` of a subscriber gets the view computed from the parent as it was constructed (its first handle).
+* **The field is `View<'a>`.** Owned (`type View<'a> = u64;`) or a reference or a struct that borrows (`&'a Level`, `Depth<'a>`): the field of a subscriber is that type and nothing is added to it. A by-value parent is still `&Output`. `new` of a subscriber gets the view computed from the parent as it was constructed (its first handle).
 * **`output` is evaluated at each use and not cached**: once per subscriber run and once per subscriber `new`. It should be cheap (an index, a reference into the state, a copy of a few words). Anything expensive belongs in `update`, whose result is the handle.
 * **Persistence.** The stored thing is the handle, and the state stays where it is. A subscriber that runs in a step where the handle component did not run reads the view of the state and handle as they were (`tests/handle.rs`, `a_parent_that_did_not_run_gives_the_same_view`). The execution order, the OR rule, the one-instance-per-type rule and the lifecycle (constructed, run at most once per push, dropped once) are those of any component.
 * **`Handle` needs no `Copy`**, only `'static`: the framework stores it and lends `&Handle` to `output`. `()` and indices are typical.
-* **Config.** `HandleComponent::Config` is given with `Configs::new().with_handle::<Ring>(cfg)`.
+* **Config.** `HandleComponent::Config` is given with `Configs::new().with::<Ring>(cfg)` (`with` takes both kinds of component).
 * **Generic code.** `X: Node<Output = T>` still means "a node whose subscribers read `&T`", so existing generic components compile unchanged (their field is `&T`); a handle component is not a `Node` and is rejected there with ``error[E0277]: `Ring` is not a by-value Node``. The one bound for generic *pipeline* code is still `S: Sinks<R>`.
-* **Not supported yet** (each is a clear compile error, `scripts/check_errors.sh handle_*`): selectors on a handle component (`Some(Trade(t)): Feed`), handled entries and `for` entries whose parent is a handle, `#[handle]` on a `#[listener]` or on a handler. How handlers and components merge is open.
+* **Not supported yet** (each is a clear compile error, `scripts/check_errors.sh handle_*`): selectors on a handle component (`Some(Trade(t)): Feed`), `#[handle]` on a `#[listener]`, and a stored selected value whose source is a handle.
 
 **How it works.** `Node` is split in two. The internal, sealed `Vertex` is what the plan, the storage and the drivers use; its `Stored` type is the output of a by-value component and the handle of a handle component. `Edge::Read<'a>` says what a subscriber's field is for a parent, and the public `Node` is a `Vertex` whose `Read` is pinned (`for<'a> Self: Edge<Read<'a> = &'a Self::Output>`) so that the field of a by-value parent is `&Output` to generic code. A handle component implements `Edge` with `Read<'a> = Output<'a>` and is not a `Node`.
 
@@ -637,8 +655,10 @@ The price of being `unsafe`-free is `generic_const_exprs`, which is confined to 
 | A config for a component outside the graph | `Pipeline::build` returns | `BuildError { unused: [..] }` |
 | Generic code without the `Sinks<R>` bound | `cargo check` | `E0277` ``not valid sinks`` / `Sinks<R>` |
 | `#[handle]` without `impl HandleComponent` | `cargo check` | `E0277` ``the trait bound `X: HandleComponent` is not satisfied`` |
-| A selector, handled entry or `Node<Output = ..>` bound on a handle component | `cargo check` | `E0277` ``is not a by-value Node: its subscribers read a view, not `&Output` `` |
-| `#[handle]` with `#[listener]` or handled entries | `cargo check` | ``cannot be combined with `#[listener]`, handled entries or `for` entries yet`` |
+| A selector or `Node<Output = ..>` bound on a handle component | `cargo check` | `E0277` ``is not a by-value Node: its subscribers read a view, not `&Output` `` |
+| `#[handle]` with `#[listener]` | `cargo check` | ``cannot be combined with `#[listener]` yet`` |
+| An entry without an `UpdateHandler` impl | `cargo check` | `E0277` ``subscribes to `Limits` without an `UpdateHandler<Limits>` impl`` |
+| `#[derive(UpdateHandler)]` and a hand-written impl | `cargo check` | `E0119` conflicting implementations of `UpdateHandler<..>` |
 
 `MAX_EDGES` (131,072 subscription entries), `MAX_DECISIONS` (32,768) and `MAX_TERMS` (8,192 distinct conditions per component) fail the same way; each message names the constant to raise. `scripts/check_errors.sh` runs 56 cases, each a tiny crate that must fail (or, for the `_ok` cases, succeed) with the expected code or message.
 
@@ -747,7 +767,7 @@ Smaller decisions: configs are keyed by component `TypeId`; `type Config: Defaul
 | Capacity | `MAX_COMPONENTS` 32,768, `MAX_EDGES` 131,072, `MAX_DECISIONS` 32,768, `MAX_TERMS` 8,192. At most 15 sinks. Compile-time memory grows with the number of components. The plan's pools (push program 131,072 nodes, child pool 131,072, lists 262,144, key pool 65,536) have private limits with messages such as "the push program is too large: raise dataflow_flat's list pool". What `full` (29,650 components, 30,187 nodes) uses, measured 2026-11-02: 56,503 edges, 8,898 decisions, 23,727 pool words of terms, 60,440 term-list entries, push program 69,341 nodes and 69,334 child entries, lists 90,035, candidate lists 101,033, keys 13,317. Nodes are within 8% of `MAX_COMPONENTS`: `full` is about the largest graph that fits. A plan error is reported once (as `E0080` on `Planned::CHECK`), not once per component. |
 | Graph depth | The plan's `Upstream` proof is as deep as the graph. The depth is about 1.1 solver levels per layer plus about 35 for the rest of the pipeline's proof, so at the default `recursion_limit` of 128 a chain builds up to 88 layers (about 4 s in `cargo check`). At 89 rustc warns about the overflow and still finishes (7 s, 0.83 GB). From 90 it fails, after an expensive cascade of follow-up errors (90: 15 s and 2.1 GB, 95: 20 s and 3 GB; this is the steep part, not the build itself). Deeper chains need `#![recursion_limit = "N"]` in the user's crate: with 4096, 250 layers take 6 s / 0.63 GB and 500 take 11.7 s / 2.1 GB (`cargo check`; dev and release builds of 250 layers 7.8 s). Many parallel chains are fine (16 chains of 50: 8 s). Typical graphs are shallow (about 6 levels) and wide. |
 | Scale | `long_running_const_eval` allow needed above about 1,300 to 2,000 components. Cold `cargo check` of `full` (29,650, `enum`, patched rustc, empty `MALLOC_CONF`): passes, 310 s, 10.1 GB, 4.8M page faults. Run time above hand-written code: typical about 0 (-0.7 ns, within layout noise), 4,079 components 7.2 ns. Release of 12,412 components: 416 s, 8.75 GB, 4 to 7 ns per packet above hand-written code. Release of 30,186 components: 1,537 s, 19.66 GB, about 8.5 ns above hand-written code (4 runs; the hand-written code slows more than the framework at this size, for a reason not yet known). |
-| Handle components | No selectors on them, no handled or `for` entries with a handle parent, no `#[listener]` or handler that is itself `#[handle]`. `output` is not cached (called per subscriber run). Release `.text` is unchanged for apps without them; `cargo check` of a 4,079-component app is about 1.5% slower for the library having them (see the section). A subscriber of a handle component reads `Output<'a>` borrowed from the pipeline, so it can't keep it past `update`. |
+| Handle components | No selectors on them, no `#[listener]` that is itself `#[handle]`. `view` is not cached (called per subscriber run). Release `.text` is unchanged for apps without them; `cargo check` of a 4,079-component app is 11% slower for the library having them (see the section). A subscriber of a handle component reads `View<'a>` borrowed from the pipeline, so it can't keep it past `update`. |
 | Listeners | `Select::REQUEST` is true only for derived selectors; a hand-written selector never reaches `Request`. One component can read several variants of one listener (stored selector values). |
 | Unit selector on a data variant | Compiles and ignores the payload. |
 | Patterns | Enum-variant style with at most one field; anything else is a hand-written `Select`. `for` bodies are one node type. |

@@ -10,7 +10,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::Mutex;
 
-use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline, Root, Sinks};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Pipeline, Root, Sinks};
 
 #[derive(Root)]
 pub struct Poll;
@@ -36,7 +36,7 @@ fn reset() {
 }
 
 /// The shared dependency: counts its own lifecycle. Output 7.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct X;
 impl Component for X {
@@ -61,7 +61,7 @@ type Y = X;
 
 macro_rules! leaf {
     ($name:ident, $n:expr) => {
-        #[derive(ComponentSubscription)]
+        #[derive(ComponentSubscription, UpdateHandler)]
         #[subscribe(p: Poll)]
         pub struct $name;
         impl Component for $name {
@@ -77,7 +77,7 @@ macro_rules! leaf {
     };
 }
 /// Many distinct leaves, for the wide lists: output `N + 100`.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct G<const N: usize>;
 impl<const N: usize> Component for G<N> {
@@ -102,7 +102,7 @@ leaf!(Z5, 6);
 /// fields are all the same reference.
 macro_rules! dup {
     ($name:ident, [$($f:ident: $d:ty),*], same: [$first:ident $(, $rest:ident)+]) => {
-        #[derive(ComponentSubscription)]
+        #[derive(ComponentSubscription, UpdateHandler)]
         #[subscribe($($f: $d),*)]
         pub struct $name;
         impl Component for $name {
@@ -156,7 +156,7 @@ dup!(
 );
 
 /// Reaches X first, so that the duplicating component sees it as already done.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(x: X)]
 pub struct P;
 impl Component for P {
@@ -172,7 +172,7 @@ impl Component for P {
 
 macro_rules! root {
     ($name:ident, [$($f:ident: $d:ty),*], $body:expr) => {
-        #[derive(ComponentSubscription)]
+        #[derive(ComponentSubscription, UpdateHandler)]
         #[subscribe($($f: $d),*)]
         pub struct $name;
         impl Component for $name {

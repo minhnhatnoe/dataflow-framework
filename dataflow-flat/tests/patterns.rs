@@ -6,7 +6,7 @@
 use std::marker::PhantomData;
 use std::sync::Mutex;
 
-use dataflow_flat::{Component, ComponentSubscription, Configs, Demux, Pipeline, Root, Select};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Demux, Pipeline, Root, Select};
 
 static LOG: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 static SERIAL: Mutex<()> = Mutex::new(());
@@ -24,7 +24,7 @@ fn seen() -> Vec<(&'static str, u32)> {
 
 macro_rules! comp {
     ($name:ident, [$($sub:tt)*], $out:ty, |$i:ident| $body:expr) => {
-        #[derive(ComponentSubscription)]
+        #[derive(ComponentSubscription, UpdateHandler)]
         #[subscribe($($sub)*)]
         pub struct $name;
         impl Component for $name {
@@ -132,7 +132,7 @@ pub struct Res {
 
 mod res {
     use super::*;
-    #[derive(ComponentSubscription)]
+    #[derive(ComponentSubscription, UpdateHandler)]
     #[subscribe(r: Res)]
     pub struct Parse;
     impl Component for Parse {
@@ -204,7 +204,7 @@ mod shared {
     comp!(CoinEth, [Some(Eth(t)): Coin], u32, |i| *i.t);
 
     // generic: the selector is a type parameter
-    #[derive(ComponentSubscription)]
+    #[derive(ComponentSubscription, UpdateHandler)]
     #[subscribe(Some(S(t)): Bin)]
     pub struct GenReader<S: Select<BinanceFrame, Out = u32>> {
         _p: PhantomData<S>,

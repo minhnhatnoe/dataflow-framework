@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Mutex;
 
-use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline, Root};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Pipeline, Root};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Ev {
@@ -41,7 +41,7 @@ impl Drop for Life {
 /// base, and how many times it has run. `new` logs and returns `(base, 0)`.
 macro_rules! comp {
     ($log:ident, $name:ident, $base:expr, [$($f:ident: $d:ty),*]) => {
-        #[derive(ComponentSubscription)]
+        #[derive(ComponentSubscription, UpdateHandler)]
         #[subscribe($($f: $d),*)]
         pub struct $name {
             _life: Life,
@@ -139,7 +139,7 @@ mod values {
 
     pub static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-    #[derive(ComponentSubscription)]
+    #[derive(ComponentSubscription, UpdateHandler)]
     #[subscribe(t: Tick)]
     pub struct Counter {
         n: u64,
@@ -158,7 +158,7 @@ mod values {
         }
     }
 
-    #[derive(ComponentSubscription)]
+    #[derive(ComponentSubscription, UpdateHandler)]
     #[subscribe(c: Counter, t: Tick)]
     pub struct Report;
     impl Component for Report {
@@ -211,7 +211,7 @@ mod stored {
         }
     }
 
-    #[derive(ComponentSubscription)]
+    #[derive(ComponentSubscription, UpdateHandler)]
     #[subscribe(t: Tick)]
     pub struct Producer;
     impl Component for Producer {
@@ -225,7 +225,7 @@ mod stored {
         }
     }
 
-    #[derive(ComponentSubscription)]
+    #[derive(ComponentSubscription, UpdateHandler)]
     #[subscribe(p: Producer)]
     pub struct Consumer;
     impl Component for Consumer {
@@ -292,7 +292,7 @@ mod boom {
     comp!(LOG, First, 1, [t: Tick]);
     comp!(LOG, Second, 1, [f: First]);
 
-    #[derive(ComponentSubscription)]
+    #[derive(ComponentSubscription, UpdateHandler)]
     #[subscribe(s: Second)]
     pub struct Third(#[allow(dead_code)] Option<Life>);
     impl Component for Third {
@@ -356,7 +356,7 @@ fn panics_never_double_drop() {
 mod aligned {
     use super::*;
 
-    #[derive(ComponentSubscription)]
+    #[derive(ComponentSubscription, UpdateHandler)]
     #[subscribe(t: Tick)]
     #[repr(align(64))]
     pub struct Wide64 {
@@ -376,7 +376,7 @@ mod aligned {
         }
     }
 
-    #[derive(ComponentSubscription)]
+    #[derive(ComponentSubscription, UpdateHandler)]
     #[subscribe(w: Wide64, t: Tick)]
     #[repr(align(256))]
     pub struct Wide256(PhantomData<u8>);

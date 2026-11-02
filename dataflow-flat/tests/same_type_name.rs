@@ -7,14 +7,14 @@ use std::any::{type_name, TypeId};
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Mutex;
 
-use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline, Root};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Pipeline, Root};
 
 #[derive(Root)]
 pub struct Poll;
 
 static SEEN: Mutex<Vec<(u32, u32)>> = Mutex::new(Vec::new());
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(a: foo_a::Foo<Poll>, b: foo_b::Foo<Poll>)]
 pub struct App;
 impl Component for App {
@@ -60,7 +60,7 @@ fn same_type_name_different_components() {
 fn config_for_a_component_outside_the_graph_is_reported_by_identity() {
     // Only `foo_a::Foo` is in this graph; a config for `foo_b::Foo` has the
     // same type name but is not in it.
-    #[derive(ComponentSubscription)]
+    #[derive(ComponentSubscription, UpdateHandler)]
     #[subscribe(a: foo_a::Foo<Poll>)]
     pub struct OnlyA;
     impl Component for OnlyA {

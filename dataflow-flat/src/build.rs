@@ -38,13 +38,6 @@ impl Configs {
         self.map.insert(TypeId::of::<C>(), entry);
         self
     }
-
-    /// The config of a handle component ([`HandleComponent`](crate::HandleComponent)).
-    pub fn with_handle<C: crate::component::HandleComponent>(mut self, config: C::Config) -> Self {
-        let entry = ConfigEntry { config: Box::new(config), name: type_name::<C>() };
-        self.map.insert(TypeId::of::<C>(), entry);
-        self
-    }
 }
 
 /// Construction state: hands each constructor its config (supplied, or the

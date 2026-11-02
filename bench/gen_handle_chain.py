@@ -53,7 +53,7 @@ open(f"{out}/rust-toolchain.toml", "w").write('[toolchain]\nchannel = "nightly-2
 L = []
 L.append(f"""#![allow(long_running_const_eval)]
 #![recursion_limit = "4096"]
-use dataflow_flat::{{Component, ComponentSubscription, Configs, HandleComponent, Pipeline, Root}};
+use dataflow_flat::{{Component, ComponentSubscription, UpdateHandler, Configs, HandleComponent, Pipeline, Root}};
 use std::sync::atomic::{{AtomicU64, Ordering::Relaxed}};
 use std::time::Instant;
 
@@ -98,7 +98,7 @@ fn step_in(b: &mut Out, p: &Out, c: u64) {{
 for i in range(N):
     sub = "t: Tick" if i == 0 else f"p: V{i-1}"
     body = "first(i.t.0, 0)" if i == 0 else f"step(i.p, {i})"
-    L.append(f"""#[derive(ComponentSubscription)]
+    L.append(f"""#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe({sub})]
 pub struct V{i};
 impl Component for V{i} {{
@@ -108,7 +108,7 @@ impl Component for V{i} {{
     #[inline(always)]
     fn update(&mut self, i: Self::Input<'_>) -> Out {{ {body} }}
 }}""")
-L.append(f"""#[derive(ComponentSubscription)]
+L.append(f"""#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: V{N-1})]
 pub struct SinkV;
 impl Component for SinkV {{
@@ -122,21 +122,21 @@ impl Component for SinkV {{
 for i in range(N):
     sub = "t: Tick" if i == 0 else f"p: H{i-1}"
     body = "first_in(&mut self.buf, i.t.0, 0)" if i == 0 else f"step_in(&mut self.buf, i.p, {i})"
-    L.append(f"""#[derive(ComponentSubscription)]
+    L.append(f"""#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe({sub})]
 #[handle]
 pub struct H{i} {{ buf: Out }}
 impl HandleComponent for H{i} {{
     type Config = ();
     type Handle = ();
-    type Output<'a> = &'a Out;
+    type View<'a> = &'a Out;
     fn new((): (), _: Self::Init<'_>) -> (Self, ()) {{ (H{i} {{ buf: [0; K] }}, ()) }}
     #[inline(always)]
     fn update(&mut self, i: Self::Input<'_>) {{ {body} }}
     #[inline(always)]
-    fn output<'a>(&'a self, (): &'a ()) -> &'a Out {{ &self.buf }}
+    fn view<'a>(&'a self, (): &'a ()) -> &'a Out {{ &self.buf }}
 }}""")
-L.append(f"""#[derive(ComponentSubscription)]
+L.append(f"""#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: H{N-1})]
 pub struct SinkH;
 impl Component for SinkH {{

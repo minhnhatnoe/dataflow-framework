@@ -92,7 +92,7 @@ pub enum Frame {{
 pub trait Sym: Select<Frame, Out = u64> {{}}
 impl<S: Select<Frame, Out = u64>> Sym for S {{}}
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(m: Msg)]
 pub struct Feed;
 impl Component for Feed {{
@@ -106,7 +106,7 @@ impl Component for Feed {{
 }}
 
 /// (sequence, value)
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(S(u)): Feed)]
 pub struct Quoter<S: Sym>(std::marker::PhantomData<S>);
 impl<S: Sym> Component for Quoter<S> {{
@@ -134,9 +134,9 @@ pub mod h {{
     }}
     impl<S: Sym> UpdateHandler<Quoter<S>> for Oms {{
         #[inline(always)]
-        fn on_update(&mut self, v: &(u64, u64)) {{ self.acc.0 += v.1; self.acc.1 += 1; }}
+        fn on_update(&mut self, _: Self::Input<'_>, v: &(u64, u64)) {{ self.acc.0 += v.1; self.acc.1 += 1; }}
     }}
-    #[derive(ComponentSubscription)]
+    #[derive(ComponentSubscription, UpdateHandler)]
     #[subscribe(o: Oms)]
     pub struct Probe {{ d: u64 }}
     impl Component for Probe {{
@@ -154,7 +154,7 @@ pub mod h {{
 #[cfg(feature = "component")]
 pub mod c {{
     use super::*;
-    #[derive(ComponentSubscription)]
+    #[derive(ComponentSubscription, UpdateHandler)]
     #[subscribe({fields})]
     pub struct Sink;
     impl Component for Sink {{
@@ -167,7 +167,7 @@ pub mod c {{
             (best.1, 1)
         }}
     }}
-    #[derive(ComponentSubscription)]
+    #[derive(ComponentSubscription, UpdateHandler)]
     #[subscribe(o: Sink)]
     pub struct ProbeC {{ d: u64 }}
     impl Component for ProbeC {{

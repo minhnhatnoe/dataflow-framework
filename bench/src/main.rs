@@ -3,12 +3,12 @@ use std::hint::black_box;
 use std::time::Instant;
 
 mod flat {
-use dataflow_flat::{Component, ComponentSubscription, Root};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Root};
 use std::sync::atomic::{AtomicU64, Ordering};
 #[derive(Root)]
 pub struct Poll;
 pub static OUT: AtomicU64 = AtomicU64::new(0);
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_0(pub u64);
 impl Component for C0_0 {
@@ -18,7 +18,7 @@ impl Component for C0_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_1(pub u64);
 impl Component for C0_1 {
@@ -28,7 +28,7 @@ impl Component for C0_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(2); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_2(pub u64);
 impl Component for C0_2 {
@@ -38,7 +38,7 @@ impl Component for C0_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(3); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_3(pub u64);
 impl Component for C0_3 {
@@ -48,7 +48,7 @@ impl Component for C0_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(4); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_4(pub u64);
 impl Component for C0_4 {
@@ -58,7 +58,7 @@ impl Component for C0_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(5); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_5(pub u64);
 impl Component for C0_5 {
@@ -68,7 +68,7 @@ impl Component for C0_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(6); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_6(pub u64);
 impl Component for C0_6 {
@@ -78,7 +78,7 @@ impl Component for C0_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(7); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_7(pub u64);
 impl Component for C0_7 {
@@ -88,7 +88,7 @@ impl Component for C0_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(8); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_8(pub u64);
 impl Component for C0_8 {
@@ -98,7 +98,7 @@ impl Component for C0_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(9); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_9(pub u64);
 impl Component for C0_9 {
@@ -108,7 +108,7 @@ impl Component for C0_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(10); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_10(pub u64);
 impl Component for C0_10 {
@@ -118,7 +118,7 @@ impl Component for C0_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(11); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_11(pub u64);
 impl Component for C0_11 {
@@ -128,7 +128,7 @@ impl Component for C0_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(12); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_12(pub u64);
 impl Component for C0_12 {
@@ -138,7 +138,7 @@ impl Component for C0_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(13); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_13(pub u64);
 impl Component for C0_13 {
@@ -148,7 +148,7 @@ impl Component for C0_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(14); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_14(pub u64);
 impl Component for C0_14 {
@@ -158,7 +158,7 @@ impl Component for C0_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(15); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_15(pub u64);
 impl Component for C0_15 {
@@ -168,7 +168,7 @@ impl Component for C0_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(16); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_16(pub u64);
 impl Component for C0_16 {
@@ -178,7 +178,7 @@ impl Component for C0_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(17); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_17(pub u64);
 impl Component for C0_17 {
@@ -188,7 +188,7 @@ impl Component for C0_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(18); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_18(pub u64);
 impl Component for C0_18 {
@@ -198,7 +198,7 @@ impl Component for C0_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(19); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct C0_19(pub u64);
 impl Component for C0_19 {
@@ -208,7 +208,7 @@ impl Component for C0_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(20); self.0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_4, s1: C0_18, s2: C0_2, s3: C0_8)]
 pub struct C1_0(pub u64);
 impl Component for C1_0 {
@@ -218,7 +218,7 @@ impl Component for C1_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(31) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_3, s1: C0_15, s2: C0_14, s3: C0_18)]
 pub struct C1_1(pub u64);
 impl Component for C1_1 {
@@ -228,7 +228,7 @@ impl Component for C1_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(32) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_12, s1: C0_6, s2: C0_3, s3: C0_15)]
 pub struct C1_2(pub u64);
 impl Component for C1_2 {
@@ -238,7 +238,7 @@ impl Component for C1_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(33) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_0, s1: C0_12, s2: C0_13, s3: C0_19)]
 pub struct C1_3(pub u64);
 impl Component for C1_3 {
@@ -248,7 +248,7 @@ impl Component for C1_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(34) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_14, s1: C0_8, s2: C0_7, s3: C0_3)]
 pub struct C1_4(pub u64);
 impl Component for C1_4 {
@@ -258,7 +258,7 @@ impl Component for C1_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(35) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_10, s1: C0_0, s2: C0_18, s3: C0_17)]
 pub struct C1_5(pub u64);
 impl Component for C1_5 {
@@ -268,7 +268,7 @@ impl Component for C1_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(36) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_17, s1: C0_0, s2: C0_12, s3: C0_6)]
 pub struct C1_6(pub u64);
 impl Component for C1_6 {
@@ -278,7 +278,7 @@ impl Component for C1_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(37) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_13, s1: C0_0, s2: C0_16, s3: C0_7)]
 pub struct C1_7(pub u64);
 impl Component for C1_7 {
@@ -288,7 +288,7 @@ impl Component for C1_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(38) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_14, s1: C0_15, s2: C0_17, s3: C0_7)]
 pub struct C1_8(pub u64);
 impl Component for C1_8 {
@@ -298,7 +298,7 @@ impl Component for C1_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(39) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_11, s1: C0_7, s2: C0_18, s3: C0_14)]
 pub struct C1_9(pub u64);
 impl Component for C1_9 {
@@ -308,7 +308,7 @@ impl Component for C1_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(40) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_9, s1: C0_0, s2: C0_13, s3: C0_3)]
 pub struct C1_10(pub u64);
 impl Component for C1_10 {
@@ -318,7 +318,7 @@ impl Component for C1_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(41) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_5, s1: C0_9, s2: C0_3, s3: C0_10)]
 pub struct C1_11(pub u64);
 impl Component for C1_11 {
@@ -328,7 +328,7 @@ impl Component for C1_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(42) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_16, s1: C0_13, s2: C0_19, s3: C0_6)]
 pub struct C1_12(pub u64);
 impl Component for C1_12 {
@@ -338,7 +338,7 @@ impl Component for C1_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(43) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_9, s1: C0_19, s2: C0_15, s3: C0_16)]
 pub struct C1_13(pub u64);
 impl Component for C1_13 {
@@ -348,7 +348,7 @@ impl Component for C1_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(44) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_12, s1: C0_18, s2: C0_1, s3: C0_15)]
 pub struct C1_14(pub u64);
 impl Component for C1_14 {
@@ -358,7 +358,7 @@ impl Component for C1_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(45) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_7, s1: C0_12, s2: C0_13, s3: C0_5)]
 pub struct C1_15(pub u64);
 impl Component for C1_15 {
@@ -368,7 +368,7 @@ impl Component for C1_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(46) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_11, s1: C0_17, s2: C0_19, s3: C0_2)]
 pub struct C1_16(pub u64);
 impl Component for C1_16 {
@@ -378,7 +378,7 @@ impl Component for C1_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(47) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_14, s1: C0_16, s2: C0_3, s3: C0_5)]
 pub struct C1_17(pub u64);
 impl Component for C1_17 {
@@ -388,7 +388,7 @@ impl Component for C1_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(48) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_16, s1: C0_12, s2: C0_11, s3: C0_15)]
 pub struct C1_18(pub u64);
 impl Component for C1_18 {
@@ -398,7 +398,7 @@ impl Component for C1_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(49) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C0_0, s1: C0_15, s2: C0_1, s3: C0_9)]
 pub struct C1_19(pub u64);
 impl Component for C1_19 {
@@ -408,7 +408,7 @@ impl Component for C1_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(50) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_19, s1: C1_18, s2: C1_12, s3: C1_5)]
 pub struct C2_0(pub u64);
 impl Component for C2_0 {
@@ -418,7 +418,7 @@ impl Component for C2_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(62) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_5, s1: C1_16, s2: C1_7, s3: C1_0)]
 pub struct C2_1(pub u64);
 impl Component for C2_1 {
@@ -428,7 +428,7 @@ impl Component for C2_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(63) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_6, s1: C1_17, s2: C1_18, s3: C1_7)]
 pub struct C2_2(pub u64);
 impl Component for C2_2 {
@@ -438,7 +438,7 @@ impl Component for C2_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(64) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_12, s1: C1_16, s2: C1_11, s3: C1_17)]
 pub struct C2_3(pub u64);
 impl Component for C2_3 {
@@ -448,7 +448,7 @@ impl Component for C2_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(65) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_14, s1: C1_8, s2: C1_17, s3: C1_0)]
 pub struct C2_4(pub u64);
 impl Component for C2_4 {
@@ -458,7 +458,7 @@ impl Component for C2_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(66) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_12, s1: C1_16, s2: C1_4, s3: C1_18)]
 pub struct C2_5(pub u64);
 impl Component for C2_5 {
@@ -468,7 +468,7 @@ impl Component for C2_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(67) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_17, s1: C1_6, s2: C1_13, s3: C1_1)]
 pub struct C2_6(pub u64);
 impl Component for C2_6 {
@@ -478,7 +478,7 @@ impl Component for C2_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(68) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_15, s1: C1_11, s2: C1_17, s3: C1_6)]
 pub struct C2_7(pub u64);
 impl Component for C2_7 {
@@ -488,7 +488,7 @@ impl Component for C2_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(69) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_16, s1: C1_13, s2: C1_15, s3: C1_11)]
 pub struct C2_8(pub u64);
 impl Component for C2_8 {
@@ -498,7 +498,7 @@ impl Component for C2_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(70) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_13, s1: C1_11, s2: C1_0, s3: C1_10)]
 pub struct C2_9(pub u64);
 impl Component for C2_9 {
@@ -508,7 +508,7 @@ impl Component for C2_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(71) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_14, s1: C1_0, s2: C1_7, s3: C1_5)]
 pub struct C2_10(pub u64);
 impl Component for C2_10 {
@@ -518,7 +518,7 @@ impl Component for C2_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(72) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_17, s1: C1_18, s2: C1_5, s3: C1_2)]
 pub struct C2_11(pub u64);
 impl Component for C2_11 {
@@ -528,7 +528,7 @@ impl Component for C2_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(73) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_17, s1: C1_8, s2: C1_1, s3: C1_2)]
 pub struct C2_12(pub u64);
 impl Component for C2_12 {
@@ -538,7 +538,7 @@ impl Component for C2_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(74) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_2, s1: C1_0, s2: C1_14, s3: C1_18)]
 pub struct C2_13(pub u64);
 impl Component for C2_13 {
@@ -548,7 +548,7 @@ impl Component for C2_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(75) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_8, s1: C1_7, s2: C1_19, s3: C1_3)]
 pub struct C2_14(pub u64);
 impl Component for C2_14 {
@@ -558,7 +558,7 @@ impl Component for C2_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(76) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_19, s1: C1_5, s2: C1_11, s3: C1_9)]
 pub struct C2_15(pub u64);
 impl Component for C2_15 {
@@ -568,7 +568,7 @@ impl Component for C2_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(77) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_2, s1: C1_5, s2: C1_18, s3: C1_8)]
 pub struct C2_16(pub u64);
 impl Component for C2_16 {
@@ -578,7 +578,7 @@ impl Component for C2_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(78) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_16, s1: C1_5, s2: C1_8, s3: C1_9)]
 pub struct C2_17(pub u64);
 impl Component for C2_17 {
@@ -588,7 +588,7 @@ impl Component for C2_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(79) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_14, s1: C1_10, s2: C1_15, s3: C1_17)]
 pub struct C2_18(pub u64);
 impl Component for C2_18 {
@@ -598,7 +598,7 @@ impl Component for C2_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(80) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C1_3, s1: C1_0, s2: C1_9, s3: C1_12)]
 pub struct C2_19(pub u64);
 impl Component for C2_19 {
@@ -608,7 +608,7 @@ impl Component for C2_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(81) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_10, s1: C2_13, s2: C2_6, s3: C2_8)]
 pub struct C3_0(pub u64);
 impl Component for C3_0 {
@@ -618,7 +618,7 @@ impl Component for C3_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(93) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_3, s1: C2_8, s2: C2_16, s3: C2_6)]
 pub struct C3_1(pub u64);
 impl Component for C3_1 {
@@ -628,7 +628,7 @@ impl Component for C3_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(94) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_19, s1: C2_13, s2: C2_0, s3: C2_7)]
 pub struct C3_2(pub u64);
 impl Component for C3_2 {
@@ -638,7 +638,7 @@ impl Component for C3_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(95) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_0, s1: C2_12, s2: C2_4, s3: C2_1)]
 pub struct C3_3(pub u64);
 impl Component for C3_3 {
@@ -648,7 +648,7 @@ impl Component for C3_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(96) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_5, s1: C2_14, s2: C2_16, s3: C2_13)]
 pub struct C3_4(pub u64);
 impl Component for C3_4 {
@@ -658,7 +658,7 @@ impl Component for C3_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(97) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_17, s1: C2_7, s2: C2_16, s3: C2_14)]
 pub struct C3_5(pub u64);
 impl Component for C3_5 {
@@ -668,7 +668,7 @@ impl Component for C3_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(98) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_7, s1: C2_16, s2: C2_0, s3: C2_12)]
 pub struct C3_6(pub u64);
 impl Component for C3_6 {
@@ -678,7 +678,7 @@ impl Component for C3_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(99) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_18, s1: C2_10, s2: C2_13, s3: C2_1)]
 pub struct C3_7(pub u64);
 impl Component for C3_7 {
@@ -688,7 +688,7 @@ impl Component for C3_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(100) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_9, s1: C2_4, s2: C2_6, s3: C2_1)]
 pub struct C3_8(pub u64);
 impl Component for C3_8 {
@@ -698,7 +698,7 @@ impl Component for C3_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(101) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_9, s1: C2_2, s2: C2_18, s3: C2_19)]
 pub struct C3_9(pub u64);
 impl Component for C3_9 {
@@ -708,7 +708,7 @@ impl Component for C3_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(102) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_9, s1: C2_5, s2: C2_13, s3: C2_8)]
 pub struct C3_10(pub u64);
 impl Component for C3_10 {
@@ -718,7 +718,7 @@ impl Component for C3_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(103) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_4, s1: C2_0, s2: C2_17, s3: C2_1)]
 pub struct C3_11(pub u64);
 impl Component for C3_11 {
@@ -728,7 +728,7 @@ impl Component for C3_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(104) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_18, s1: C2_6, s2: C2_14, s3: C2_5)]
 pub struct C3_12(pub u64);
 impl Component for C3_12 {
@@ -738,7 +738,7 @@ impl Component for C3_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(105) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_19, s1: C2_16, s2: C2_1, s3: C2_12)]
 pub struct C3_13(pub u64);
 impl Component for C3_13 {
@@ -748,7 +748,7 @@ impl Component for C3_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(106) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_6, s1: C2_11, s2: C2_3, s3: C2_19)]
 pub struct C3_14(pub u64);
 impl Component for C3_14 {
@@ -758,7 +758,7 @@ impl Component for C3_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(107) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_18, s1: C2_13, s2: C2_6, s3: C2_15)]
 pub struct C3_15(pub u64);
 impl Component for C3_15 {
@@ -768,7 +768,7 @@ impl Component for C3_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(108) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_3, s1: C2_12, s2: C2_9, s3: C2_16)]
 pub struct C3_16(pub u64);
 impl Component for C3_16 {
@@ -778,7 +778,7 @@ impl Component for C3_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(109) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_15, s1: C2_0, s2: C2_10, s3: C2_12)]
 pub struct C3_17(pub u64);
 impl Component for C3_17 {
@@ -788,7 +788,7 @@ impl Component for C3_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(110) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_9, s1: C2_0, s2: C2_5, s3: C2_6)]
 pub struct C3_18(pub u64);
 impl Component for C3_18 {
@@ -798,7 +798,7 @@ impl Component for C3_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(111) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C2_10, s1: C2_18, s2: C2_4, s3: C2_19)]
 pub struct C3_19(pub u64);
 impl Component for C3_19 {
@@ -808,7 +808,7 @@ impl Component for C3_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(112) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_13, s1: C3_6, s2: C3_8, s3: C3_3)]
 pub struct C4_0(pub u64);
 impl Component for C4_0 {
@@ -818,7 +818,7 @@ impl Component for C4_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(124) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_12, s1: C3_17, s2: C3_11, s3: C3_15)]
 pub struct C4_1(pub u64);
 impl Component for C4_1 {
@@ -828,7 +828,7 @@ impl Component for C4_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(125) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_17, s1: C3_7, s2: C3_2, s3: C3_1)]
 pub struct C4_2(pub u64);
 impl Component for C4_2 {
@@ -838,7 +838,7 @@ impl Component for C4_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(126) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_2, s1: C3_4, s2: C3_5, s3: C3_17)]
 pub struct C4_3(pub u64);
 impl Component for C4_3 {
@@ -848,7 +848,7 @@ impl Component for C4_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(127) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_17, s1: C3_6, s2: C3_8, s3: C3_10)]
 pub struct C4_4(pub u64);
 impl Component for C4_4 {
@@ -858,7 +858,7 @@ impl Component for C4_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(128) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_19, s1: C3_16, s2: C3_8, s3: C3_11)]
 pub struct C4_5(pub u64);
 impl Component for C4_5 {
@@ -868,7 +868,7 @@ impl Component for C4_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(129) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_10, s1: C3_19, s2: C3_3, s3: C3_9)]
 pub struct C4_6(pub u64);
 impl Component for C4_6 {
@@ -878,7 +878,7 @@ impl Component for C4_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(130) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_7, s1: C3_15, s2: C3_4, s3: C3_3)]
 pub struct C4_7(pub u64);
 impl Component for C4_7 {
@@ -888,7 +888,7 @@ impl Component for C4_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(131) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_10, s1: C3_1, s2: C3_13, s3: C3_2)]
 pub struct C4_8(pub u64);
 impl Component for C4_8 {
@@ -898,7 +898,7 @@ impl Component for C4_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(132) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_12, s1: C3_4, s2: C3_18, s3: C3_10)]
 pub struct C4_9(pub u64);
 impl Component for C4_9 {
@@ -908,7 +908,7 @@ impl Component for C4_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(133) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_3, s1: C3_18, s2: C3_12, s3: C3_2)]
 pub struct C4_10(pub u64);
 impl Component for C4_10 {
@@ -918,7 +918,7 @@ impl Component for C4_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(134) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_18, s1: C3_17, s2: C3_7, s3: C3_2)]
 pub struct C4_11(pub u64);
 impl Component for C4_11 {
@@ -928,7 +928,7 @@ impl Component for C4_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(135) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_8, s1: C3_11, s2: C3_9, s3: C3_3)]
 pub struct C4_12(pub u64);
 impl Component for C4_12 {
@@ -938,7 +938,7 @@ impl Component for C4_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(136) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_14, s1: C3_8, s2: C3_3, s3: C3_1)]
 pub struct C4_13(pub u64);
 impl Component for C4_13 {
@@ -948,7 +948,7 @@ impl Component for C4_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(137) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_9, s1: C3_0, s2: C3_18, s3: C3_2)]
 pub struct C4_14(pub u64);
 impl Component for C4_14 {
@@ -958,7 +958,7 @@ impl Component for C4_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(138) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_13, s1: C3_3, s2: C3_1, s3: C3_6)]
 pub struct C4_15(pub u64);
 impl Component for C4_15 {
@@ -968,7 +968,7 @@ impl Component for C4_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(139) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_7, s1: C3_18, s2: C3_13, s3: C3_5)]
 pub struct C4_16(pub u64);
 impl Component for C4_16 {
@@ -978,7 +978,7 @@ impl Component for C4_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(140) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_3, s1: C3_14, s2: C3_5, s3: C3_7)]
 pub struct C4_17(pub u64);
 impl Component for C4_17 {
@@ -988,7 +988,7 @@ impl Component for C4_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(141) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_5, s1: C3_3, s2: C3_13, s3: C3_12)]
 pub struct C4_18(pub u64);
 impl Component for C4_18 {
@@ -998,7 +998,7 @@ impl Component for C4_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(142) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C3_17, s1: C3_9, s2: C3_19, s3: C3_8)]
 pub struct C4_19(pub u64);
 impl Component for C4_19 {
@@ -1008,7 +1008,7 @@ impl Component for C4_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(143) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_15, s1: C4_10, s2: C4_3, s3: C4_6)]
 pub struct C5_0(pub u64);
 impl Component for C5_0 {
@@ -1018,7 +1018,7 @@ impl Component for C5_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(155) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_10, s1: C4_1, s2: C4_0, s3: C4_17)]
 pub struct C5_1(pub u64);
 impl Component for C5_1 {
@@ -1028,7 +1028,7 @@ impl Component for C5_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(156) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_9, s1: C4_10, s2: C4_14, s3: C4_12)]
 pub struct C5_2(pub u64);
 impl Component for C5_2 {
@@ -1038,7 +1038,7 @@ impl Component for C5_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(157) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_10, s1: C4_12, s2: C4_2, s3: C4_17)]
 pub struct C5_3(pub u64);
 impl Component for C5_3 {
@@ -1048,7 +1048,7 @@ impl Component for C5_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(158) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_10, s1: C4_14, s2: C4_3, s3: C4_8)]
 pub struct C5_4(pub u64);
 impl Component for C5_4 {
@@ -1058,7 +1058,7 @@ impl Component for C5_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(159) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_6, s1: C4_17, s2: C4_15, s3: C4_11)]
 pub struct C5_5(pub u64);
 impl Component for C5_5 {
@@ -1068,7 +1068,7 @@ impl Component for C5_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(160) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_8, s1: C4_5, s2: C4_17, s3: C4_6)]
 pub struct C5_6(pub u64);
 impl Component for C5_6 {
@@ -1078,7 +1078,7 @@ impl Component for C5_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(161) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_9, s1: C4_6, s2: C4_7, s3: C4_11)]
 pub struct C5_7(pub u64);
 impl Component for C5_7 {
@@ -1088,7 +1088,7 @@ impl Component for C5_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(162) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_2, s1: C4_8, s2: C4_19, s3: C4_14)]
 pub struct C5_8(pub u64);
 impl Component for C5_8 {
@@ -1098,7 +1098,7 @@ impl Component for C5_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(163) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_2, s1: C4_18, s2: C4_10, s3: C4_7)]
 pub struct C5_9(pub u64);
 impl Component for C5_9 {
@@ -1108,7 +1108,7 @@ impl Component for C5_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(164) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_12, s1: C4_9, s2: C4_1, s3: C4_10)]
 pub struct C5_10(pub u64);
 impl Component for C5_10 {
@@ -1118,7 +1118,7 @@ impl Component for C5_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(165) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_5, s1: C4_10, s2: C4_9, s3: C4_7)]
 pub struct C5_11(pub u64);
 impl Component for C5_11 {
@@ -1128,7 +1128,7 @@ impl Component for C5_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(166) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_10, s1: C4_3, s2: C4_17, s3: C4_2)]
 pub struct C5_12(pub u64);
 impl Component for C5_12 {
@@ -1138,7 +1138,7 @@ impl Component for C5_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(167) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_7, s1: C4_19, s2: C4_0, s3: C4_18)]
 pub struct C5_13(pub u64);
 impl Component for C5_13 {
@@ -1148,7 +1148,7 @@ impl Component for C5_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(168) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_12, s1: C4_2, s2: C4_8, s3: C4_18)]
 pub struct C5_14(pub u64);
 impl Component for C5_14 {
@@ -1158,7 +1158,7 @@ impl Component for C5_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(169) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_2, s1: C4_0, s2: C4_18, s3: C4_9)]
 pub struct C5_15(pub u64);
 impl Component for C5_15 {
@@ -1168,7 +1168,7 @@ impl Component for C5_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(170) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_11, s1: C4_15, s2: C4_18, s3: C4_4)]
 pub struct C5_16(pub u64);
 impl Component for C5_16 {
@@ -1178,7 +1178,7 @@ impl Component for C5_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(171) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_3, s1: C4_16, s2: C4_10, s3: C4_2)]
 pub struct C5_17(pub u64);
 impl Component for C5_17 {
@@ -1188,7 +1188,7 @@ impl Component for C5_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(172) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_16, s1: C4_5, s2: C4_18, s3: C4_4)]
 pub struct C5_18(pub u64);
 impl Component for C5_18 {
@@ -1198,7 +1198,7 @@ impl Component for C5_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(173) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C4_4, s1: C4_10, s2: C4_9, s3: C4_3)]
 pub struct C5_19(pub u64);
 impl Component for C5_19 {
@@ -1208,7 +1208,7 @@ impl Component for C5_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(174) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_16, s1: C5_9, s2: C5_4, s3: C5_6)]
 pub struct C6_0(pub u64);
 impl Component for C6_0 {
@@ -1218,7 +1218,7 @@ impl Component for C6_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(186) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_4, s1: C5_17, s2: C5_1, s3: C5_10)]
 pub struct C6_1(pub u64);
 impl Component for C6_1 {
@@ -1228,7 +1228,7 @@ impl Component for C6_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(187) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_19, s1: C5_17, s2: C5_6, s3: C5_5)]
 pub struct C6_2(pub u64);
 impl Component for C6_2 {
@@ -1238,7 +1238,7 @@ impl Component for C6_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(188) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_9, s1: C5_13, s2: C5_17, s3: C5_5)]
 pub struct C6_3(pub u64);
 impl Component for C6_3 {
@@ -1248,7 +1248,7 @@ impl Component for C6_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(189) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_1, s1: C5_7, s2: C5_8, s3: C5_2)]
 pub struct C6_4(pub u64);
 impl Component for C6_4 {
@@ -1258,7 +1258,7 @@ impl Component for C6_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(190) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_14, s1: C5_13, s2: C5_17, s3: C5_8)]
 pub struct C6_5(pub u64);
 impl Component for C6_5 {
@@ -1268,7 +1268,7 @@ impl Component for C6_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(191) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_17, s1: C5_14, s2: C5_19, s3: C5_18)]
 pub struct C6_6(pub u64);
 impl Component for C6_6 {
@@ -1278,7 +1278,7 @@ impl Component for C6_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(192) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_0, s1: C5_12, s2: C5_10, s3: C5_5)]
 pub struct C6_7(pub u64);
 impl Component for C6_7 {
@@ -1288,7 +1288,7 @@ impl Component for C6_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(193) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_8, s1: C5_15, s2: C5_0, s3: C5_13)]
 pub struct C6_8(pub u64);
 impl Component for C6_8 {
@@ -1298,7 +1298,7 @@ impl Component for C6_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(194) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_18, s1: C5_0, s2: C5_1, s3: C5_11)]
 pub struct C6_9(pub u64);
 impl Component for C6_9 {
@@ -1308,7 +1308,7 @@ impl Component for C6_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(195) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_18, s1: C5_4, s2: C5_19, s3: C5_17)]
 pub struct C6_10(pub u64);
 impl Component for C6_10 {
@@ -1318,7 +1318,7 @@ impl Component for C6_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(196) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_8, s1: C5_19, s2: C5_12, s3: C5_17)]
 pub struct C6_11(pub u64);
 impl Component for C6_11 {
@@ -1328,7 +1328,7 @@ impl Component for C6_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(197) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_5, s1: C5_2, s2: C5_7, s3: C5_15)]
 pub struct C6_12(pub u64);
 impl Component for C6_12 {
@@ -1338,7 +1338,7 @@ impl Component for C6_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(198) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_0, s1: C5_5, s2: C5_16, s3: C5_10)]
 pub struct C6_13(pub u64);
 impl Component for C6_13 {
@@ -1348,7 +1348,7 @@ impl Component for C6_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(199) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_16, s1: C5_14, s2: C5_7, s3: C5_17)]
 pub struct C6_14(pub u64);
 impl Component for C6_14 {
@@ -1358,7 +1358,7 @@ impl Component for C6_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(200) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_10, s1: C5_15, s2: C5_18, s3: C5_7)]
 pub struct C6_15(pub u64);
 impl Component for C6_15 {
@@ -1368,7 +1368,7 @@ impl Component for C6_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(201) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_13, s1: C5_10, s2: C5_17, s3: C5_8)]
 pub struct C6_16(pub u64);
 impl Component for C6_16 {
@@ -1378,7 +1378,7 @@ impl Component for C6_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(202) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_7, s1: C5_1, s2: C5_2, s3: C5_16)]
 pub struct C6_17(pub u64);
 impl Component for C6_17 {
@@ -1388,7 +1388,7 @@ impl Component for C6_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(203) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_11, s1: C5_5, s2: C5_16, s3: C5_6)]
 pub struct C6_18(pub u64);
 impl Component for C6_18 {
@@ -1398,7 +1398,7 @@ impl Component for C6_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(204) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C5_9, s1: C5_19, s2: C5_18, s3: C5_11)]
 pub struct C6_19(pub u64);
 impl Component for C6_19 {
@@ -1408,7 +1408,7 @@ impl Component for C6_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(205) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_5, s1: C6_14, s2: C6_2, s3: C6_3)]
 pub struct C7_0(pub u64);
 impl Component for C7_0 {
@@ -1418,7 +1418,7 @@ impl Component for C7_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(217) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_19, s1: C6_16, s2: C6_12, s3: C6_5)]
 pub struct C7_1(pub u64);
 impl Component for C7_1 {
@@ -1428,7 +1428,7 @@ impl Component for C7_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(218) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_4, s1: C6_8, s2: C6_13, s3: C6_6)]
 pub struct C7_2(pub u64);
 impl Component for C7_2 {
@@ -1438,7 +1438,7 @@ impl Component for C7_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(219) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_18, s1: C6_1, s2: C6_15, s3: C6_12)]
 pub struct C7_3(pub u64);
 impl Component for C7_3 {
@@ -1448,7 +1448,7 @@ impl Component for C7_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(220) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_11, s1: C6_12, s2: C6_16, s3: C6_5)]
 pub struct C7_4(pub u64);
 impl Component for C7_4 {
@@ -1458,7 +1458,7 @@ impl Component for C7_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(221) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_17, s1: C6_1, s2: C6_16, s3: C6_2)]
 pub struct C7_5(pub u64);
 impl Component for C7_5 {
@@ -1468,7 +1468,7 @@ impl Component for C7_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(222) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_8, s1: C6_3, s2: C6_19, s3: C6_2)]
 pub struct C7_6(pub u64);
 impl Component for C7_6 {
@@ -1478,7 +1478,7 @@ impl Component for C7_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(223) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_4, s1: C6_2, s2: C6_14, s3: C6_7)]
 pub struct C7_7(pub u64);
 impl Component for C7_7 {
@@ -1488,7 +1488,7 @@ impl Component for C7_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(224) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_12, s1: C6_13, s2: C6_19, s3: C6_5)]
 pub struct C7_8(pub u64);
 impl Component for C7_8 {
@@ -1498,7 +1498,7 @@ impl Component for C7_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(225) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_10, s1: C6_14, s2: C6_4, s3: C6_15)]
 pub struct C7_9(pub u64);
 impl Component for C7_9 {
@@ -1508,7 +1508,7 @@ impl Component for C7_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(226) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_6, s1: C6_3, s2: C6_13, s3: C6_17)]
 pub struct C7_10(pub u64);
 impl Component for C7_10 {
@@ -1518,7 +1518,7 @@ impl Component for C7_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(227) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_3, s1: C6_9, s2: C6_8, s3: C6_7)]
 pub struct C7_11(pub u64);
 impl Component for C7_11 {
@@ -1528,7 +1528,7 @@ impl Component for C7_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(228) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_12, s1: C6_17, s2: C6_0, s3: C6_6)]
 pub struct C7_12(pub u64);
 impl Component for C7_12 {
@@ -1538,7 +1538,7 @@ impl Component for C7_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(229) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_16, s1: C6_14, s2: C6_0, s3: C6_17)]
 pub struct C7_13(pub u64);
 impl Component for C7_13 {
@@ -1548,7 +1548,7 @@ impl Component for C7_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(230) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_19, s1: C6_7, s2: C6_8, s3: C6_6)]
 pub struct C7_14(pub u64);
 impl Component for C7_14 {
@@ -1558,7 +1558,7 @@ impl Component for C7_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(231) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_5, s1: C6_9, s2: C6_4, s3: C6_6)]
 pub struct C7_15(pub u64);
 impl Component for C7_15 {
@@ -1568,7 +1568,7 @@ impl Component for C7_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(232) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_8, s1: C6_9, s2: C6_19, s3: C6_14)]
 pub struct C7_16(pub u64);
 impl Component for C7_16 {
@@ -1578,7 +1578,7 @@ impl Component for C7_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(233) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_5, s1: C6_17, s2: C6_11, s3: C6_15)]
 pub struct C7_17(pub u64);
 impl Component for C7_17 {
@@ -1588,7 +1588,7 @@ impl Component for C7_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(234) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_13, s1: C6_3, s2: C6_6, s3: C6_12)]
 pub struct C7_18(pub u64);
 impl Component for C7_18 {
@@ -1598,7 +1598,7 @@ impl Component for C7_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(235) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C6_6, s1: C6_9, s2: C6_3, s3: C6_0)]
 pub struct C7_19(pub u64);
 impl Component for C7_19 {
@@ -1608,7 +1608,7 @@ impl Component for C7_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(236) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_3, s1: C7_18, s2: C7_0, s3: C7_9)]
 pub struct C8_0(pub u64);
 impl Component for C8_0 {
@@ -1618,7 +1618,7 @@ impl Component for C8_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(248) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_4, s1: C7_2, s2: C7_16, s3: C7_11)]
 pub struct C8_1(pub u64);
 impl Component for C8_1 {
@@ -1628,7 +1628,7 @@ impl Component for C8_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(249) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_18, s1: C7_9, s2: C7_13, s3: C7_16)]
 pub struct C8_2(pub u64);
 impl Component for C8_2 {
@@ -1638,7 +1638,7 @@ impl Component for C8_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(250) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_11, s1: C7_16, s2: C7_10, s3: C7_0)]
 pub struct C8_3(pub u64);
 impl Component for C8_3 {
@@ -1648,7 +1648,7 @@ impl Component for C8_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(251) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_3, s1: C7_14, s2: C7_18, s3: C7_11)]
 pub struct C8_4(pub u64);
 impl Component for C8_4 {
@@ -1658,7 +1658,7 @@ impl Component for C8_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(252) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_9, s1: C7_17, s2: C7_12, s3: C7_10)]
 pub struct C8_5(pub u64);
 impl Component for C8_5 {
@@ -1668,7 +1668,7 @@ impl Component for C8_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(253) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_18, s1: C7_15, s2: C7_3, s3: C7_12)]
 pub struct C8_6(pub u64);
 impl Component for C8_6 {
@@ -1678,7 +1678,7 @@ impl Component for C8_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(254) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_12, s1: C7_6, s2: C7_17, s3: C7_0)]
 pub struct C8_7(pub u64);
 impl Component for C8_7 {
@@ -1688,7 +1688,7 @@ impl Component for C8_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(255) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_8, s1: C7_16, s2: C7_6, s3: C7_14)]
 pub struct C8_8(pub u64);
 impl Component for C8_8 {
@@ -1698,7 +1698,7 @@ impl Component for C8_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(256) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_19, s1: C7_16, s2: C7_13, s3: C7_9)]
 pub struct C8_9(pub u64);
 impl Component for C8_9 {
@@ -1708,7 +1708,7 @@ impl Component for C8_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(257) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_5, s1: C7_14, s2: C7_16, s3: C7_6)]
 pub struct C8_10(pub u64);
 impl Component for C8_10 {
@@ -1718,7 +1718,7 @@ impl Component for C8_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(258) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_11, s1: C7_16, s2: C7_0, s3: C7_12)]
 pub struct C8_11(pub u64);
 impl Component for C8_11 {
@@ -1728,7 +1728,7 @@ impl Component for C8_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(259) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_18, s1: C7_13, s2: C7_12, s3: C7_10)]
 pub struct C8_12(pub u64);
 impl Component for C8_12 {
@@ -1738,7 +1738,7 @@ impl Component for C8_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(260) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_19, s1: C7_18, s2: C7_2, s3: C7_15)]
 pub struct C8_13(pub u64);
 impl Component for C8_13 {
@@ -1748,7 +1748,7 @@ impl Component for C8_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(261) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_7, s1: C7_9, s2: C7_0, s3: C7_13)]
 pub struct C8_14(pub u64);
 impl Component for C8_14 {
@@ -1758,7 +1758,7 @@ impl Component for C8_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(262) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_4, s1: C7_12, s2: C7_8, s3: C7_5)]
 pub struct C8_15(pub u64);
 impl Component for C8_15 {
@@ -1768,7 +1768,7 @@ impl Component for C8_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(263) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_2, s1: C7_0, s2: C7_11, s3: C7_8)]
 pub struct C8_16(pub u64);
 impl Component for C8_16 {
@@ -1778,7 +1778,7 @@ impl Component for C8_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(264) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_13, s1: C7_17, s2: C7_9, s3: C7_4)]
 pub struct C8_17(pub u64);
 impl Component for C8_17 {
@@ -1788,7 +1788,7 @@ impl Component for C8_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(265) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_14, s1: C7_8, s2: C7_15, s3: C7_5)]
 pub struct C8_18(pub u64);
 impl Component for C8_18 {
@@ -1798,7 +1798,7 @@ impl Component for C8_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(266) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C7_14, s1: C7_16, s2: C7_1, s3: C7_8)]
 pub struct C8_19(pub u64);
 impl Component for C8_19 {
@@ -1808,7 +1808,7 @@ impl Component for C8_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(267) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_16, s1: C8_3, s2: C8_13, s3: C8_2)]
 pub struct C9_0(pub u64);
 impl Component for C9_0 {
@@ -1818,7 +1818,7 @@ impl Component for C9_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(279) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_11, s1: C8_2, s2: C8_14, s3: C8_0)]
 pub struct C9_1(pub u64);
 impl Component for C9_1 {
@@ -1828,7 +1828,7 @@ impl Component for C9_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(280) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_5, s1: C8_16, s2: C8_19, s3: C8_2)]
 pub struct C9_2(pub u64);
 impl Component for C9_2 {
@@ -1838,7 +1838,7 @@ impl Component for C9_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(281) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_12, s1: C8_8, s2: C8_9, s3: C8_6)]
 pub struct C9_3(pub u64);
 impl Component for C9_3 {
@@ -1848,7 +1848,7 @@ impl Component for C9_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(282) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_16, s1: C8_6, s2: C8_7, s3: C8_10)]
 pub struct C9_4(pub u64);
 impl Component for C9_4 {
@@ -1858,7 +1858,7 @@ impl Component for C9_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(283) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_8, s1: C8_2, s2: C8_18, s3: C8_16)]
 pub struct C9_5(pub u64);
 impl Component for C9_5 {
@@ -1868,7 +1868,7 @@ impl Component for C9_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(284) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_11, s1: C8_14, s2: C8_16, s3: C8_1)]
 pub struct C9_6(pub u64);
 impl Component for C9_6 {
@@ -1878,7 +1878,7 @@ impl Component for C9_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(285) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_5, s1: C8_9, s2: C8_17, s3: C8_8)]
 pub struct C9_7(pub u64);
 impl Component for C9_7 {
@@ -1888,7 +1888,7 @@ impl Component for C9_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(286) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_11, s1: C8_7, s2: C8_12, s3: C8_17)]
 pub struct C9_8(pub u64);
 impl Component for C9_8 {
@@ -1898,7 +1898,7 @@ impl Component for C9_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(287) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_5, s1: C8_15, s2: C8_8, s3: C8_10)]
 pub struct C9_9(pub u64);
 impl Component for C9_9 {
@@ -1908,7 +1908,7 @@ impl Component for C9_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(288) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_7, s1: C8_8, s2: C8_19, s3: C8_0)]
 pub struct C9_10(pub u64);
 impl Component for C9_10 {
@@ -1918,7 +1918,7 @@ impl Component for C9_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(289) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_19, s1: C8_12, s2: C8_10, s3: C8_13)]
 pub struct C9_11(pub u64);
 impl Component for C9_11 {
@@ -1928,7 +1928,7 @@ impl Component for C9_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(290) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_7, s1: C8_8, s2: C8_6, s3: C8_2)]
 pub struct C9_12(pub u64);
 impl Component for C9_12 {
@@ -1938,7 +1938,7 @@ impl Component for C9_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(291) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_5, s1: C8_18, s2: C8_14, s3: C8_4)]
 pub struct C9_13(pub u64);
 impl Component for C9_13 {
@@ -1948,7 +1948,7 @@ impl Component for C9_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(292) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_19, s1: C8_8, s2: C8_14, s3: C8_16)]
 pub struct C9_14(pub u64);
 impl Component for C9_14 {
@@ -1958,7 +1958,7 @@ impl Component for C9_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(293) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_5, s1: C8_4, s2: C8_18, s3: C8_14)]
 pub struct C9_15(pub u64);
 impl Component for C9_15 {
@@ -1968,7 +1968,7 @@ impl Component for C9_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(294) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_11, s1: C8_9, s2: C8_12, s3: C8_7)]
 pub struct C9_16(pub u64);
 impl Component for C9_16 {
@@ -1978,7 +1978,7 @@ impl Component for C9_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(295) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_3, s1: C8_6, s2: C8_9, s3: C8_2)]
 pub struct C9_17(pub u64);
 impl Component for C9_17 {
@@ -1988,7 +1988,7 @@ impl Component for C9_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(296) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_3, s1: C8_7, s2: C8_12, s3: C8_10)]
 pub struct C9_18(pub u64);
 impl Component for C9_18 {
@@ -1998,7 +1998,7 @@ impl Component for C9_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(297) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C8_15, s1: C8_3, s2: C8_5, s3: C8_1)]
 pub struct C9_19(pub u64);
 impl Component for C9_19 {
@@ -2008,7 +2008,7 @@ impl Component for C9_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(298) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_1, s1: C9_0, s2: C9_6, s3: C9_19)]
 pub struct C10_0(pub u64);
 impl Component for C10_0 {
@@ -2018,7 +2018,7 @@ impl Component for C10_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(310) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_15, s1: C9_16, s2: C9_14, s3: C9_10)]
 pub struct C10_1(pub u64);
 impl Component for C10_1 {
@@ -2028,7 +2028,7 @@ impl Component for C10_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(311) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_8, s1: C9_3, s2: C9_5, s3: C9_18)]
 pub struct C10_2(pub u64);
 impl Component for C10_2 {
@@ -2038,7 +2038,7 @@ impl Component for C10_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(312) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_7, s1: C9_12, s2: C9_19, s3: C9_15)]
 pub struct C10_3(pub u64);
 impl Component for C10_3 {
@@ -2048,7 +2048,7 @@ impl Component for C10_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(313) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_14, s1: C9_12, s2: C9_5, s3: C9_7)]
 pub struct C10_4(pub u64);
 impl Component for C10_4 {
@@ -2058,7 +2058,7 @@ impl Component for C10_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(314) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_7, s1: C9_9, s2: C9_14, s3: C9_12)]
 pub struct C10_5(pub u64);
 impl Component for C10_5 {
@@ -2068,7 +2068,7 @@ impl Component for C10_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(315) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_6, s1: C9_14, s2: C9_8, s3: C9_10)]
 pub struct C10_6(pub u64);
 impl Component for C10_6 {
@@ -2078,7 +2078,7 @@ impl Component for C10_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(316) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_15, s1: C9_18, s2: C9_3, s3: C9_6)]
 pub struct C10_7(pub u64);
 impl Component for C10_7 {
@@ -2088,7 +2088,7 @@ impl Component for C10_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(317) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_2, s1: C9_1, s2: C9_0, s3: C9_17)]
 pub struct C10_8(pub u64);
 impl Component for C10_8 {
@@ -2098,7 +2098,7 @@ impl Component for C10_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(318) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_15, s1: C9_10, s2: C9_12, s3: C9_9)]
 pub struct C10_9(pub u64);
 impl Component for C10_9 {
@@ -2108,7 +2108,7 @@ impl Component for C10_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(319) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_6, s1: C9_12, s2: C9_5, s3: C9_4)]
 pub struct C10_10(pub u64);
 impl Component for C10_10 {
@@ -2118,7 +2118,7 @@ impl Component for C10_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(320) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_0, s1: C9_19, s2: C9_12, s3: C9_4)]
 pub struct C10_11(pub u64);
 impl Component for C10_11 {
@@ -2128,7 +2128,7 @@ impl Component for C10_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(321) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_17, s1: C9_1, s2: C9_12, s3: C9_8)]
 pub struct C10_12(pub u64);
 impl Component for C10_12 {
@@ -2138,7 +2138,7 @@ impl Component for C10_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(322) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_4, s1: C9_2, s2: C9_14, s3: C9_9)]
 pub struct C10_13(pub u64);
 impl Component for C10_13 {
@@ -2148,7 +2148,7 @@ impl Component for C10_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(323) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_0, s1: C9_1, s2: C9_17, s3: C9_18)]
 pub struct C10_14(pub u64);
 impl Component for C10_14 {
@@ -2158,7 +2158,7 @@ impl Component for C10_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(324) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_16, s1: C9_4, s2: C9_1, s3: C9_8)]
 pub struct C10_15(pub u64);
 impl Component for C10_15 {
@@ -2168,7 +2168,7 @@ impl Component for C10_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(325) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_3, s1: C9_13, s2: C9_2, s3: C9_6)]
 pub struct C10_16(pub u64);
 impl Component for C10_16 {
@@ -2178,7 +2178,7 @@ impl Component for C10_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(326) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_0, s1: C9_15, s2: C9_4, s3: C9_8)]
 pub struct C10_17(pub u64);
 impl Component for C10_17 {
@@ -2188,7 +2188,7 @@ impl Component for C10_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(327) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_6, s1: C9_14, s2: C9_12, s3: C9_10)]
 pub struct C10_18(pub u64);
 impl Component for C10_18 {
@@ -2198,7 +2198,7 @@ impl Component for C10_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(328) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C9_8, s1: C9_19, s2: C9_7, s3: C9_17)]
 pub struct C10_19(pub u64);
 impl Component for C10_19 {
@@ -2208,7 +2208,7 @@ impl Component for C10_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(329) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_1, s1: C10_18, s2: C10_5, s3: C10_11)]
 pub struct C11_0(pub u64);
 impl Component for C11_0 {
@@ -2218,7 +2218,7 @@ impl Component for C11_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(341) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_13, s1: C10_17, s2: C10_16, s3: C10_1)]
 pub struct C11_1(pub u64);
 impl Component for C11_1 {
@@ -2228,7 +2228,7 @@ impl Component for C11_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(342) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_11, s1: C10_17, s2: C10_13, s3: C10_6)]
 pub struct C11_2(pub u64);
 impl Component for C11_2 {
@@ -2238,7 +2238,7 @@ impl Component for C11_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(343) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_17, s1: C10_13, s2: C10_2, s3: C10_8)]
 pub struct C11_3(pub u64);
 impl Component for C11_3 {
@@ -2248,7 +2248,7 @@ impl Component for C11_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(344) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_19, s1: C10_2, s2: C10_8, s3: C10_5)]
 pub struct C11_4(pub u64);
 impl Component for C11_4 {
@@ -2258,7 +2258,7 @@ impl Component for C11_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(345) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_3, s1: C10_4, s2: C10_1, s3: C10_6)]
 pub struct C11_5(pub u64);
 impl Component for C11_5 {
@@ -2268,7 +2268,7 @@ impl Component for C11_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(346) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_13, s1: C10_1, s2: C10_18, s3: C10_2)]
 pub struct C11_6(pub u64);
 impl Component for C11_6 {
@@ -2278,7 +2278,7 @@ impl Component for C11_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(347) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_16, s1: C10_15, s2: C10_19, s3: C10_11)]
 pub struct C11_7(pub u64);
 impl Component for C11_7 {
@@ -2288,7 +2288,7 @@ impl Component for C11_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(348) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_3, s1: C10_10, s2: C10_1, s3: C10_4)]
 pub struct C11_8(pub u64);
 impl Component for C11_8 {
@@ -2298,7 +2298,7 @@ impl Component for C11_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(349) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_17, s1: C10_1, s2: C10_14, s3: C10_4)]
 pub struct C11_9(pub u64);
 impl Component for C11_9 {
@@ -2308,7 +2308,7 @@ impl Component for C11_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(350) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_12, s1: C10_14, s2: C10_0, s3: C10_16)]
 pub struct C11_10(pub u64);
 impl Component for C11_10 {
@@ -2318,7 +2318,7 @@ impl Component for C11_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(351) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_8, s1: C10_2, s2: C10_19, s3: C10_10)]
 pub struct C11_11(pub u64);
 impl Component for C11_11 {
@@ -2328,7 +2328,7 @@ impl Component for C11_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(352) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_2, s1: C10_9, s2: C10_1, s3: C10_12)]
 pub struct C11_12(pub u64);
 impl Component for C11_12 {
@@ -2338,7 +2338,7 @@ impl Component for C11_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(353) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_1, s1: C10_8, s2: C10_10, s3: C10_4)]
 pub struct C11_13(pub u64);
 impl Component for C11_13 {
@@ -2348,7 +2348,7 @@ impl Component for C11_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(354) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_8, s1: C10_12, s2: C10_3, s3: C10_9)]
 pub struct C11_14(pub u64);
 impl Component for C11_14 {
@@ -2358,7 +2358,7 @@ impl Component for C11_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(355) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_3, s1: C10_13, s2: C10_7, s3: C10_16)]
 pub struct C11_15(pub u64);
 impl Component for C11_15 {
@@ -2368,7 +2368,7 @@ impl Component for C11_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(356) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_17, s1: C10_6, s2: C10_10, s3: C10_19)]
 pub struct C11_16(pub u64);
 impl Component for C11_16 {
@@ -2378,7 +2378,7 @@ impl Component for C11_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(357) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_16, s1: C10_12, s2: C10_15, s3: C10_3)]
 pub struct C11_17(pub u64);
 impl Component for C11_17 {
@@ -2388,7 +2388,7 @@ impl Component for C11_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(358) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_4, s1: C10_14, s2: C10_16, s3: C10_17)]
 pub struct C11_18(pub u64);
 impl Component for C11_18 {
@@ -2398,7 +2398,7 @@ impl Component for C11_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(359) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C10_17, s1: C10_0, s2: C10_9, s3: C10_5)]
 pub struct C11_19(pub u64);
 impl Component for C11_19 {
@@ -2408,7 +2408,7 @@ impl Component for C11_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(360) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_6, s1: C11_11, s2: C11_12, s3: C11_16)]
 pub struct C12_0(pub u64);
 impl Component for C12_0 {
@@ -2418,7 +2418,7 @@ impl Component for C12_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(372) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_10, s1: C11_3, s2: C11_13, s3: C11_11)]
 pub struct C12_1(pub u64);
 impl Component for C12_1 {
@@ -2428,7 +2428,7 @@ impl Component for C12_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(373) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_4, s1: C11_18, s2: C11_2, s3: C11_1)]
 pub struct C12_2(pub u64);
 impl Component for C12_2 {
@@ -2438,7 +2438,7 @@ impl Component for C12_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(374) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_9, s1: C11_17, s2: C11_10, s3: C11_13)]
 pub struct C12_3(pub u64);
 impl Component for C12_3 {
@@ -2448,7 +2448,7 @@ impl Component for C12_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(375) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_9, s1: C11_10, s2: C11_11, s3: C11_8)]
 pub struct C12_4(pub u64);
 impl Component for C12_4 {
@@ -2458,7 +2458,7 @@ impl Component for C12_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(376) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_10, s1: C11_16, s2: C11_18, s3: C11_0)]
 pub struct C12_5(pub u64);
 impl Component for C12_5 {
@@ -2468,7 +2468,7 @@ impl Component for C12_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(377) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_16, s1: C11_3, s2: C11_4, s3: C11_10)]
 pub struct C12_6(pub u64);
 impl Component for C12_6 {
@@ -2478,7 +2478,7 @@ impl Component for C12_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(378) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_10, s1: C11_19, s2: C11_2, s3: C11_14)]
 pub struct C12_7(pub u64);
 impl Component for C12_7 {
@@ -2488,7 +2488,7 @@ impl Component for C12_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(379) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_8, s1: C11_15, s2: C11_14, s3: C11_11)]
 pub struct C12_8(pub u64);
 impl Component for C12_8 {
@@ -2498,7 +2498,7 @@ impl Component for C12_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(380) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_12, s1: C11_2, s2: C11_1, s3: C11_4)]
 pub struct C12_9(pub u64);
 impl Component for C12_9 {
@@ -2508,7 +2508,7 @@ impl Component for C12_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(381) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_1, s1: C11_16, s2: C11_15, s3: C11_8)]
 pub struct C12_10(pub u64);
 impl Component for C12_10 {
@@ -2518,7 +2518,7 @@ impl Component for C12_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(382) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_7, s1: C11_18, s2: C11_10, s3: C11_11)]
 pub struct C12_11(pub u64);
 impl Component for C12_11 {
@@ -2528,7 +2528,7 @@ impl Component for C12_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(383) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_11, s1: C11_12, s2: C11_9, s3: C11_14)]
 pub struct C12_12(pub u64);
 impl Component for C12_12 {
@@ -2538,7 +2538,7 @@ impl Component for C12_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(384) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_19, s1: C11_10, s2: C11_17, s3: C11_16)]
 pub struct C12_13(pub u64);
 impl Component for C12_13 {
@@ -2548,7 +2548,7 @@ impl Component for C12_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(385) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_5, s1: C11_0, s2: C11_4, s3: C11_8)]
 pub struct C12_14(pub u64);
 impl Component for C12_14 {
@@ -2558,7 +2558,7 @@ impl Component for C12_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(386) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_7, s1: C11_18, s2: C11_4, s3: C11_3)]
 pub struct C12_15(pub u64);
 impl Component for C12_15 {
@@ -2568,7 +2568,7 @@ impl Component for C12_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(387) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_5, s1: C11_13, s2: C11_1, s3: C11_3)]
 pub struct C12_16(pub u64);
 impl Component for C12_16 {
@@ -2578,7 +2578,7 @@ impl Component for C12_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(388) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_17, s1: C11_8, s2: C11_3, s3: C11_6)]
 pub struct C12_17(pub u64);
 impl Component for C12_17 {
@@ -2588,7 +2588,7 @@ impl Component for C12_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(389) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_8, s1: C11_2, s2: C11_16, s3: C11_18)]
 pub struct C12_18(pub u64);
 impl Component for C12_18 {
@@ -2598,7 +2598,7 @@ impl Component for C12_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(390) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C11_2, s1: C11_6, s2: C11_5, s3: C11_16)]
 pub struct C12_19(pub u64);
 impl Component for C12_19 {
@@ -2608,7 +2608,7 @@ impl Component for C12_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(391) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_13, s1: C12_0, s2: C12_11, s3: C12_15)]
 pub struct C13_0(pub u64);
 impl Component for C13_0 {
@@ -2618,7 +2618,7 @@ impl Component for C13_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(403) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_9, s1: C12_7, s2: C12_6, s3: C12_15)]
 pub struct C13_1(pub u64);
 impl Component for C13_1 {
@@ -2628,7 +2628,7 @@ impl Component for C13_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(404) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_7, s1: C12_13, s2: C12_14, s3: C12_11)]
 pub struct C13_2(pub u64);
 impl Component for C13_2 {
@@ -2638,7 +2638,7 @@ impl Component for C13_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(405) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_17, s1: C12_6, s2: C12_15, s3: C12_2)]
 pub struct C13_3(pub u64);
 impl Component for C13_3 {
@@ -2648,7 +2648,7 @@ impl Component for C13_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(406) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_8, s1: C12_13, s2: C12_6, s3: C12_0)]
 pub struct C13_4(pub u64);
 impl Component for C13_4 {
@@ -2658,7 +2658,7 @@ impl Component for C13_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(407) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_17, s1: C12_12, s2: C12_16, s3: C12_15)]
 pub struct C13_5(pub u64);
 impl Component for C13_5 {
@@ -2668,7 +2668,7 @@ impl Component for C13_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(408) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_2, s1: C12_12, s2: C12_16, s3: C12_13)]
 pub struct C13_6(pub u64);
 impl Component for C13_6 {
@@ -2678,7 +2678,7 @@ impl Component for C13_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(409) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_1, s1: C12_11, s2: C12_14, s3: C12_0)]
 pub struct C13_7(pub u64);
 impl Component for C13_7 {
@@ -2688,7 +2688,7 @@ impl Component for C13_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(410) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_6, s1: C12_9, s2: C12_0, s3: C12_3)]
 pub struct C13_8(pub u64);
 impl Component for C13_8 {
@@ -2698,7 +2698,7 @@ impl Component for C13_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(411) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_9, s1: C12_16, s2: C12_10, s3: C12_19)]
 pub struct C13_9(pub u64);
 impl Component for C13_9 {
@@ -2708,7 +2708,7 @@ impl Component for C13_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(412) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_16, s1: C12_13, s2: C12_17, s3: C12_19)]
 pub struct C13_10(pub u64);
 impl Component for C13_10 {
@@ -2718,7 +2718,7 @@ impl Component for C13_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(413) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_13, s1: C12_18, s2: C12_9, s3: C12_14)]
 pub struct C13_11(pub u64);
 impl Component for C13_11 {
@@ -2728,7 +2728,7 @@ impl Component for C13_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(414) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_9, s1: C12_4, s2: C12_16, s3: C12_14)]
 pub struct C13_12(pub u64);
 impl Component for C13_12 {
@@ -2738,7 +2738,7 @@ impl Component for C13_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(415) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_18, s1: C12_4, s2: C12_17, s3: C12_5)]
 pub struct C13_13(pub u64);
 impl Component for C13_13 {
@@ -2748,7 +2748,7 @@ impl Component for C13_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(416) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_8, s1: C12_0, s2: C12_13, s3: C12_1)]
 pub struct C13_14(pub u64);
 impl Component for C13_14 {
@@ -2758,7 +2758,7 @@ impl Component for C13_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(417) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_11, s1: C12_13, s2: C12_12, s3: C12_9)]
 pub struct C13_15(pub u64);
 impl Component for C13_15 {
@@ -2768,7 +2768,7 @@ impl Component for C13_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(418) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_0, s1: C12_2, s2: C12_18, s3: C12_19)]
 pub struct C13_16(pub u64);
 impl Component for C13_16 {
@@ -2778,7 +2778,7 @@ impl Component for C13_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(419) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_12, s1: C12_8, s2: C12_14, s3: C12_18)]
 pub struct C13_17(pub u64);
 impl Component for C13_17 {
@@ -2788,7 +2788,7 @@ impl Component for C13_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(420) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_11, s1: C12_15, s2: C12_10, s3: C12_12)]
 pub struct C13_18(pub u64);
 impl Component for C13_18 {
@@ -2798,7 +2798,7 @@ impl Component for C13_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(421) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C12_14, s1: C12_3, s2: C12_15, s3: C12_11)]
 pub struct C13_19(pub u64);
 impl Component for C13_19 {
@@ -2808,7 +2808,7 @@ impl Component for C13_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(422) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_4, s1: C13_13, s2: C13_19, s3: C13_0)]
 pub struct C14_0(pub u64);
 impl Component for C14_0 {
@@ -2818,7 +2818,7 @@ impl Component for C14_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(434) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_5, s1: C13_8, s2: C13_11, s3: C13_4)]
 pub struct C14_1(pub u64);
 impl Component for C14_1 {
@@ -2828,7 +2828,7 @@ impl Component for C14_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(435) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_18, s1: C13_9, s2: C13_13, s3: C13_8)]
 pub struct C14_2(pub u64);
 impl Component for C14_2 {
@@ -2838,7 +2838,7 @@ impl Component for C14_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(436) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_16, s1: C13_9, s2: C13_13, s3: C13_8)]
 pub struct C14_3(pub u64);
 impl Component for C14_3 {
@@ -2848,7 +2848,7 @@ impl Component for C14_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(437) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_13, s1: C13_10, s2: C13_15, s3: C13_6)]
 pub struct C14_4(pub u64);
 impl Component for C14_4 {
@@ -2858,7 +2858,7 @@ impl Component for C14_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(438) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_15, s1: C13_12, s2: C13_13, s3: C13_2)]
 pub struct C14_5(pub u64);
 impl Component for C14_5 {
@@ -2868,7 +2868,7 @@ impl Component for C14_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(439) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_2, s1: C13_4, s2: C13_6, s3: C13_18)]
 pub struct C14_6(pub u64);
 impl Component for C14_6 {
@@ -2878,7 +2878,7 @@ impl Component for C14_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(440) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_7, s1: C13_0, s2: C13_3, s3: C13_8)]
 pub struct C14_7(pub u64);
 impl Component for C14_7 {
@@ -2888,7 +2888,7 @@ impl Component for C14_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(441) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_4, s1: C13_15, s2: C13_3, s3: C13_12)]
 pub struct C14_8(pub u64);
 impl Component for C14_8 {
@@ -2898,7 +2898,7 @@ impl Component for C14_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(442) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_5, s1: C13_0, s2: C13_2, s3: C13_13)]
 pub struct C14_9(pub u64);
 impl Component for C14_9 {
@@ -2908,7 +2908,7 @@ impl Component for C14_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(443) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_19, s1: C13_1, s2: C13_17, s3: C13_6)]
 pub struct C14_10(pub u64);
 impl Component for C14_10 {
@@ -2918,7 +2918,7 @@ impl Component for C14_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(444) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_17, s1: C13_13, s2: C13_11, s3: C13_1)]
 pub struct C14_11(pub u64);
 impl Component for C14_11 {
@@ -2928,7 +2928,7 @@ impl Component for C14_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(445) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_3, s1: C13_17, s2: C13_13, s3: C13_19)]
 pub struct C14_12(pub u64);
 impl Component for C14_12 {
@@ -2938,7 +2938,7 @@ impl Component for C14_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(446) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_8, s1: C13_19, s2: C13_5, s3: C13_15)]
 pub struct C14_13(pub u64);
 impl Component for C14_13 {
@@ -2948,7 +2948,7 @@ impl Component for C14_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(447) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_1, s1: C13_6, s2: C13_2, s3: C13_12)]
 pub struct C14_14(pub u64);
 impl Component for C14_14 {
@@ -2958,7 +2958,7 @@ impl Component for C14_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(448) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_3, s1: C13_14, s2: C13_9, s3: C13_16)]
 pub struct C14_15(pub u64);
 impl Component for C14_15 {
@@ -2968,7 +2968,7 @@ impl Component for C14_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(449) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_15, s1: C13_12, s2: C13_3, s3: C13_19)]
 pub struct C14_16(pub u64);
 impl Component for C14_16 {
@@ -2978,7 +2978,7 @@ impl Component for C14_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(450) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_3, s1: C13_4, s2: C13_12, s3: C13_6)]
 pub struct C14_17(pub u64);
 impl Component for C14_17 {
@@ -2988,7 +2988,7 @@ impl Component for C14_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(451) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_5, s1: C13_16, s2: C13_8, s3: C13_13)]
 pub struct C14_18(pub u64);
 impl Component for C14_18 {
@@ -2998,7 +2998,7 @@ impl Component for C14_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(452) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C13_17, s1: C13_9, s2: C13_15, s3: C13_6)]
 pub struct C14_19(pub u64);
 impl Component for C14_19 {
@@ -3008,7 +3008,7 @@ impl Component for C14_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(453) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_19, s1: C14_10, s2: C14_15, s3: C14_3)]
 pub struct C15_0(pub u64);
 impl Component for C15_0 {
@@ -3018,7 +3018,7 @@ impl Component for C15_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(465) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_0, s1: C14_11, s2: C14_8, s3: C14_1)]
 pub struct C15_1(pub u64);
 impl Component for C15_1 {
@@ -3028,7 +3028,7 @@ impl Component for C15_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(466) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_17, s1: C14_14, s2: C14_9, s3: C14_3)]
 pub struct C15_2(pub u64);
 impl Component for C15_2 {
@@ -3038,7 +3038,7 @@ impl Component for C15_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(467) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_7, s1: C14_16, s2: C14_8, s3: C14_17)]
 pub struct C15_3(pub u64);
 impl Component for C15_3 {
@@ -3048,7 +3048,7 @@ impl Component for C15_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(468) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_7, s1: C14_13, s2: C14_4, s3: C14_17)]
 pub struct C15_4(pub u64);
 impl Component for C15_4 {
@@ -3058,7 +3058,7 @@ impl Component for C15_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(469) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_8, s1: C14_6, s2: C14_13, s3: C14_1)]
 pub struct C15_5(pub u64);
 impl Component for C15_5 {
@@ -3068,7 +3068,7 @@ impl Component for C15_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(470) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_17, s1: C14_16, s2: C14_4, s3: C14_13)]
 pub struct C15_6(pub u64);
 impl Component for C15_6 {
@@ -3078,7 +3078,7 @@ impl Component for C15_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(471) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_8, s1: C14_19, s2: C14_15, s3: C14_9)]
 pub struct C15_7(pub u64);
 impl Component for C15_7 {
@@ -3088,7 +3088,7 @@ impl Component for C15_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(472) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_8, s1: C14_15, s2: C14_6, s3: C14_18)]
 pub struct C15_8(pub u64);
 impl Component for C15_8 {
@@ -3098,7 +3098,7 @@ impl Component for C15_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(473) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_11, s1: C14_15, s2: C14_7, s3: C14_10)]
 pub struct C15_9(pub u64);
 impl Component for C15_9 {
@@ -3108,7 +3108,7 @@ impl Component for C15_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(474) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_5, s1: C14_19, s2: C14_14, s3: C14_4)]
 pub struct C15_10(pub u64);
 impl Component for C15_10 {
@@ -3118,7 +3118,7 @@ impl Component for C15_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(475) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_1, s1: C14_16, s2: C14_10, s3: C14_18)]
 pub struct C15_11(pub u64);
 impl Component for C15_11 {
@@ -3128,7 +3128,7 @@ impl Component for C15_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(476) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_4, s1: C14_6, s2: C14_10, s3: C14_15)]
 pub struct C15_12(pub u64);
 impl Component for C15_12 {
@@ -3138,7 +3138,7 @@ impl Component for C15_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(477) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_15, s1: C14_10, s2: C14_3, s3: C14_4)]
 pub struct C15_13(pub u64);
 impl Component for C15_13 {
@@ -3148,7 +3148,7 @@ impl Component for C15_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(478) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_4, s1: C14_8, s2: C14_7, s3: C14_2)]
 pub struct C15_14(pub u64);
 impl Component for C15_14 {
@@ -3158,7 +3158,7 @@ impl Component for C15_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(479) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_17, s1: C14_1, s2: C14_5, s3: C14_3)]
 pub struct C15_15(pub u64);
 impl Component for C15_15 {
@@ -3168,7 +3168,7 @@ impl Component for C15_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(480) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_7, s1: C14_18, s2: C14_6, s3: C14_16)]
 pub struct C15_16(pub u64);
 impl Component for C15_16 {
@@ -3178,7 +3178,7 @@ impl Component for C15_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(481) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_18, s1: C14_9, s2: C14_13, s3: C14_10)]
 pub struct C15_17(pub u64);
 impl Component for C15_17 {
@@ -3188,7 +3188,7 @@ impl Component for C15_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(482) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_0, s1: C14_19, s2: C14_9, s3: C14_7)]
 pub struct C15_18(pub u64);
 impl Component for C15_18 {
@@ -3198,7 +3198,7 @@ impl Component for C15_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(483) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C14_2, s1: C14_7, s2: C14_8, s3: C14_10)]
 pub struct C15_19(pub u64);
 impl Component for C15_19 {
@@ -3208,7 +3208,7 @@ impl Component for C15_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(484) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_8, s1: C15_16, s2: C15_12, s3: C15_0)]
 pub struct C16_0(pub u64);
 impl Component for C16_0 {
@@ -3218,7 +3218,7 @@ impl Component for C16_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(496) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_3, s1: C15_10, s2: C15_11, s3: C15_4)]
 pub struct C16_1(pub u64);
 impl Component for C16_1 {
@@ -3228,7 +3228,7 @@ impl Component for C16_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(497) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_3, s1: C15_8, s2: C15_4, s3: C15_1)]
 pub struct C16_2(pub u64);
 impl Component for C16_2 {
@@ -3238,7 +3238,7 @@ impl Component for C16_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(498) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_11, s1: C15_2, s2: C15_18, s3: C15_3)]
 pub struct C16_3(pub u64);
 impl Component for C16_3 {
@@ -3248,7 +3248,7 @@ impl Component for C16_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(499) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_9, s1: C15_10, s2: C15_7, s3: C15_8)]
 pub struct C16_4(pub u64);
 impl Component for C16_4 {
@@ -3258,7 +3258,7 @@ impl Component for C16_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(500) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_16, s1: C15_1, s2: C15_11, s3: C15_0)]
 pub struct C16_5(pub u64);
 impl Component for C16_5 {
@@ -3268,7 +3268,7 @@ impl Component for C16_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(501) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_2, s1: C15_4, s2: C15_12, s3: C15_11)]
 pub struct C16_6(pub u64);
 impl Component for C16_6 {
@@ -3278,7 +3278,7 @@ impl Component for C16_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(502) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_7, s1: C15_3, s2: C15_10, s3: C15_8)]
 pub struct C16_7(pub u64);
 impl Component for C16_7 {
@@ -3288,7 +3288,7 @@ impl Component for C16_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(503) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_0, s1: C15_16, s2: C15_10, s3: C15_3)]
 pub struct C16_8(pub u64);
 impl Component for C16_8 {
@@ -3298,7 +3298,7 @@ impl Component for C16_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(504) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_11, s1: C15_4, s2: C15_8, s3: C15_12)]
 pub struct C16_9(pub u64);
 impl Component for C16_9 {
@@ -3308,7 +3308,7 @@ impl Component for C16_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(505) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_2, s1: C15_18, s2: C15_16, s3: C15_15)]
 pub struct C16_10(pub u64);
 impl Component for C16_10 {
@@ -3318,7 +3318,7 @@ impl Component for C16_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(506) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_18, s1: C15_13, s2: C15_17, s3: C15_12)]
 pub struct C16_11(pub u64);
 impl Component for C16_11 {
@@ -3328,7 +3328,7 @@ impl Component for C16_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(507) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_9, s1: C15_7, s2: C15_19, s3: C15_4)]
 pub struct C16_12(pub u64);
 impl Component for C16_12 {
@@ -3338,7 +3338,7 @@ impl Component for C16_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(508) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_1, s1: C15_16, s2: C15_3, s3: C15_5)]
 pub struct C16_13(pub u64);
 impl Component for C16_13 {
@@ -3348,7 +3348,7 @@ impl Component for C16_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(509) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_7, s1: C15_6, s2: C15_13, s3: C15_8)]
 pub struct C16_14(pub u64);
 impl Component for C16_14 {
@@ -3358,7 +3358,7 @@ impl Component for C16_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(510) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_17, s1: C15_0, s2: C15_8, s3: C15_19)]
 pub struct C16_15(pub u64);
 impl Component for C16_15 {
@@ -3368,7 +3368,7 @@ impl Component for C16_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(511) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_16, s1: C15_8, s2: C15_15, s3: C15_4)]
 pub struct C16_16(pub u64);
 impl Component for C16_16 {
@@ -3378,7 +3378,7 @@ impl Component for C16_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(512) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_12, s1: C15_3, s2: C15_11, s3: C15_2)]
 pub struct C16_17(pub u64);
 impl Component for C16_17 {
@@ -3388,7 +3388,7 @@ impl Component for C16_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(513) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_17, s1: C15_11, s2: C15_19, s3: C15_16)]
 pub struct C16_18(pub u64);
 impl Component for C16_18 {
@@ -3398,7 +3398,7 @@ impl Component for C16_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(514) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C15_18, s1: C15_0, s2: C15_9, s3: C15_14)]
 pub struct C16_19(pub u64);
 impl Component for C16_19 {
@@ -3408,7 +3408,7 @@ impl Component for C16_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(515) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_4, s1: C16_19, s2: C16_2, s3: C16_18)]
 pub struct C17_0(pub u64);
 impl Component for C17_0 {
@@ -3418,7 +3418,7 @@ impl Component for C17_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(527) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_6, s1: C16_15, s2: C16_10, s3: C16_11)]
 pub struct C17_1(pub u64);
 impl Component for C17_1 {
@@ -3428,7 +3428,7 @@ impl Component for C17_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(528) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_9, s1: C16_5, s2: C16_4, s3: C16_12)]
 pub struct C17_2(pub u64);
 impl Component for C17_2 {
@@ -3438,7 +3438,7 @@ impl Component for C17_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(529) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_14, s1: C16_12, s2: C16_3, s3: C16_4)]
 pub struct C17_3(pub u64);
 impl Component for C17_3 {
@@ -3448,7 +3448,7 @@ impl Component for C17_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(530) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_8, s1: C16_9, s2: C16_0, s3: C16_17)]
 pub struct C17_4(pub u64);
 impl Component for C17_4 {
@@ -3458,7 +3458,7 @@ impl Component for C17_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(531) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_4, s1: C16_12, s2: C16_17, s3: C16_3)]
 pub struct C17_5(pub u64);
 impl Component for C17_5 {
@@ -3468,7 +3468,7 @@ impl Component for C17_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(532) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_14, s1: C16_0, s2: C16_13, s3: C16_17)]
 pub struct C17_6(pub u64);
 impl Component for C17_6 {
@@ -3478,7 +3478,7 @@ impl Component for C17_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(533) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_8, s1: C16_11, s2: C16_13, s3: C16_12)]
 pub struct C17_7(pub u64);
 impl Component for C17_7 {
@@ -3488,7 +3488,7 @@ impl Component for C17_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(534) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_19, s1: C16_14, s2: C16_1, s3: C16_3)]
 pub struct C17_8(pub u64);
 impl Component for C17_8 {
@@ -3498,7 +3498,7 @@ impl Component for C17_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(535) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_15, s1: C16_1, s2: C16_0, s3: C16_18)]
 pub struct C17_9(pub u64);
 impl Component for C17_9 {
@@ -3508,7 +3508,7 @@ impl Component for C17_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(536) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_3, s1: C16_18, s2: C16_4, s3: C16_16)]
 pub struct C17_10(pub u64);
 impl Component for C17_10 {
@@ -3518,7 +3518,7 @@ impl Component for C17_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(537) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_16, s1: C16_11, s2: C16_17, s3: C16_8)]
 pub struct C17_11(pub u64);
 impl Component for C17_11 {
@@ -3528,7 +3528,7 @@ impl Component for C17_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(538) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_18, s1: C16_11, s2: C16_15, s3: C16_7)]
 pub struct C17_12(pub u64);
 impl Component for C17_12 {
@@ -3538,7 +3538,7 @@ impl Component for C17_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(539) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_19, s1: C16_7, s2: C16_3, s3: C16_11)]
 pub struct C17_13(pub u64);
 impl Component for C17_13 {
@@ -3548,7 +3548,7 @@ impl Component for C17_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(540) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_5, s1: C16_3, s2: C16_1, s3: C16_10)]
 pub struct C17_14(pub u64);
 impl Component for C17_14 {
@@ -3558,7 +3558,7 @@ impl Component for C17_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(541) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_13, s1: C16_11, s2: C16_8, s3: C16_1)]
 pub struct C17_15(pub u64);
 impl Component for C17_15 {
@@ -3568,7 +3568,7 @@ impl Component for C17_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(542) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_19, s1: C16_13, s2: C16_18, s3: C16_12)]
 pub struct C17_16(pub u64);
 impl Component for C17_16 {
@@ -3578,7 +3578,7 @@ impl Component for C17_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(543) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_11, s1: C16_9, s2: C16_10, s3: C16_14)]
 pub struct C17_17(pub u64);
 impl Component for C17_17 {
@@ -3588,7 +3588,7 @@ impl Component for C17_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(544) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_7, s1: C16_16, s2: C16_4, s3: C16_1)]
 pub struct C17_18(pub u64);
 impl Component for C17_18 {
@@ -3598,7 +3598,7 @@ impl Component for C17_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(545) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C16_10, s1: C16_3, s2: C16_16, s3: C16_5)]
 pub struct C17_19(pub u64);
 impl Component for C17_19 {
@@ -3608,7 +3608,7 @@ impl Component for C17_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(546) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_17, s1: C17_15, s2: C17_10, s3: C17_3)]
 pub struct C18_0(pub u64);
 impl Component for C18_0 {
@@ -3618,7 +3618,7 @@ impl Component for C18_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(558) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_18, s1: C17_0, s2: C17_15, s3: C17_6)]
 pub struct C18_1(pub u64);
 impl Component for C18_1 {
@@ -3628,7 +3628,7 @@ impl Component for C18_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(559) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_12, s1: C17_5, s2: C17_19, s3: C17_7)]
 pub struct C18_2(pub u64);
 impl Component for C18_2 {
@@ -3638,7 +3638,7 @@ impl Component for C18_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(560) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_3, s1: C17_7, s2: C17_10, s3: C17_17)]
 pub struct C18_3(pub u64);
 impl Component for C18_3 {
@@ -3648,7 +3648,7 @@ impl Component for C18_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(561) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_7, s1: C17_14, s2: C17_15, s3: C17_11)]
 pub struct C18_4(pub u64);
 impl Component for C18_4 {
@@ -3658,7 +3658,7 @@ impl Component for C18_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(562) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_15, s1: C17_6, s2: C17_13, s3: C17_14)]
 pub struct C18_5(pub u64);
 impl Component for C18_5 {
@@ -3668,7 +3668,7 @@ impl Component for C18_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(563) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_12, s1: C17_17, s2: C17_3, s3: C17_15)]
 pub struct C18_6(pub u64);
 impl Component for C18_6 {
@@ -3678,7 +3678,7 @@ impl Component for C18_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(564) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_8, s1: C17_4, s2: C17_18, s3: C17_0)]
 pub struct C18_7(pub u64);
 impl Component for C18_7 {
@@ -3688,7 +3688,7 @@ impl Component for C18_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(565) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_12, s1: C17_13, s2: C17_3, s3: C17_0)]
 pub struct C18_8(pub u64);
 impl Component for C18_8 {
@@ -3698,7 +3698,7 @@ impl Component for C18_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(566) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_2, s1: C17_5, s2: C17_14, s3: C17_12)]
 pub struct C18_9(pub u64);
 impl Component for C18_9 {
@@ -3708,7 +3708,7 @@ impl Component for C18_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(567) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_16, s1: C17_9, s2: C17_4, s3: C17_17)]
 pub struct C18_10(pub u64);
 impl Component for C18_10 {
@@ -3718,7 +3718,7 @@ impl Component for C18_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(568) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_16, s1: C17_3, s2: C17_8, s3: C17_0)]
 pub struct C18_11(pub u64);
 impl Component for C18_11 {
@@ -3728,7 +3728,7 @@ impl Component for C18_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(569) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_14, s1: C17_12, s2: C17_7, s3: C17_18)]
 pub struct C18_12(pub u64);
 impl Component for C18_12 {
@@ -3738,7 +3738,7 @@ impl Component for C18_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(570) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_0, s1: C17_17, s2: C17_7, s3: C17_13)]
 pub struct C18_13(pub u64);
 impl Component for C18_13 {
@@ -3748,7 +3748,7 @@ impl Component for C18_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(571) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_5, s1: C17_19, s2: C17_10, s3: C17_7)]
 pub struct C18_14(pub u64);
 impl Component for C18_14 {
@@ -3758,7 +3758,7 @@ impl Component for C18_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(572) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_2, s1: C17_17, s2: C17_18, s3: C17_5)]
 pub struct C18_15(pub u64);
 impl Component for C18_15 {
@@ -3768,7 +3768,7 @@ impl Component for C18_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(573) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_5, s1: C17_12, s2: C17_0, s3: C17_16)]
 pub struct C18_16(pub u64);
 impl Component for C18_16 {
@@ -3778,7 +3778,7 @@ impl Component for C18_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(574) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_6, s1: C17_13, s2: C17_7, s3: C17_1)]
 pub struct C18_17(pub u64);
 impl Component for C18_17 {
@@ -3788,7 +3788,7 @@ impl Component for C18_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(575) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_16, s1: C17_6, s2: C17_19, s3: C17_2)]
 pub struct C18_18(pub u64);
 impl Component for C18_18 {
@@ -3798,7 +3798,7 @@ impl Component for C18_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(576) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C17_7, s1: C17_12, s2: C17_14, s3: C17_3)]
 pub struct C18_19(pub u64);
 impl Component for C18_19 {
@@ -3808,7 +3808,7 @@ impl Component for C18_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(577) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_18, s1: C18_1, s2: C18_12, s3: C18_2)]
 pub struct C19_0(pub u64);
 impl Component for C19_0 {
@@ -3818,7 +3818,7 @@ impl Component for C19_0 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(589) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_17, s1: C18_3, s2: C18_15, s3: C18_1)]
 pub struct C19_1(pub u64);
 impl Component for C19_1 {
@@ -3828,7 +3828,7 @@ impl Component for C19_1 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(590) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_16, s1: C18_7, s2: C18_0, s3: C18_17)]
 pub struct C19_2(pub u64);
 impl Component for C19_2 {
@@ -3838,7 +3838,7 @@ impl Component for C19_2 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(591) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_9, s1: C18_14, s2: C18_8, s3: C18_13)]
 pub struct C19_3(pub u64);
 impl Component for C19_3 {
@@ -3848,7 +3848,7 @@ impl Component for C19_3 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(592) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_5, s1: C18_4, s2: C18_17, s3: C18_10)]
 pub struct C19_4(pub u64);
 impl Component for C19_4 {
@@ -3858,7 +3858,7 @@ impl Component for C19_4 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(593) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_17, s1: C18_14, s2: C18_16, s3: C18_13)]
 pub struct C19_5(pub u64);
 impl Component for C19_5 {
@@ -3868,7 +3868,7 @@ impl Component for C19_5 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(594) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_17, s1: C18_5, s2: C18_12, s3: C18_19)]
 pub struct C19_6(pub u64);
 impl Component for C19_6 {
@@ -3878,7 +3878,7 @@ impl Component for C19_6 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(595) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_6, s1: C18_15, s2: C18_8, s3: C18_11)]
 pub struct C19_7(pub u64);
 impl Component for C19_7 {
@@ -3888,7 +3888,7 @@ impl Component for C19_7 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(596) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_4, s1: C18_8, s2: C18_18, s3: C18_5)]
 pub struct C19_8(pub u64);
 impl Component for C19_8 {
@@ -3898,7 +3898,7 @@ impl Component for C19_8 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(597) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_19, s1: C18_2, s2: C18_11, s3: C18_10)]
 pub struct C19_9(pub u64);
 impl Component for C19_9 {
@@ -3908,7 +3908,7 @@ impl Component for C19_9 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(598) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_4, s1: C18_8, s2: C18_18, s3: C18_17)]
 pub struct C19_10(pub u64);
 impl Component for C19_10 {
@@ -3918,7 +3918,7 @@ impl Component for C19_10 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(599) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_11, s1: C18_12, s2: C18_8, s3: C18_14)]
 pub struct C19_11(pub u64);
 impl Component for C19_11 {
@@ -3928,7 +3928,7 @@ impl Component for C19_11 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(600) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_0, s1: C18_4, s2: C18_18, s3: C18_8)]
 pub struct C19_12(pub u64);
 impl Component for C19_12 {
@@ -3938,7 +3938,7 @@ impl Component for C19_12 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(601) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_7, s1: C18_6, s2: C18_2, s3: C18_18)]
 pub struct C19_13(pub u64);
 impl Component for C19_13 {
@@ -3948,7 +3948,7 @@ impl Component for C19_13 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(602) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_17, s1: C18_13, s2: C18_7, s3: C18_4)]
 pub struct C19_14(pub u64);
 impl Component for C19_14 {
@@ -3958,7 +3958,7 @@ impl Component for C19_14 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(603) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_17, s1: C18_14, s2: C18_12, s3: C18_6)]
 pub struct C19_15(pub u64);
 impl Component for C19_15 {
@@ -3968,7 +3968,7 @@ impl Component for C19_15 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(604) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_2, s1: C18_19, s2: C18_4, s3: C18_1)]
 pub struct C19_16(pub u64);
 impl Component for C19_16 {
@@ -3978,7 +3978,7 @@ impl Component for C19_16 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(605) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_0, s1: C18_12, s2: C18_18, s3: C18_13)]
 pub struct C19_17(pub u64);
 impl Component for C19_17 {
@@ -3988,7 +3988,7 @@ impl Component for C19_17 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(606) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_4, s1: C18_18, s2: C18_19, s3: C18_2)]
 pub struct C19_18(pub u64);
 impl Component for C19_18 {
@@ -3998,7 +3998,7 @@ impl Component for C19_18 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(607) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s0: C18_7, s1: C18_12, s2: C18_4, s3: C18_9)]
 pub struct C19_19(pub u64);
 impl Component for C19_19 {
@@ -4008,7 +4008,7 @@ impl Component for C19_19 {
     #[inline]
     fn update(&mut self, input: Self::Input<'_>) -> u64 { (input.s0.rotate_left(1) ^ input.s1.rotate_left(2) ^ input.s2.rotate_left(3) ^ input.s3.rotate_left(4)).wrapping_add(608) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(r0: C19_0, r1: C19_1, r2: C19_2, r3: C19_3, r4: C19_4, r5: C19_5, r6: C19_6, r7: C19_7, r8: C19_8, r9: C19_9, r10: C19_10, r11: C19_11, r12: C19_12, r13: C19_13, r14: C19_14, r15: C19_15, r16: C19_16, r17: C19_17, r18: C19_18, r19: C19_19)]
 pub struct App;
 impl Component for App {

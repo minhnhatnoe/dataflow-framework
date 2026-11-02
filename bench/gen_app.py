@@ -466,7 +466,7 @@ impl<S: Symbol, W: Node<Output = <S as Symbol>::Ev>> Feed<S> for W {}
         feed_def = "/// A listener component: a node whose output is the exchange's latest frame.\npub trait Feed<S>: Node<Output = Frame> {}\n"
     comp = [f"""//! Thin generic components over the non-generic cores (the recommended pattern).
 use std::marker::PhantomData;
-use dataflow_flat::{{Component, ComponentSubscription, Node}};
+use dataflow_flat::{{Component, ComponentSubscription, UpdateHandler, Node}};
 use crate::cores::*;
 use crate::symbol::Symbol;
 use crate::wire::*;
@@ -479,7 +479,7 @@ use crate::wire::*;
             limpl = f"impl dataflow_flat::Listener for {ws} {{ type Requests = crate::stats::Reqs; }}\n" if REQ else ""
             newbody = (f"{{ crate::stats::SUBS[{e}].store(i.requests.n, std::sync::atomic::Ordering::Relaxed); crate::stats::SUBKEYS[{e}].store(i.requests.digest, std::sync::atomic::Ordering::Relaxed); ({ws}, {evt}::default()) }}"
                        if REQ else f"{{ ({ws}, {evt}::default()) }}")
-            comp.append(f"""#[derive(ComponentSubscription)]
+            comp.append(f"""#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe({lsub(var)})]{lattr}
 pub struct {ws};
 {limpl}impl Component for {ws} {{
@@ -494,7 +494,7 @@ pub struct {ws};
             upd = "*i.w"
         else:
             upd = f"if let Wire::{var}(f) = i.w {{ self.last = *f }}\n        self.last"
-        comp.append(f"""#[derive(ComponentSubscription)]
+        comp.append(f"""#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe({lsub(var)})]
 pub struct {ws} {{ last: Frame }}
 impl Component for {ws} {{
@@ -510,7 +510,7 @@ impl<S> Feed<S> for {ws} {{}}
         core_init = core_init or f"{core_t}::default()"
         wc = f"<{gen}>"
         names = ", ".join(g.split(":")[0].strip() for g in gen.split(","))
-        return f"""#[derive(ComponentSubscription)]
+        return f"""#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe({subs})]
 pub struct {name}{wc} {{ {state}: {core_t}, _p: PhantomData<fn() -> ({names})> }}
 impl{wc} Component for {name}<{names}> {extra_bounds} {{
@@ -640,11 +640,11 @@ pub fn run_batch(p: &mut Pipe, pkts: &[Wire]) {{
         subs = ",\n    ".join(f"q{k}: crate::{mod}::Q{k}" for k in range(M.n[e]))
         digest = sender_sum(M, e, lambda k: f"i.q{k}")
         write(f"{app}/src/{mod}/sender.rs", f"""//! Order sender for {mod}: subscribes to every quoter of the exchange (wide).
-use dataflow_flat::{{Component, ComponentSubscription}};
+use dataflow_flat::{{Component, ComponentSubscription, UpdateHandler}};
 use marketlib::DigestCore;
 use marketlib::stats::SENT;
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(
     {subs}
 )]
@@ -667,11 +667,11 @@ impl Component for Sender {{
         rsubs.append(f"x{ix}: crate::cross::X{d[1]}" if d[0] == "x" else f"x{ix}: crate::{EX[d[1]][0]}::Q{d[2]}")
     rsum = risk_sum(M, lambda i: f"i.x{i}", lambda e, k: f"i.x{M.risk_deps.index(('q', e, k))}")
     write(f"{app}/src/risk.rs", f"""//! Risk sink: reads every cross-venue join.
-use dataflow_flat::{{Component, ComponentSubscription}};
+use dataflow_flat::{{Component, ComponentSubscription, UpdateHandler}};
 use marketlib::DigestCore;
 use marketlib::stats::RISK;
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(
     {(",\n    ").join(rsubs)}
 )]
@@ -694,11 +694,11 @@ impl Component for Risk {{
     body = "\n        ".join(big_math(M, lambda j: f"i.f{j}"))
     big_attr = "#[inline(always)]" if big_inline else ""
     write(f"{app}/src/big.rs", f"""//! The big component: wide, with a long body. Lives alone in its file.
-use dataflow_flat::{{Component, ComponentSubscription}};
+use dataflow_flat::{{Component, ComponentSubscription, UpdateHandler}};
 use marketlib::DigestCore;
 use marketlib::stats::BIG;
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(
     {bsubs}
 )]

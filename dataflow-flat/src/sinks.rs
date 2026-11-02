@@ -30,7 +30,7 @@ pub trait SinkList: 'static {
 macro_rules! sink_list_impl {
     ($($C:ident $i:tt)+) => {
         impl<$($C: Comp,)+> SinkList for ($($C,)+) {
-            type Subs = ($(Sub<$C, (), $i>,)+);
+            type Subs = ($(Sub<$C, (), $i, ()>,)+);
         }
     };
 }

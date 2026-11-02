@@ -30,7 +30,7 @@ pub const KIND_COMPONENT: u8 = 1;
 pub const KIND_ANCHOR: u8 = 3;
 
 /// What a subscriber's field is when it reads this node: `&Output` for a node that stores a
-/// value, a view (`HandleComponent::Output<'a>`) for a handle component.
+/// value, a view (`HandleComponent::View<'a>`) for a handle component.
 pub trait Edge {
     type Read<'a>
     where
@@ -54,9 +54,6 @@ pub trait Vertex: __private::Sealed + Edge + Sized + 'static {
     /// Root, component or anchor.
     type Kind: NodeKind;
     const KIND: u8;
-    /// Is this a handler component (a `#[subscribe]` with handled entries)? The plan treats its
-    /// handled edges differently (see `handler`).
-    const HANDLER: bool = false;
     /// Is this a handle component? Its subscribers read a view of its state, so the plan gives
     /// them the `PG_RUN_VIEW` kinds (by-value components keep `PG_RUN`/`PG_RUN_IF`).
     const VIEW: bool = false;
@@ -149,7 +146,7 @@ impl<T> Is<T> for T {
     }
 }
 
-/// A handle component's view of its state and stored handle (`HandleComponent::output`).
+/// A handle component's view of its state and stored handle (`HandleComponent::view`).
 #[doc(hidden)]
 pub trait HandleView: Vertex<Kind = HandleKind> {
     fn __view<'a>(&'a self, handle: &'a Self::Stored) -> <Self as Edge>::Read<'a>;

@@ -41,6 +41,7 @@ use std::any::{type_name, TypeId};
 use crate::component::Sub;
 use crate::identity::{Hashed, BLANK};
 use crate::node::{Vertex, KIND_ANCHOR, KIND_COMPONENT, KIND_ROOT};
+use crate::handler::Hook;
 use crate::select::ChainWalk;
 use crate::table::Table;
 
@@ -166,7 +167,7 @@ const fn message(parts: &[&[u8]]) -> ([u8; MSG], usize) {
 /// recursion into `N::Subs`, which keeps constant evaluation at one stack frame
 /// per graph layer. The trait solver's proof is unaffected: the only bound is
 /// `N::Subs: [const] Upstream`, a trait on the tree rather than on the node.
-const fn enter<N: Vertex, C: [const] ChainWalk<N::Stored>>(plan: &mut Plan, parent: u32, pos: u32) -> (u32, bool) {
+const fn enter<N: Vertex, C: [const] ChainWalk<N::Stored>, X: Hook>(plan: &mut Plan, parent: u32, pos: u32) -> (u32, bool) {
     let id = TypeId::of::<N>();
     let slot = plan.table.slot(&plan.ids, <N as Hashed>::HASH, id);
     let (i, new) = if let Some(at) = plan.table.at(slot) {
@@ -191,7 +192,6 @@ const fn enter<N: Vertex, C: [const] ChainWalk<N::Stored>>(plan: &mut Plan, pare
         plan.table.put(slot, i);
         plan.ids[i] = id;
         plan.kind[i] = N::KIND;
-        plan.handler[i] = N::HANDLER;
         plan.first_parent[i] = parent;
         plan.first_pos[i] = pos;
         plan.len = i + 1;
@@ -211,6 +211,12 @@ const fn enter<N: Vertex, C: [const] ChainWalk<N::Stored>>(plan: &mut Plan, pare
             plan.cur_h = false;
             let dn = C::walk(plan, i as u32, NONE);
             plan.edge_h[e] = plan.cur_h;
+            // The edge is handled (`on_update` is called when it fires) iff its owner's
+            // `UpdateHandler` impl for it is `ACTIVE`; one such edge makes the owner a handler.
+            plan.edge_a[e] = X::ACTIVE;
+            if X::ACTIVE {
+                plan.handler[parent as usize] = true;
+            }
             plan.edge_pos[e] = pos;
             plan.edge_to[e] = i as u32;
             plan.edge_dn[e] = dn;
@@ -265,7 +271,7 @@ const fn visit<N: Vertex>(plan: &mut Plan, parent: u32, pos: u32)
 where
     N::Subs: [const] Upstream,
 {
-    let (i, new) = enter::<N, ()>(plan, parent, pos);
+    let (i, new) = enter::<N, (), ()>(plan, parent, pos);
     if new {
         <N::Subs as Upstream>::visit_all(plan, i);
         leave::<N>(plan, i);
@@ -287,14 +293,14 @@ pub const trait Upstream {
 }
 
 macro_rules! upstream_leaf {
-    ([$($h:ident $c:ident $i:ident)*]) => {
+    ([$($h:ident $c:ident $i:ident $x:ident)*]) => {
         #[allow(unused_variables)]
-        const impl<$($h: Vertex, $c: [const] ChainWalk<<$h as Vertex>::Stored>, const $i: usize),*> Upstream for ($(Sub<$h, $c, $i>,)*)
+        const impl<$($h: Vertex, $c: [const] ChainWalk<<$h as Vertex>::Stored>, const $i: usize, $x: Hook),*> Upstream for ($(Sub<$h, $c, $i, $x>,)*)
         where $($h::Subs: [const] Upstream,)*
         {
             fn visit_all(plan: &mut Plan, parent: u32) {
                 $({
-                    let (i, new) = enter::<$h, $c>(plan, parent, $i as u32);
+                    let (i, new) = enter::<$h, $c, $x>(plan, parent, $i as u32);
                     if new {
                         <$h::Subs as Upstream>::visit_all(plan, i);
                         leave::<$h>(plan, i);
@@ -417,12 +423,14 @@ pub struct Plan {
     sc_keys: [u32; MAX_TERMS],
     sc_head: [u32; MAX_DECISIONS],
     sc_used: [bool; MAX_DECISIONS],
-    /// Is the node a handler component? Is edge `e` a handled edge, and the entry
-    /// position that named it?
+    /// Is the node a handler component (some edge is `ACTIVE`)? Is edge `e` an unnamed one (never
+    /// read in `update`, never stored), and the entry position that named it?
     handler: [bool; MAX_COMPONENTS],
     /// Does the node subscribe to a handle component?
     view: [bool; MAX_COMPONENTS],
     edge_h: [bool; MAX_EDGES],
+    /// Is edge `e` handled (its owner's `UpdateHandler` impl for it is `ACTIVE`)?
+    edge_a: [bool; MAX_EDGES],
     edge_pos: [u32; MAX_EDGES],
     cur_h: bool,
     /// Items of handler runs: entry position and mode (bit 0: the parent's flag
@@ -580,6 +588,7 @@ impl Plan {
             handler: [false; MAX_COMPONENTS],
             view: [false; MAX_COMPONENTS],
             edge_h: [false; MAX_EDGES],
+            edge_a: [false; MAX_EDGES],
             edge_pos: [0; MAX_EDGES],
             cur_h: false,
             hi_len: 0,
@@ -1399,7 +1408,7 @@ impl Plan {
     }
     // Candidate handled edges of entry `q` of `lst`: a cursor `c` (`NONE` = end).
     const fn h_skip(&self, mut e: u32) -> u32 {
-        while e != NONE && !self.edge_h[e as usize] {
+        while e != NONE && !self.edge_a[e as usize] {
             e = self.edge_next[e as usize];
         }
         e
@@ -1622,7 +1631,7 @@ impl Plan {
             }
             c = self.h_next(q, c);
         }
-        let n = self.new_node(PG_HRUN, self.cpos[i], guarded as u32);
+        let n = self.new_node(PG_HRUN, self.cpos[i], guarded as u32 | ((self.view[i] as u32) << 1));
         self.pg_c[n as usize] = start as u32;
         self.pg_d[n as usize] = (self.hi_len - start) as u32;
         n
@@ -1630,7 +1639,11 @@ impl Plan {
 
     /// Handler run: is it guarded by the firing of its edges.
     pub(crate) const fn hr_guarded(&self, n: usize) -> bool {
-        self.pg_b[n] != 0
+        self.pg_b[n] & 1 != 0
+    }
+    /// Handler run: does the component read a handle parent (it is run through the split of the states)?
+    pub(crate) const fn hr_view(&self, n: usize) -> bool {
+        self.pg_b[n] & 2 != 0
     }
     /// Handler run: first item and number of items.
     pub(crate) const fn hr_start(&self, n: usize) -> usize {
@@ -1652,7 +1665,7 @@ impl Plan {
         let mut e = self.up_head[i];
         let mut n = 0;
         while e != NONE {
-            if self.edge_h[e as usize] {
+            if self.edge_a[e as usize] {
                 n += 1;
             }
             e = self.edge_next[e as usize];
@@ -2472,14 +2485,14 @@ mod trace {
     use super::*;
     use crate::node::{KIND_COMPONENT, KIND_ROOT};
     use crate::sinks::Anchor;
-    use crate::{Component, ComponentSubscription, Root};
+    use crate::{Component, ComponentSubscription, Root, UpdateHandler};
 
     #[derive(Root)]
     pub struct Poll;
 
     macro_rules! comp {
         ($name:ident, [$($n:ident: $d:ty),*]) => {
-            #[derive(ComponentSubscription)]
+            #[derive(ComponentSubscription, UpdateHandler)]
             #[subscribe($($n: $d),*)]
             pub struct $name;
             impl Component for $name {
@@ -2528,7 +2541,7 @@ mod trace {
     }
     macro_rules! scomp {
         ($name:ident, [$($sub:tt)*]) => {
-            #[derive(ComponentSubscription)]
+            #[derive(ComponentSubscription, UpdateHandler)]
             #[subscribe($($sub)*)]
             pub struct $name;
             impl Component for $name {
@@ -2605,7 +2618,7 @@ mod handler_trace {
     key!(K1, 1);
     macro_rules! scomp {
         ($name:ident, [$($sub:tt)*]) => {
-            #[derive(ComponentSubscription)]
+            #[derive(ComponentSubscription, UpdateHandler)]
             #[subscribe($($sub)*)]
             pub struct $name;
             impl Component for $name {
@@ -2629,8 +2642,8 @@ mod handler_trace {
         fn new((): (), _: Self::Init<'_>) -> (Self, u8) { (H, 0) }
         fn update(&mut self, _: Self::Input<'_>) -> u8 { 0 }
     }
-    impl UpdateHandler<X> for H { fn on_update(&mut self, _: &u8) {} }
-    impl UpdateHandler<Y> for H { fn on_update(&mut self, _: &u8) {} }
+    impl UpdateHandler<X> for H { fn on_update(&mut self, _: Self::Input<'_>, _: &u8) {} }
+    impl UpdateHandler<Y> for H { fn on_update(&mut self, _: Self::Input<'_>, _: &u8) {} }
 
     #[derive(ComponentSubscription)]
     #[subscribe(X, Y, z: Z)]
@@ -2641,8 +2654,9 @@ mod handler_trace {
         fn new((): (), _: Self::Init<'_>) -> (Self, u8) { (G, 0) }
         fn update(&mut self, _: Self::Input<'_>) -> u8 { 0 }
     }
-    impl UpdateHandler<X> for G { fn on_update(&mut self, _: &u8) {} }
-    impl UpdateHandler<Y> for G { fn on_update(&mut self, _: &u8) {} }
+    impl UpdateHandler<X> for G { fn on_update(&mut self, _: Self::Input<'_>, _: &u8) {} }
+    impl UpdateHandler<Y> for G { fn on_update(&mut self, _: Self::Input<'_>, _: &u8) {} }
+    impl UpdateHandler<Z> for G { const ACTIVE: bool = false; }
 
     /// Inside a switch leaf the fired edges are static: one item per leaf and no tests.
     #[test]
@@ -2694,7 +2708,7 @@ mod shapes {
     }
     macro_rules! comp {
         ($name:ident, [$($sub:tt)*]) => {
-            #[derive(ComponentSubscription)]
+            #[derive(ComponentSubscription, UpdateHandler)]
             #[subscribe($($sub)*)]
             pub struct $name;
             impl Component for $name {
@@ -2734,7 +2748,7 @@ mod shapes {
         fn new((): (), _: Self::Init<'_>) -> (Self, u8) { (HH, 0) }
         fn update(&mut self, _: Self::Input<'_>) -> u8 { 0 }
     }
-    macro_rules! upd { ($($x:ident),*) => { $(impl UpdateHandler<$x> for HH { fn on_update(&mut self, _: &u8) {} })* }; }
+    macro_rules! upd { ($($x:ident),*) => { $(impl UpdateHandler<$x> for HH { fn on_update(&mut self, _: Self::Input<'_>, _: &u8) {} })* }; }
     upd!(X0, X1, X2, X3, X4, X5);
 
     #[derive(ComponentSubscription)]
@@ -2746,8 +2760,9 @@ mod shapes {
         fn new((): (), _: Self::Init<'_>) -> (Self, u8) { (HZ, 0) }
         fn update(&mut self, _: Self::Input<'_>) -> u8 { 0 }
     }
-    macro_rules! updz { ($($x:ident),*) => { $(impl UpdateHandler<$x> for HZ { fn on_update(&mut self, _: &u8) {} })* }; }
+    macro_rules! updz { ($($x:ident),*) => { $(impl UpdateHandler<$x> for HZ { fn on_update(&mut self, _: Self::Input<'_>, _: &u8) {} })* }; }
     updz!(X0, X1, X2, X3, X4, X5);
+    impl UpdateHandler<Z> for HZ { const ACTIVE: bool = false; }
 
     /// Program shapes of a few graphs: join of exclusive keys, mixed, handlers, plain.
     #[test]

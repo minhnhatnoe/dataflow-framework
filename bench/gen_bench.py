@@ -46,7 +46,7 @@ impl {nm} {{
 
 def components_flat():
     # Nightly `dataflow-flat` crate: derive syntax.
-    out=["use dataflow_flat::{Component, ComponentSubscription, Root};",
+    out=["use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Root};",
          "use std::sync::atomic::{AtomicU64, Ordering};",
          "#[derive(Root)]\npub struct Poll;",
          "pub static OUT: AtomicU64 = AtomicU64::new(0);"]
@@ -54,7 +54,7 @@ def components_flat():
         nm = name(n)
         subs = ", ".join(f"s{i}: {name(d)}" for i, d in enumerate(ds)) if ds else "p: Poll"
         attr = f"#[subscribe({subs})]\n"
-        out.append(f"""#[derive(ComponentSubscription)]
+        out.append(f"""#[derive(ComponentSubscription, UpdateHandler)]
 {attr}pub struct {nm}(pub u64);
 impl Component for {nm} {{
     type Config = ();
@@ -66,7 +66,7 @@ impl Component for {nm} {{
     # The single root: subscribes to the last layer; its output is the XOR checksum.
     subs = ", ".join(f"r{i}: {name(r)}" for i, r in enumerate(roots))
     xor_in = " ^ ".join(f"*input.r{i}" for i in range(len(roots)))
-    out.append(f"""#[derive(ComponentSubscription)]
+    out.append(f"""#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe({subs})]
 pub struct App;
 impl Component for App {{

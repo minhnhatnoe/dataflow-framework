@@ -128,8 +128,8 @@ pub trait ReqList: DepList {
     fn collect(pass: &mut ConstructPass);
 }
 macro_rules! req_leaf {
-    ([$($E:ident $C:ident $I:ident)*]) => {
-        impl<$($E: Vertex, $C: ChainReq<<$E as Vertex>::Stored, <$E as Vertex>::Requests>, const $I: usize,)*> ReqList for ($(Sub<$E, $C, $I>,)*) {
+    ([$($E:ident $C:ident $I:ident $X:ident)*]) => {
+        impl<$($E: Vertex, $C: ChainReq<<$E as Vertex>::Stored, <$E as Vertex>::Requests>, const $I: usize, $X: 'static,)*> ReqList for ($(Sub<$E, $C, $I, $X>,)*) {
             #[allow(unused_variables)]
             fn collect(pass: &mut ConstructPass) {
                 $(if <$E as Vertex>::LISTENS {

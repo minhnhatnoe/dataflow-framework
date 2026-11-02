@@ -54,7 +54,7 @@ impl<S: Symbol> Initial<Frame> for Pick<S> {
     }
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(m: Msg)]
 pub struct Ws;
 impl Component for Ws {
@@ -75,7 +75,7 @@ impl<const K: usize> Symbol for Sy<K> {
     const NAME: &'static str = "Sy";
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(Pick::<S>(u)): Ws)]
 pub struct Quoter<S: Symbol>(PhantomData<S>);
 impl<S: Symbol> Component for Quoter<S> {
@@ -111,7 +111,7 @@ macro_rules! oms {
             }
         }
         impl<S: Symbol> UpdateHandler<Quoter<S>> for $name {
-            fn on_update(&mut self, v: &u64) {
+            fn on_update(&mut self, _input: Self::Input<'_>, v: &u64) {
                 self.got.push((S::KEY, *v));
             }
         }
@@ -154,7 +154,7 @@ probe_test!(concat_of_big_catalogs, OmsCat2, Concat<Cat300, CatHi>, [0usize, 15,
 
 macro_rules! ticks {
     ($($name:ident),*) => { $(
-        #[derive(ComponentSubscription)]
+        #[derive(ComponentSubscription, UpdateHandler)]
         #[subscribe(m: Msg)]
         pub struct $name;
         impl Component for $name {
@@ -176,7 +176,7 @@ ticks!(First, T0, T1, T2, Last, U0, U1);
 #[derive(ComponentSubscription)]
 #[subscribe(First, for T in catalog![T0, T1, T2] { T }, Last, limits: Limits, for U in catalog![U0, U1] { U })]
 pub struct Mix;
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(m: Msg)]
 pub struct Limits;
 impl Component for Limits {
@@ -203,12 +203,15 @@ impl Component for Mix {
 }
 macro_rules! handles_mix {
     ($($t:ident),*) => { $(impl UpdateHandler<$t> for Mix {
-        fn on_update(&mut self, _: &u64) {
+        fn on_update(&mut self, _input: Self::Input<'_>, _: &u64) {
             log(concat!("on ", stringify!($t)));
         }
     })* };
 }
 handles_mix!(First, T0, T1, T2, Last, U0, U1);
+impl UpdateHandler<Limits> for Mix {
+    const ACTIVE: bool = false;
+}
 
 #[test]
 fn for_and_plain_entries_keep_listing_order() {
@@ -252,7 +255,7 @@ impl<X: Tag, S: Symbol> Symbol for Pair<X, S> {
     const NAME: &'static str = "Pair";
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(Pick::<Pair<X, S>>(u)): Ws)]
 pub struct Book<X: Tag, S: Symbol>(PhantomData<(X, S)>);
 impl<X: Tag, S: Symbol> Component for Book<X, S> {
@@ -285,7 +288,7 @@ macro_rules! books {
             }
         }
         impl<X: Tag, S: Symbol> UpdateHandler<Book<X, S>> for $name {
-            fn on_update(&mut self, _: &u64) {
+            fn on_update(&mut self, _input: Self::Input<'_>, _: &u64) {
                 self.got.push(<Pair<X, S> as Symbol>::KEY);
             }
         }
@@ -343,7 +346,7 @@ pub enum Mkt {
 }
 
 /// The frames: key 0, 1, 2 become `Mkt::A`, `B`, `C`; any other key is no frame.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(m: Msg)]
 pub struct MktWs;
 impl Component for MktWs {
@@ -363,7 +366,7 @@ impl Component for MktWs {
 }
 
 /// Reads one market's part of a frame: `S` is any marker that selects a `u64` out of a `Mkt`.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(S(u)): MktWs)]
 pub struct Leg<S: Select<Mkt, Out = u64>>(PhantomData<S>);
 impl<S: Select<Mkt, Out = u64>> Component for Leg<S> {
@@ -390,7 +393,7 @@ impl Component for Fan {
     fn update(&mut self, _: Self::Input<'_>) {}
 }
 impl<S: Select<Mkt, Out = u64>> UpdateHandler<Leg<S>> for Fan {
-    fn on_update(&mut self, v: &u64) {
+    fn on_update(&mut self, _input: Self::Input<'_>, v: &u64) {
         log(format!("key {} -> {}", S::KEY, v));
     }
 }

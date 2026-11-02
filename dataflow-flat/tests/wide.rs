@@ -6,7 +6,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::Mutex;
 
-use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline, Root};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Pipeline, Root};
 
 #[derive(Root)]
 pub struct Poll;
@@ -47,7 +47,7 @@ fn reset() {
 /// `Name(n)`: output `n`, no subscriptions.
 macro_rules! leaf {
     ($name:ident, $n:expr) => {
-        #[derive(ComponentSubscription)]
+        #[derive(ComponentSubscription, UpdateHandler)]
         #[subscribe(p: Poll)]
         pub struct $name(Life);
         impl Component for $name {
@@ -68,7 +68,7 @@ macro_rules! leaf {
 /// input changes the result), plus `$base`.
 macro_rules! summing {
     ($name:ident, $base:expr, [$($f:ident: $d:ty),*]) => {
-        #[derive(ComponentSubscription)]
+        #[derive(ComponentSubscription, UpdateHandler)]
         #[subscribe($($f: $d),*)]
         pub struct $name(Life);
         impl Component for $name {

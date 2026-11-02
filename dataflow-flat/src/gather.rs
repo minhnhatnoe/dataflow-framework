@@ -179,8 +179,8 @@ pub trait GatherIn<A: Layout, const P: usize>: DepList {
     fn gather<'a>(root: &'a A::Root, outs: &'a A::Outs) -> Self::Inputs<'a>;
 }
 macro_rules! gather_in_leaf {
-    ([$($E:ident $C:ident $I:ident)*]) => {
-        impl<A: Layout, const P: usize, $($E: Source<A>, $C: ChainRead<$E, A, P, $I>, const $I: usize,)*> GatherIn<A, P> for ($(Sub<$E, $C, $I>,)*) {
+    ([$($E:ident $C:ident $I:ident $X:ident)*]) => {
+        impl<A: Layout, const P: usize, $($E: Source<A>, $C: ChainRead<$E, A, P, $I>, const $I: usize, $X: 'static,)*> GatherIn<A, P> for ($(Sub<$E, $C, $I, $X>,)*) {
             #[cfg_attr(not(debug_assertions), inline(always))]
             #[cfg_attr(debug_assertions, inline)]
             #[allow(unused_variables)]
@@ -210,8 +210,8 @@ pub trait GatherInit<A: Layout, const P: usize>: DepList {
     fn gather<'a>(states: &'a A::StatesOpt, outs: &'a A::OutsOpt) -> Self::Inits<'a>;
 }
 macro_rules! gather_init_leaf {
-    ([$($E:ident $C:ident $I:ident)*]) => {
-        impl<A: Layout, const P: usize, $($E: Source<A>, $C: ChainSeed<$E, A, P, $I>, const $I: usize,)*> GatherInit<A, P> for ($(Sub<$E, $C, $I>,)*) {
+    ([$($E:ident $C:ident $I:ident $X:ident)*]) => {
+        impl<A: Layout, const P: usize, $($E: Source<A>, $C: ChainSeed<$E, A, P, $I>, const $I: usize, $X: 'static,)*> GatherInit<A, P> for ($(Sub<$E, $C, $I, $X>,)*) {
             #[cfg_attr(not(debug_assertions), inline(always))]
             #[cfg_attr(debug_assertions, inline)]
             #[allow(unused_variables)]
@@ -497,8 +497,8 @@ pub trait GatherCx<A: Layout, const P: usize>: DepList {
         A::States: SplitAt<P>;
 }
 macro_rules! gather_cx_leaf {
-    ([$($E:ident $C:ident $I:ident)*]) => {
-        impl<A: Layout, const P: usize, $($E: Source<A>, $C: ChainReadCx<$E, A, P, $I>, const $I: usize,)*> GatherCx<A, P> for ($(Sub<$E, $C, $I>,)*) {
+    ([$($E:ident $C:ident $I:ident $X:ident)*]) => {
+        impl<A: Layout, const P: usize, $($E: Source<A>, $C: ChainReadCx<$E, A, P, $I>, const $I: usize, $X: 'static,)*> GatherCx<A, P> for ($(Sub<$E, $C, $I, $X>,)*) {
             #[cfg_attr(not(debug_assertions), inline(always))]
             #[cfg_attr(debug_assertions, inline)]
             #[allow(unused_variables)]
@@ -550,8 +550,8 @@ pub trait Ready<A: Layout>: DepList {
     fn ready(root: &A::Root, outs: &A::Outs, fired: &FiredOf<A>) -> bool;
 }
 macro_rules! ready_leaf {
-    ([$($E:ident $C:ident $I:ident)*]) => {
-        impl<A: Layout, $($E: Source<A>, $C: SelectChain<<$E as Vertex>::Stored>, const $I: usize,)*> Ready<A> for ($(Sub<$E, $C, $I>,)*) {
+    ([$($E:ident $C:ident $I:ident $X:ident)*]) => {
+        impl<A: Layout, $($E: Source<A>, $C: SelectChain<<$E as Vertex>::Stored>, const $I: usize, $X: 'static,)*> Ready<A> for ($(Sub<$E, $C, $I, $X>,)*) {
             #[cfg_attr(not(debug_assertions), inline(always))]
             #[cfg_attr(debug_assertions, inline)]
             #[allow(unused_variables)]

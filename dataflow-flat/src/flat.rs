@@ -47,7 +47,7 @@ pub trait PosSpan {
     const LO: usize;
     const HI: usize;
 }
-impl<E: Vertex, C, const I: usize> PosSpan for Sub<E, C, I> {
+impl<E: Vertex, C, const I: usize, X> PosSpan for Sub<E, C, I, X> {
     const LO: usize = I;
     const HI: usize = I + 1;
 }
@@ -65,7 +65,7 @@ dataflow_macros::tuple_sizes!(pos_span_impl);
 pub trait PosSelect<W: Target> {
     const POS: usize;
 }
-impl<E: Vertex, C, const I: usize, W: Target> PosSelect<W> for Sub<E, C, I> {
+impl<E: Vertex, C, const I: usize, X, W: Target> PosSelect<W> for Sub<E, C, I, X> {
     const POS: usize = 0;
 }
 macro_rules! pos_select_impl {
@@ -87,7 +87,7 @@ dataflow_macros::select_tuples!(pos_select_impl);
 pub trait Pick<W: Target, const S: usize> {
     type T: Vertex;
 }
-impl<E: Vertex, C, const I: usize, W: Target> Pick<W, 0> for Sub<E, C, I> {
+impl<E: Vertex, C, const I: usize, X, W: Target> Pick<W, 0> for Sub<E, C, I, X> {
     type T = E;
 }
 macro_rules! pick_impl {
@@ -115,10 +115,13 @@ impl<const I: usize> Target for EntryPos<I> {
 pub trait PickEdge<W: Target, const S: usize> {
     type E: Vertex;
     type Ch: crate::select::SelectChain<<Self::E as Vertex>::Stored>;
+    /// The handler hook of the entry (see `handler::By`).
+    type X: 'static;
 }
-impl<E: Vertex, C: crate::select::SelectChain<E::Stored>, const I: usize, W: Target> PickEdge<W, 0> for Sub<E, C, I> {
+impl<E: Vertex, C: crate::select::SelectChain<E::Stored>, const I: usize, X: 'static, W: Target> PickEdge<W, 0> for Sub<E, C, I, X> {
     type E = E;
     type Ch = C;
+    type X = X;
 }
 macro_rules! pick_edge_impl {
     (($($g:ident)+) $k:tt $s:ident) => {
@@ -128,6 +131,7 @@ macro_rules! pick_edge_impl {
         {
             type E = <$s as PickEdge<W, { <$s as PosSelect<W>>::POS }>>::E;
             type Ch = <$s as PickEdge<W, { <$s as PosSelect<W>>::POS }>>::Ch;
+            type X = <$s as PickEdge<W, { <$s as PosSelect<W>>::POS }>>::X;
         }
     };
 }

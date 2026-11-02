@@ -1,5 +1,5 @@
 //! Handle components (`#[handle]` + `impl HandleComponent`): the pipeline stores a handle and a
-//! subscriber's field is the component's `Output<'a>` itself, owned or borrowed, computed from the
+//! subscriber's field is the component's `View<'a>` itself, owned or borrowed, computed from the
 //! parent's state each time the subscriber runs or is constructed. Checks values, the view of a
 //! parent that did not run in this step, a wide subscriber, an aliased parent, mixed by-value and
 //! handle parents, lifecycle counts, execution order and generic user code. No `#![feature]` here.
@@ -7,7 +7,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::Mutex;
 
-use dataflow_flat::{Component, ComponentSubscription, Configs, Demux, HandleComponent, Node, Pipeline, Root, Sinks};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Demux, HandleComponent, Node, Pipeline, Root, Sinks};
 
 static SERIAL: Mutex<()> = Mutex::new(());
 static LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -62,7 +62,7 @@ fn val(m: &Msg) -> u64 {
 
 /// A ring of four values; the handle is the index of the last one written; the view is a
 /// reference into the state. Runs on `A` events only.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Msg::A(v): Msg)]
 #[handle]
 pub struct Ring {
@@ -73,7 +73,7 @@ pub struct Ring {
 impl HandleComponent for Ring {
     type Config = u64;
     type Handle = usize;
-    type Output<'a> = &'a u64;
+    type View<'a> = &'a u64;
     fn new(start: u64, _: Self::Init<'_>) -> (Self, usize) {
         log("new Ring");
         (Ring { arr: [start; 4], n: 0, _life: Life::new() }, 0)
@@ -86,13 +86,13 @@ impl HandleComponent for Ring {
         self.arr[slot] = *i.v;
         slot
     }
-    fn output<'a>(&'a self, h: &'a usize) -> &'a u64 {
+    fn view<'a>(&'a self, h: &'a usize) -> &'a u64 {
         &self.arr[*h]
     }
 }
 
 /// `Handle = ()`: the whole state is the value; the view is owned.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(m: Msg)]
 #[handle]
 pub struct Level {
@@ -102,7 +102,7 @@ pub struct Level {
 impl HandleComponent for Level {
     type Config = ();
     type Handle = ();
-    type Output<'a> = u64;
+    type View<'a> = u64;
     fn new((): (), _: Self::Init<'_>) -> (Self, ()) {
         log("new Level");
         (Level { v: 7, _life: Life::new() }, ())
@@ -112,13 +112,13 @@ impl HandleComponent for Level {
         UPDATE.fetch_add(1, SeqCst);
         self.v += val(i.m);
     }
-    fn output<'a>(&'a self, (): &'a ()) -> u64 {
+    fn view<'a>(&'a self, (): &'a ()) -> u64 {
         self.v
     }
 }
 
 /// A by-value component.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(m: Msg)]
 pub struct Twice(Life);
 impl Component for Twice {
@@ -137,7 +137,7 @@ impl Component for Twice {
 
 /// Mixed parents, in this listing order: a handle with a borrowed view, a by-value component, a
 /// handle with an owned view, the root. Its `new` gets the views of the constructed parents.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(r: Ring, t: Twice, l: Level, m: Msg)]
 pub struct Mixed(Life);
 static NEW_SEEN: Mutex<Vec<(u64, u64, u64)>> = Mutex::new(Vec::new());
@@ -174,7 +174,7 @@ fn mixed_parents_owned_and_borrowed_views() {
     let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     reset();
     NEW_SEEN.lock().unwrap().clear();
-    let mut p = Pipeline::<Msg, (Mixed,)>::build(Configs::new().with_handle::<Ring>(5)).unwrap();
+    let mut p = Pipeline::<Msg, (Mixed,)>::build(Configs::new().with::<Ring>(5)).unwrap();
     // `new` saw the views of the constructed parents: ring start (5), twice 0, level 7.
     assert_eq!(*NEW_SEEN.lock().unwrap(), vec![(5, 0, 7)]);
     // The construction order is the execution order: Ring, Twice, Level, Mixed.
@@ -229,7 +229,7 @@ fn lifecycle_counts_and_order() {
 
 type RingAgain = Ring;
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(a: Ring, b: RingAgain, c: Ring)]
 pub struct Aliased;
 static ALIASED: Mutex<Vec<(u64, u64, u64)>> = Mutex::new(Vec::new());
@@ -250,7 +250,7 @@ fn an_aliased_parent_is_one_component_with_one_view() {
     let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     reset();
     ALIASED.lock().unwrap().clear();
-    let mut p = Pipeline::<Msg, (Aliased,)>::build(Configs::new().with_handle::<Ring>(1)).unwrap();
+    let mut p = Pipeline::<Msg, (Aliased,)>::build(Configs::new().with::<Ring>(1)).unwrap();
     assert_eq!(p.len(), 2);
     p.push(Msg::A(8));
     p.push(Msg::B(2));
@@ -263,7 +263,7 @@ fn an_aliased_parent_is_one_component_with_one_view() {
 // ---------------------------------------------------------------------------
 
 /// Doubles the ring's view into its own state; the view is the state.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(r: Ring, m: Msg)]
 #[handle]
 pub struct Doubler {
@@ -273,19 +273,19 @@ pub struct Doubler {
 impl HandleComponent for Doubler {
     type Config = ();
     type Handle = ();
-    type Output<'a> = &'a u64;
+    type View<'a> = &'a u64;
     fn new((): (), i: Self::Init<'_>) -> (Self, ()) {
         (Doubler { last: *i.r * 2, _life: Life::new() }, ())
     }
     fn update(&mut self, i: Self::Input<'_>) {
         self.last = *i.r * 2 + val(i.m);
     }
-    fn output<'a>(&'a self, (): &'a ()) -> &'a u64 {
+    fn view<'a>(&'a self, (): &'a ()) -> &'a u64 {
         &self.last
     }
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(d: Doubler, r: Ring)]
 pub struct AfterDoubler;
 static CHAIN: Mutex<Vec<(u64, u64)>> = Mutex::new(Vec::new());
@@ -306,7 +306,7 @@ fn a_handle_component_can_read_a_handle_component() {
     let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     reset();
     CHAIN.lock().unwrap().clear();
-    let mut p = Pipeline::<Msg, (AfterDoubler,)>::build(Configs::new().with_handle::<Ring>(10)).unwrap();
+    let mut p = Pipeline::<Msg, (AfterDoubler,)>::build(Configs::new().with::<Ring>(10)).unwrap();
     p.push(Msg::A(4));
     p.push(Msg::B(1));
     assert_eq!(*CHAIN.lock().unwrap(), vec![(20, 10), (8 + 4, 4), (8 + 1, 4)]);
@@ -316,7 +316,7 @@ fn a_handle_component_can_read_a_handle_component() {
 // A wide subscriber: 30 handle parents, across the blocks of the storage tree
 // ---------------------------------------------------------------------------
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(m: Msg)]
 #[handle]
 pub struct Cell<const K: usize> {
@@ -325,7 +325,7 @@ pub struct Cell<const K: usize> {
 impl<const K: usize> HandleComponent for Cell<K> {
     type Config = ();
     type Handle = u64;
-    type Output<'a> = u64;
+    type View<'a> = u64;
     fn new((): (), _: Self::Init<'_>) -> (Self, u64) {
         (Cell { v: K as u64 }, 1)
     }
@@ -333,12 +333,12 @@ impl<const K: usize> HandleComponent for Cell<K> {
         self.v += val(i.m) + K as u64;
         K as u64
     }
-    fn output<'a>(&'a self, h: &'a u64) -> u64 {
+    fn view<'a>(&'a self, h: &'a u64) -> u64 {
         self.v * 1000 + *h
     }
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(
     c0: Cell<0>,
     c1: Cell<1>,
@@ -416,7 +416,7 @@ pub fn make<R, S: Sinks<R>>() -> Pipeline<R, S> {
 
 /// Generic over any by-value node with a `u64` output, written with `Node<Output = u64>` only:
 /// the field is `&u64`, as before handles existed.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(x: X, l: Level)]
 pub struct Generic<X: Node<Output = u64>>(std::marker::PhantomData<X>);
 static GENERIC: Mutex<Vec<u64>> = Mutex::new(Vec::new());

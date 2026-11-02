@@ -14,12 +14,12 @@ CASES_DIR="$ROOT/target/error-cases"
 export CARGO_TARGET_DIR="$ROOT/target/error-cases-target"
 TIMEOUT="${TIMEOUT:-120}"
 
-PRELUDE='use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline, Root, Sinks};
+PRELUDE='use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline, Root, Sinks, UpdateHandler};
 
 #[derive(Root)]
 pub struct Poll;
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct Src;
 impl Component for Src {
@@ -37,7 +37,7 @@ declare -A CMD PATTERN BODY FEATURES
 CMD[field_typo]=check
 PATTERN[field_typo]='E0609'
 BODY[field_typo]='
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(value: Src)]
 pub struct A;
 impl Component for A {
@@ -51,7 +51,7 @@ fn main() {}'
 CMD[not_a_component]=check
 PATTERN[not_a_component]='E0277.*Node|Node.*not (satisfied|implemented)'
 BODY[not_a_component]='
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(value: String)]
 pub struct A;
 impl Component for A {
@@ -65,7 +65,7 @@ fn main() {}'
 CMD[duplicate_name]=check
 PATTERN[duplicate_name]='duplicate subscription name'
 BODY[duplicate_name]='
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(value: Src, value: Src)]
 pub struct A;
 impl Component for A {
@@ -79,7 +79,7 @@ fn main() {}'
 CMD[wrong_input_type]=check
 PATTERN[wrong_input_type]='E0308|mismatched types'
 BODY[wrong_input_type]='
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(value: Src)]
 pub struct A;
 impl Component for A {
@@ -95,7 +95,7 @@ CMD[cycle]=check
 # subscriptions to be nodes, which needs itself); it names a component of the cycle.
 PATTERN[cycle]='E0275.*overflow evaluating the requirement .*(Upstream|Node|Vertex|DepList)'
 BODY[cycle]='
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(b: B)]
 pub struct A;
 impl Component for A {
@@ -104,7 +104,7 @@ impl Component for A {
     fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (A, 0) }
     fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(a: A)]
 pub struct B;
 impl Component for B {
@@ -119,7 +119,7 @@ fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }'
 CMD[self_cycle]=check
 PATTERN[self_cycle]='E0275.*overflow evaluating the requirement .*(Upstream|Node|Vertex|DepList)'
 BODY[self_cycle]='
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(me: A)]
 pub struct A;
 impl Component for A {
@@ -161,7 +161,7 @@ fn main() { let mut p = Pipeline::<Poll, (Src,)>::build(Configs::new()).unwrap()
 CMD[unreachable_component]=build
 PATTERN[unreachable_component]='E0080.*Orphan is not reachable from the root'
 BODY[unreachable_component]='
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 pub struct Orphan;
 impl Component for Orphan {
     type Config = ();
@@ -169,7 +169,7 @@ impl Component for Orphan {
     fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (Orphan, 0) }
     fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 0 }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s: Src, o: Orphan)]
 pub struct A;
 impl Component for A {
@@ -188,7 +188,7 @@ PATTERN[second_root]='E0080.*Other is a root, but the pipeline.s root is a diffe
 BODY[second_root]='
 #[derive(Root)]
 pub struct Other;
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s: Src, o: Other)]
 pub struct A;
 impl Component for A {
@@ -210,7 +210,7 @@ fn main() { let _ = Pipeline::<Other, (Src,)>::build(Configs::new()); }'
 CMD[keep_input_reference]=check
 PATTERN[keep_input_reference]='lifetime may not live long enough|borrowed data escapes|E0521'
 BODY[keep_input_reference]='
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(value: Src)]
 pub struct A { kept: Option<&'"'"'static u64> }
 impl Component for A {
@@ -230,7 +230,7 @@ fn main() { let _x: Option<SrcInput<'"'"'static>> = None; }'
 CMD[unused_config]=run
 PATTERN[unused_config]='BuildError \{ unused: \[[^]]*Unused'
 BODY[unused_config]='
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 pub struct Unused;
 impl Component for Unused {
     type Config = ();
@@ -256,7 +256,7 @@ G, K = 30, 20
 out = []
 def comp(name, subs):
     attr = "#[subscribe(%s)] " % ", ".join(f"s{i}: {d}" for i, d in enumerate(subs)) if subs else ""
-    out.append(f"#[derive(ComponentSubscription)] {attr}pub struct {name};")
+    out.append(f"#[derive(ComponentSubscription, UpdateHandler)] {attr}pub struct {name};")
     out.append(f"impl Component for {name} {{ type Config = (); type Output = u64; fn new((): (), _: Self::Init<'_>) -> (Self, u64) {{ ({name}, 0) }} fn update(&mut self, _: Self::Input<'_>) -> u64 {{ 0 }} }}")
 for g in range(G):
     for k in range(K):
@@ -279,7 +279,7 @@ impl Select<Poll> for K0 { type Out = Poll; const KEY: u32 = 0; fn select(x: &Po
 impl Select<Poll> for K1 { type Out = Poll; const KEY: u32 = 1; fn select(x: &Poll) -> Option<&Poll> { Some(x) } fn key_of(_: &Poll) -> u32 { 1 } }
 macro_rules! comp {
     ($name:ident, [$($sub:tt)*]) => {
-        #[derive(ComponentSubscription)]
+        #[derive(ComponentSubscription, UpdateHandler)]
         #[subscribe($($sub)*)]
         pub struct $name;
         impl Component for $name {
@@ -379,7 +379,7 @@ read -r -d '' BODY[stored_payload_no_default] <<'EOT'
 pub struct NoDef(u8);
 #[derive(Root, dataflow_flat::Demux)]
 pub enum E { X(NoDef), Y(u64) }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(E::X(x): E, E::Y(y): E)]
 pub struct A;
 impl Component for A {
@@ -399,7 +399,7 @@ read -r -d '' BODY[stored_payload_no_clone] <<'EOT'
 pub struct NoClone(u8);
 #[derive(Root, dataflow_flat::Demux)]
 pub enum E { X(NoClone), Y(u64) }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(E::X(x): E, E::Y(y): E)]
 pub struct A;
 impl Component for A {
@@ -419,7 +419,7 @@ read -r -d '' BODY[unstored_payload_ok] <<'EOT'
 pub struct Opaque(u8);
 #[derive(Root, dataflow_flat::Demux)]
 pub enum E { X(Opaque), Y(u64) }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(E::X(x): E)]
 pub struct A;
 impl Component for A {
@@ -435,7 +435,7 @@ EOT
 CMD[selector_unreachable_component]=build
 PATTERN[selector_unreachable_component]='E0080.*Orphan is not reachable from the root'
 read -r -d '' BODY[selector_unreachable_component] <<'EOF'
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 pub struct Orphan;
 impl Component for Orphan {
     type Config = ();
@@ -443,7 +443,7 @@ impl Component for Orphan {
     fn new((): (), _: Self::Init<'_>) -> (Self, Option<u64>) { (Orphan, None) }
     fn update(&mut self, _: Self::Input<'_>) -> Option<u64> { None }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s: Src, Some(o): Orphan)]
 pub struct B;
 impl Component for B {
@@ -459,7 +459,7 @@ EOF
 CMD[selector_wrong_input]=check
 PATTERN[selector_wrong_input]='E0277.*(selector chain.*cannot be applied|SelectChain<u64>)'
 read -r -d '' BODY[selector_wrong_input] <<'EOF'
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(x): Src)]
 pub struct A;
 impl Component for A {
@@ -478,7 +478,7 @@ EOF
 CMD[orphan_first]=build
 PATTERN[orphan_first]='E0080.*Orphan is not reachable from the root'
 read -r -d '' BODY[orphan_first] <<'EOF2'
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 pub struct Orphan;
 impl Component for Orphan {
     type Config = ();
@@ -486,7 +486,7 @@ impl Component for Orphan {
     fn new((): (), _: Self::Init<'_>) -> (Self, Option<u64>) { (Orphan, None) }
     fn update(&mut self, _: Self::Input<'_>) -> Option<u64> { None }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(o): Orphan, s: Src)]
 pub struct B;
 impl Component for B {
@@ -500,7 +500,6 @@ EOF2
 
 # --- handler components (handled entries in `#[subscribe]`) ----------------------------------------------
 read -r -d '' HANDLERS <<'EOF'
-use dataflow_flat::UpdateHandler;
 macro_rules! handler {
     ($name:ident, [$($attr:tt)*]) => {
         #[derive(ComponentSubscription)]
@@ -518,13 +517,13 @@ EOF
 
 # A handled entry without an `UpdateHandler` impl: the on_unimplemented message, naming the entry and the impl to write.
 CMD[handler_missing_update]=check
-PATTERN[handler_missing_update]='E0277.*`H` subscribes to `B` without a handler for it.*subscribe\(A, B\)'
+PATTERN[handler_missing_update]='E0277.*`H` subscribes to `B` without an `UpdateHandler<B>` impl'
 BODY[handler_missing_update]="$SELECTORS
 $HANDLERS
 comp!(A, [K0(p): Poll]);
 comp!(B, [K1(p): Poll]);
 handler!(H, [#[subscribe(A, B)]]);
-impl UpdateHandler<A> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
+impl UpdateHandler<A> for H { fn on_update(&mut self, _input: Self::Input<'_>, v: &u64) { self.acc += *v; } }
 fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }"
 
 # The note shows the impl to write.
@@ -535,7 +534,7 @@ $HANDLERS
 comp!(A, [K0(p): Poll]);
 comp!(B, [K1(p): Poll]);
 handler!(H, [#[subscribe(A, B)]]);
-impl UpdateHandler<A> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
+impl UpdateHandler<A> for H { fn on_update(&mut self, _input: Self::Input<'_>, v: &u64) { self.acc += *v; } }
 fn main() {}"
 
 # Rule 4 still applies to handled edges: two guards can fire in the same step.
@@ -546,8 +545,8 @@ $HANDLERS
 comp!(A, [G1(p): Poll]);
 comp!(B, [G2(p): Poll]);
 handler!(H, [#[subscribe(A, B)]]);
-impl UpdateHandler<A> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
-impl UpdateHandler<B> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
+impl UpdateHandler<A> for H { fn on_update(&mut self, _input: Self::Input<'_>, v: &u64) { self.acc += *v; } }
+impl UpdateHandler<B> for H { fn on_update(&mut self, _input: Self::Input<'_>, v: &u64) { self.acc += *v; } }
 fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }"
 
 # Exclusive handled edges compile (and a handled edge is not subject to rule 5); a selected handled edge `K0(_): Poll`
@@ -559,9 +558,9 @@ $HANDLERS
 comp!(A, [K0(p): Poll]);
 comp!(B, [K1(p): Poll]);
 handler!(H, [#[subscribe(A, B)] #[subscribe(K0(_): Poll)]]);
-impl UpdateHandler<A> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
-impl UpdateHandler<B> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
-impl UpdateHandler<h_edges::K0> for H { fn on_update(&mut self, _: &Poll) { self.acc += 1; } }
+impl UpdateHandler<A> for H { fn on_update(&mut self, _input: Self::Input<'_>, v: &u64) { self.acc += *v; } }
+impl UpdateHandler<B> for H { fn on_update(&mut self, _input: Self::Input<'_>, v: &u64) { self.acc += *v; } }
+impl UpdateHandler<h_edges::K0> for H { fn on_update(&mut self, _input: Self::Input<'_>, _: &Poll) { self.acc += 1; } }
 fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }"
 
 # Two selected handled entries ending in the same selector would share one `UpdateHandler` key.
@@ -574,7 +573,7 @@ fn main() {}"
 
 # A selected handled entry without its impl names the marker.
 CMD[handler_selected_missing_update]=check
-PATTERN[handler_selected_missing_update]='E0277.*`H` subscribes to `h_edges::K0` without a handler for it'
+PATTERN[handler_selected_missing_update]='E0277.*`H` subscribes to `h_edges::K0` without an `UpdateHandler<h_edges::K0>` impl'
 BODY[handler_selected_missing_update]="$SELECTORS
 $HANDLERS
 handler!(H, [#[subscribe(K0(_): Poll)]]);
@@ -589,6 +588,54 @@ handler!(H, [#[subscribe(_: Poll)]]);
 fn main() {}"
 
 
+# A named entry needs an impl too, and the error names the edge.
+CMD[handler_named_missing_update]=check
+PATTERN[handler_named_missing_update]='E0277.*`H` subscribes to `A` without an `UpdateHandler<A>` impl'
+BODY[handler_named_missing_update]="$SELECTORS
+$HANDLERS
+comp!(A, [K0(p): Poll]);
+handler!(H, [#[subscribe(a: A)]]);
+fn main() {}"
+
+# `#[derive(UpdateHandler)]` is a blanket impl, so a hand-written impl for the same component overlaps it.
+CMD[handler_derive_and_impl]=check
+PATTERN[handler_derive_and_impl]='E0119.*conflicting implementations of trait `UpdateHandler<A>` for type `H`'
+BODY[handler_derive_and_impl]="$SELECTORS
+$HANDLERS
+comp!(A, [K0(p): Poll]);
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(A)]
+pub struct H { acc: u64 }
+impl Component for H {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (H { acc: 0 }, 0) }
+    fn update(&mut self, _: Self::Input<'_>) -> u64 { self.acc }
+}
+impl UpdateHandler<A> for H { fn on_update(&mut self, _: Self::Input<'_>, v: &u64) { self.acc += *v; } }
+fn main() {}"
+
+# `on_update` gets the edge's value: `&u64` here, not `&u32`.
+CMD[handler_wrong_value_type]=check
+PATTERN[handler_wrong_value_type]='E0053'
+BODY[handler_wrong_value_type]="$SELECTORS
+$HANDLERS
+comp!(A, [K0(p): Poll]);
+handler!(H, [#[subscribe(A)]]);
+impl UpdateHandler<A> for H { fn on_update(&mut self, _: Self::Input<'_>, v: &u32) { self.acc += *v as u64; } }
+fn main() {}"
+
+# The key of an impl is a node or a generated marker: `u32` is neither.
+CMD[handler_wrong_edge_type]=check
+PATTERN[handler_wrong_edge_type]='E0277.*the trait bound `u32: HandledEdge` is not satisfied'
+BODY[handler_wrong_edge_type]="$SELECTORS
+$HANDLERS
+comp!(A, [K0(p): Poll]);
+handler!(H, [#[subscribe(A)]]);
+impl UpdateHandler<A> for H {}
+impl UpdateHandler<u32> for H {}
+fn main() {}"
+
 # --- `for` entries (catalogs) --------------------------------------------------------------------------------
 
 # A `for` over a catalog compiles when every element has its `UpdateHandler` impl (here one generic impl).
@@ -599,18 +646,18 @@ $HANDLERS
 comp!(A, [K0(p): Poll]);
 comp!(B, [K1(p): Poll]);
 handler!(H, [#[subscribe(for T in dataflow_flat::catalog![A, B] { T })]]);
-impl<T: dataflow_flat::Node<Output = u64>> UpdateHandler<T> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
+impl<T: dataflow_flat::Node<Output = u64>> UpdateHandler<T> for H { fn on_update(&mut self, _input: Self::Input<'_>, v: &u64) { self.acc += *v; } }
 fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }"
 
 # An element of the catalog without its `UpdateHandler` impl: the same message as for a written-out entry, naming the element.
 CMD[for_missing_update]=check
-PATTERN[for_missing_update]='E0277.*`H` subscribes to `B` without a handler for it'
+PATTERN[for_missing_update]='E0277.*`H` subscribes to `B` without an `UpdateHandler<B>` impl'
 BODY[for_missing_update]="$SELECTORS
 $HANDLERS
 comp!(A, [K0(p): Poll]);
 comp!(B, [K1(p): Poll]);
 handler!(H, [#[subscribe(for T in dataflow_flat::catalog![A, B] { T })]]);
-impl UpdateHandler<A> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
+impl UpdateHandler<A> for H { fn on_update(&mut self, _input: Self::Input<'_>, v: &u64) { self.acc += *v; } }
 fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }"
 
 # Something that is not a catalog.
@@ -620,7 +667,7 @@ BODY[for_not_a_catalog]="$SELECTORS
 $HANDLERS
 comp!(A, [K0(p): Poll]);
 handler!(H, [#[subscribe(for T in u32 { T })]]);
-impl UpdateHandler<A> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
+impl UpdateHandler<A> for H { fn on_update(&mut self, _input: Self::Input<'_>, v: &u64) { self.acc += *v; } }
 fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }"
 
 # `Zip` of catalogs of different shapes.
@@ -668,7 +715,7 @@ $HANDLERS
 pub trait Sym: 'static {}
 impl Sym for A {}
 comp!(A, [K0(p): Poll]);
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(K0(p): Poll)]
 pub struct Q<S: Sym>(std::marker::PhantomData<S>);
 impl<S: Sym> Component for Q<S> {
@@ -678,7 +725,7 @@ impl<S: Sym> Component for Q<S> {
     fn update(&mut self, _: Self::Input<'_>) -> u64 { 0 }
 }
 handler!(H, [#[subscribe(for S in dataflow_flat::catalog![A] { Q<S> })]]);
-impl<S: Sym> UpdateHandler<Q<S>> for H { fn on_update(&mut self, v: &u64) { self.acc += *v; } }
+impl<S: Sym> UpdateHandler<Q<S>> for H { fn on_update(&mut self, _input: Self::Input<'_>, v: &u64) { self.acc += *v; } }
 fn main() {}"
 
 # --- subscription patterns (`Some(Btc(t)): Src`): sugar over selector chains ------------------------------
@@ -687,7 +734,7 @@ pat_case() {
     CMD[$1]=check
     PATTERN[$1]="subscription pattern: $3"
     BODY[$1]="
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe($2: Src)]
 pub struct A;
 fn main() {}"
@@ -705,7 +752,7 @@ pat_case pattern_reference 'Some(&x)' 'references are not supported'
 CMD[pattern_arrow]=check
 PATTERN[pattern_arrow]='`=>` is gone: write the selectors as a pattern'
 BODY[pattern_arrow]='
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(x: Src => Some)]
 pub struct A;
 fn main() {}'
@@ -714,7 +761,7 @@ fn main() {}'
 CMD[unit_selector_unknown]=check
 PATTERN[unit_selector_unknown]='E0425.*cannot find type `Disconnected` in this scope.*subscribe\(Disconnected: Src\)'
 BODY[unit_selector_unknown]='
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Disconnected: Src)]
 pub struct A;
 fn main() {}'
@@ -726,7 +773,7 @@ read -r -d '' BODY[unit_selector_data_variant] <<'EOT'
 #[derive(Root, dataflow_flat::Demux)]
 pub enum E { Gone, Data(u64) }
 use e::Data;
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Data: E, E::Gone: E)]
 pub struct A;
 impl Component for A {
@@ -744,7 +791,7 @@ PATTERN[pattern_ok]=NOERROR
 read -r -d '' BODY[pattern_ok] <<'EOT'
 #[derive(Root, dataflow_flat::Demux)]
 pub enum E { X(u64), Y(u64) }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(E::X(x): E)]
 pub struct A;
 impl Component for A {
@@ -753,7 +800,7 @@ impl Component for A {
     fn new((): (), _: Self::Init<'_>) -> (Self, Self::Output) { (A, None) }
     fn update(&mut self, i: Self::Input<'_>) -> Self::Output { Some(Ok(*i.x)) }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(Ok(v)): A)]
 pub struct B;
 impl Component for B {
@@ -780,7 +827,7 @@ pub enum F { Btc(u64), Eth(u64) }
 pub struct Reqs(Vec<u32>);
 impl Request<m::Btc> for Reqs { fn add(&mut self) { self.0.push(0); } }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 #[listener]
 pub struct L;
@@ -791,7 +838,7 @@ impl Component for L {
     fn new((): (), i: Self::Init<'_>) -> (Self, Option<F>) { let _ = i.requests.0; (L, None) }
     fn update(&mut self, _: Self::Input<'_>) -> Option<F> { None }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(m::Eth(t)): L)]
 pub struct R;
 impl Component for R {
@@ -816,7 +863,7 @@ pub enum F { Btc(u64), Eth(u64) }
 pub struct Reqs(Vec<u32>);
 impl Request<m::Btc> for Reqs { fn add(&mut self) { self.0.push(0); } }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 #[listener]
 pub struct L;
@@ -827,7 +874,7 @@ impl Component for L {
     fn new((): (), i: Self::Init<'_>) -> (Self, Option<F>) { let _ = i.requests.0; (L, None) }
     fn update(&mut self, _: Self::Input<'_>) -> Option<F> { None }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(m::Btc(t)): L)]
 pub struct R;
 impl Component for R {
@@ -844,17 +891,17 @@ EOF2
 
 HANDLE_H='
 use dataflow_flat::HandleComponent;
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 #[handle]
 pub struct H(u64);
 impl HandleComponent for H {
     type Config = ();
     type Handle = ();
-    type Output<'"'"'a> = u64;
+    type View<'"'"'a> = u64;
     fn new((): (), _: Self::Init<'"'"'_>) -> (Self, ()) { (H(0), ()) }
     fn update(&mut self, _: Self::Input<'"'"'_>) {}
-    fn output<'"'"'a>(&'"'"'a self, (): &'"'"'a ()) -> u64 { self.0 }
+    fn view<'"'"'a>(&'"'"'a self, (): &'"'"'a ()) -> u64 { self.0 }
 }
 '
 
@@ -862,7 +909,7 @@ impl HandleComponent for H {
 CMD[handle_ok]=build
 PATTERN[handle_ok]='NOERROR'
 BODY[handle_ok]="$HANDLE_H
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(h: H, s: Src)]
 pub struct A;
 impl Component for A {
@@ -877,7 +924,7 @@ fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }"
 CMD[handle_missing_impl]=check
 PATTERN[handle_missing_impl]='E0277.*HandleComponent'
 BODY[handle_missing_impl]='
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 #[handle]
 pub struct H;
@@ -889,11 +936,28 @@ impl Component for H {
 }
 fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }'
 
-# `#[handle]` on a listener (or a handler) is rejected for now.
+# A handler (unnamed entry, `on_update` gets the handle parent's view exactly) over a handle component builds.
+CMD[handle_handler_ok]=build
+PATTERN[handle_handler_ok]='NOERROR'
+BODY[handle_handler_ok]="$HANDLE_H
+#[derive(ComponentSubscription)]
+#[subscribe(H, s: Src)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (A, 0) }
+    fn update(&mut self, input: Self::Input<'_>) -> u64 { *input.s }
+}
+impl UpdateHandler<H> for A { fn on_update(&mut self, _: Self::Input<'_>, v: u64) { let _: u64 = v; } }
+impl UpdateHandler<Src> for A { const ACTIVE: bool = false; }
+fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }"
+
+# `#[handle]` on a listener is rejected for now.
 CMD[handle_with_listener]=check
 PATTERN[handle_with_listener]='`#\[handle\]` cannot be combined with `#\[listener\]`'
 BODY[handle_with_listener]="$HANDLE_H
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 #[handle]
 #[listener]
@@ -906,7 +970,7 @@ PATTERN[handle_selector_rejected]='is not a by-value Node'
 BODY[handle_selector_rejected]="$HANDLE_H
 #[derive(Clone, Copy, dataflow_flat::Demux)]
 pub enum E { X(u8), Y }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(E::X(v): H)]
 pub struct A;
 impl Component for A {
@@ -921,7 +985,7 @@ fn main() {}"
 CMD[handle_generic_node_bound]=check
 PATTERN[handle_generic_node_bound]='is not a by-value Node'
 BODY[handle_generic_node_bound]="$HANDLE_H
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(x: X)]
 pub struct G<X: dataflow_flat::Node<Output = u64>>(std::marker::PhantomData<X>);
 impl<X: dataflow_flat::Node<Output = u64>> Component for G<X> {
@@ -936,7 +1000,7 @@ fn main() { let _: Option<G<H>> = None; }"
 CMD[handle_field_is_the_view]=check
 PATTERN[handle_field_is_the_view]='E0614|E0308|mismatched types'
 BODY[handle_field_is_the_view]="$HANDLE_H
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(h: H)]
 pub struct A;
 impl Component for A {
@@ -956,12 +1020,12 @@ ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        non_exclusive_join exclusive_join_ok deep_non_exclusive_join deep_exclusive_join_ok demux_reader_not_implied stored_selector_ok
        stored_payload_no_default stored_payload_no_clone unstored_payload_ok selector_unreachable_component
        selector_wrong_input orphan_first
-       handler_missing_update handler_missing_update_note handler_non_exclusive_join handler_exclusive_ok handler_duplicate_marker handler_selected_missing_update handler_bare_wildcard
+       handler_missing_update handler_missing_update_note handler_non_exclusive_join handler_exclusive_ok handler_duplicate_marker handler_selected_missing_update handler_bare_wildcard handler_named_missing_update handler_derive_and_impl handler_wrong_value_type handler_wrong_edge_type
        for_ok for_missing_update for_not_a_catalog for_zip_shapes for_body_named for_body_selected for_pattern_triple for_missing_bound
        pattern_struct pattern_multi_field pattern_range pattern_range_literal pattern_guard pattern_or pattern_literal
        pattern_reference pattern_arrow unit_selector_unknown unit_selector_data_variant pattern_ok
        listener_missing_request listener_request_ok
-       handle_ok handle_missing_impl handle_with_listener handle_selector_rejected handle_generic_node_bound handle_field_is_the_view)
+       handle_ok handle_handler_ok handle_missing_impl handle_with_listener handle_selector_rejected handle_generic_node_bound handle_field_is_the_view)
 
 run_case() {
     local name=$1 dir="$CASES_DIR/$1"

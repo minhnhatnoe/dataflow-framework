@@ -1,10 +1,10 @@
-use dataflow_flat::{Component, ComponentSubscription, Configs, Pipeline, Root};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Pipeline, Root};
 use std::sync::Mutex;
 
 #[derive(Root)]
 pub struct Poll;
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
 pub struct A;
 impl Component for A {
@@ -20,7 +20,7 @@ impl Component for A {
 
 static SEEN: Mutex<Vec<(u32, u32)>> = Mutex::new(Vec::new());
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(a: A, p: Poll)]
 pub struct B;
 impl Component for B {

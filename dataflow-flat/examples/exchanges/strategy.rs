@@ -16,7 +16,7 @@ use crate::market::*;
 /// the same step (one packet, one exchange): an *exclusive join*, accepted by
 /// the plan. In a step where Binance's book updated, the Coinbase book supplies
 /// its stored (older) value.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(b: Book<Binance, S>, c: Book<Coinbase, S>)]
 pub struct BestBid<S: Sym>(PhantomData<S>);
 impl<S: Sym> Component for BestBid<S> {
@@ -50,7 +50,7 @@ thread_local! {
 }
 
 /// Quotes one tick inside the best bid when the market is not crossed.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(best: BestBid<S>)]
 pub struct Quoter<S: Sym>(PhantomData<S>);
 impl<S: Sym> Component for Quoter<S> {
@@ -97,7 +97,7 @@ impl Component for OrderSender {
     }
 }
 impl<S: Sym> UpdateHandler<Quoter<S>> for OrderSender {
-    fn on_update(&mut self, o: &Order) {
+    fn on_update(&mut self, _input: Self::Input<'_>, o: &Order) {
         if o.seq != 0 {
             SENDER_UPDATES.with(|m| *m.borrow_mut().entry(<S as Market>::NAME).or_default() += 1);
             self.pending.push(*o);

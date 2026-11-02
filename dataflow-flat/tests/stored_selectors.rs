@@ -59,7 +59,7 @@ use wire::{Btc, Eth, Hb};
 // The example: two variants of one source, read together
 // ---------------------------------------------------------------------------
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Btc(a): Wire, Eth(b): Wire)]
 pub struct Spread;
 impl Component for Spread {
@@ -82,7 +82,7 @@ impl Drop for Spread {
 }
 
 /// Reads the output of the sink so the tests can see it.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s: Spread)]
 pub struct SpreadOut;
 impl Component for SpreadOut {
@@ -132,7 +132,7 @@ fn both_variants_read_default_first_then_the_last_value() {
 // Two readers share one slot per pair; a plain input does not change that
 // ---------------------------------------------------------------------------
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Btc(a): Wire, Hb: Wire)]
 pub struct Other;
 impl Component for Other {
@@ -147,7 +147,7 @@ impl Component for Other {
     }
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s: Spread, o: Other)]
 pub struct Both;
 impl Component for Both {
@@ -186,7 +186,7 @@ fn two_readers_share_a_slot() {
 // ---------------------------------------------------------------------------
 
 /// Runs on every push.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(w: Wire)]
 pub struct Clock;
 impl Component for Clock {
@@ -219,8 +219,14 @@ impl Component for Mixed {
         (i.a.bid, self.handled)
     }
 }
+impl UpdateHandler<mixed_edges::A> for Mixed {
+    const ACTIVE: bool = false;
+}
+impl UpdateHandler<Clock> for Mixed {
+    const ACTIVE: bool = false;
+}
 impl UpdateHandler<mixed_edges::Eth> for Mixed {
-    fn on_update(&mut self, v: &Book) {
+    fn on_update(&mut self, _input: Self::Input<'_>, v: &Book) {
         log(format!("Mixed.eth {}", v.bid));
         self.handled += 1;
     }
@@ -252,7 +258,7 @@ pub enum Tape {
 }
 use tape::{Ask, Bid};
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(w: Wire)]
 pub struct Feed;
 impl Component for Feed {
@@ -271,7 +277,7 @@ impl Component for Feed {
     }
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(Bid(a)): Feed, Some(Ask(b)): Feed)]
 pub struct Quote;
 impl Component for Quote {
@@ -308,7 +314,7 @@ fn nested_some_with_a_component_source() {
 // `Result`
 // ---------------------------------------------------------------------------
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(w: Wire)]
 pub struct Parse;
 impl Component for Parse {
@@ -326,7 +332,7 @@ impl Component for Parse {
     }
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Ok(v): Parse, Err(e): Parse)]
 pub struct Fold;
 impl Component for Fold {
@@ -340,7 +346,7 @@ impl Component for Fold {
         (*i.v, *i.e)
     }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(f: Fold)]
 pub struct FoldOut;
 impl Component for FoldOut {
@@ -370,7 +376,7 @@ fn result_selectors_compose() {
 // A generic selector, and a hand-written one with its own initial value
 // ---------------------------------------------------------------------------
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(S(a): Wire, Eth(b): Wire)]
 pub struct GenSpread<S: Select<Wire, Out = Book> + Initial<Wire>>(PhantomData<S>);
 impl<S: Select<Wire, Out = Book> + Initial<Wire>> Component for GenSpread<S> {
@@ -384,7 +390,7 @@ impl<S: Select<Wire, Out = Book> + Initial<Wire>> Component for GenSpread<S> {
     }
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(s: GenSpread<Btc>)]
 pub struct GenOut;
 impl Component for GenOut {
@@ -430,7 +436,7 @@ impl Initial<Wire> for Positive {
     }
 }
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Positive(p): Wire, c: Clock)]
 pub struct Guarded;
 impl Component for Guarded {
@@ -475,7 +481,7 @@ pub enum Raw {
 }
 
 /// Reads only `Num`, always covered: no slot, and `Opaque` needs neither `Default` nor `Clone`.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(raw::Num(n): Raw)]
 pub struct Covered;
 impl Component for Covered {
@@ -507,8 +513,11 @@ impl Component for Watch {
         (i.n.bid, self.blobs)
     }
 }
+impl UpdateHandler<watch_edges::N> for Watch {
+    const ACTIVE: bool = false;
+}
 impl UpdateHandler<watch_edges::Blob> for Watch {
-    fn on_update(&mut self, v: &Opaque) {
+    fn on_update(&mut self, _input: Self::Input<'_>, v: &Opaque) {
         self.blobs += v.0 as u32;
     }
 }

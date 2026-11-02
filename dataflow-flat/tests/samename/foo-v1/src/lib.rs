@@ -6,7 +6,7 @@
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use dataflow_flat::{Component, ComponentSubscription, Root};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Root};
 
 pub static NEW: AtomicUsize = AtomicUsize::new(0);
 pub static UPDATE: AtomicUsize = AtomicUsize::new(0);
@@ -14,7 +14,7 @@ pub static DROP: AtomicUsize = AtomicUsize::new(0);
 
 pub const VERSION: u32 = 1;
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(root: R)]
 pub struct Foo<R: Root>(PhantomData<R>);
 

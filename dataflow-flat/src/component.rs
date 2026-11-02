@@ -70,13 +70,13 @@ pub trait Component: ComponentSubscription + Sized {
 ///
 /// Select it with `#[handle]` next to `#[derive(ComponentSubscription)]`. The pipeline stores the
 /// [`Handle`](Self::Handle) `update` returns (a slot index, a key, `()`), and a subscriber's field
-/// is exactly [`Output<'a>`](Self::Output): `output(&self, &handle)`, evaluated by the framework
-/// each time a subscriber runs (or is constructed). Nothing is cached, so `output` should be
+/// is exactly [`View<'a>`](Self::View): `view(&self, &handle)`, evaluated by the framework
+/// each time a subscriber runs (or is constructed). Nothing is cached, so `view` should be
 /// cheap (an index, a reference into the state). The subscriber's field is the view as it is,
 /// owned or a reference: no `&` is added. A subscriber of a handle component reads the parent's
 /// state and handle as of this moment, also in steps where the parent did not run.
 ///
-/// `Handle` needs no `Copy`: the framework only stores it and lends it to `output`.
+/// `Handle` needs no `Copy`: the framework only stores it and lends it to `view`.
 ///
 /// Not supported yet: selectors on a handle component (`Some(X(v)): Parent`), `#[listener]`.
 pub trait HandleComponent: ComponentSubscription + Sized {
@@ -85,7 +85,7 @@ pub trait HandleComponent: ComponentSubscription + Sized {
     /// What the pipeline stores between steps.
     type Handle: 'static;
     /// What subscribers read.
-    type Output<'a>
+    type View<'a>
     where
         Self: 'a;
     /// As [`Component::new`], but the first output is a handle.
@@ -93,7 +93,7 @@ pub trait HandleComponent: ComponentSubscription + Sized {
     /// As [`Component::update`]; the returned handle replaces the stored one.
     fn update(&mut self, input: Self::Input<'_>) -> Self::Handle;
     /// The view of the state and the stored handle that subscribers read.
-    fn output<'a>(&'a self, handle: &'a Self::Handle) -> Self::Output<'a>;
+    fn view<'a>(&'a self, handle: &'a Self::Handle) -> Self::View<'a>;
 }
 
 /// One entry of a subscription tree: the node `N` listed at position `I`
@@ -104,7 +104,7 @@ pub trait HandleComponent: ComponentSubscription + Sized {
 /// Some`), so the plan can say which of them is the one that reached `X` first
 /// ([`Plan::first_pos_of`](crate::plan::Plan)). A marker: never constructed.
 #[doc(hidden)]
-pub struct Sub<N, C, const I: usize>(PhantomData<(N, C)>);
+pub struct Sub<N, C, const I: usize, X>(PhantomData<(N, C, X)>);
 
 /// A node of the subscription tree: the type the derive builds for
 /// [`ComponentSubscription::Deps`]. User code never writes one.
@@ -143,8 +143,8 @@ pub trait DepList: 'static {
 }
 
 macro_rules! dep_list_leaf {
-    ([$($E:ident $C:ident $I:ident)*]) => {
-        impl<$($E: Vertex, $C: SelectChain<$E::Stored>, const $I: usize,)*> DepList for ($(Sub<$E, $C, $I>,)*) {
+    ([$($E:ident $C:ident $I:ident $X:ident)*]) => {
+        impl<$($E: Vertex, $C: SelectChain<$E::Stored>, const $I: usize, $X: 'static,)*> DepList for ($(Sub<$E, $C, $I, $X>,)*) {
             type Inputs<'a> = ($(<$C as SelectChain<$E::Stored>>::Read<'a, $E>,)*);
             type Inits<'a> = ($(<$C as SelectChain<$E::Stored>>::Init<'a, $E>,)*);
             const LEN: usize = [$(stringify!($E),)* ""].len() - 1;

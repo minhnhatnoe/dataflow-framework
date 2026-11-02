@@ -9,7 +9,7 @@
 use std::marker::PhantomData;
 use std::sync::Mutex;
 
-use dataflow_flat::{Component, ComponentSubscription, Configs, Demux, Listener, Pipeline, Request, Root, Select};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Demux, Listener, Pipeline, Request, Root, Select};
 
 static SERIAL: Mutex<()> = Mutex::new(());
 /// (listener, what its `new` got in `init.requests`).
@@ -71,7 +71,7 @@ pub struct Wire {
 
 macro_rules! listener {
     ($name:ident, $out:ty, $field:ident) => {
-        #[derive(ComponentSubscription)]
+        #[derive(ComponentSubscription, UpdateHandler)]
         #[subscribe(w: Wire)]
         #[listener]
         pub struct $name;
@@ -97,7 +97,7 @@ listener!(LC, Option<CbFrame>, c);
 
 macro_rules! reader {
     ($name:ident, [$($sub:tt)*]) => {
-        #[derive(ComponentSubscription)]
+        #[derive(ComponentSubscription, UpdateHandler)]
         #[subscribe($($sub)*)]
         pub struct $name;
         impl Component for $name {
@@ -154,7 +154,7 @@ fn a_listener_nobody_reads_gets_an_empty_default() {
 // A listener whose output is the enum itself (no `Some`)
 // ---------------------------------------------------------------------------
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(w: Wire)]
 #[listener]
 pub struct LD;
@@ -187,7 +187,7 @@ fn a_direct_enum_output_is_read_without_some() {
 // Generic readers
 // ---------------------------------------------------------------------------
 
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(S(t)): LB)]
 pub struct Gen<S: Select<BinFrame, Out = u32>>(PhantomData<S>);
 impl<S: Select<BinFrame, Out = u32>> Component for Gen<S> {
@@ -251,7 +251,7 @@ impl Request<frame_kind::B> for Kinds {
         self.0.push("B");
     }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(w: Wire)]
 #[listener]
 pub struct LK;
@@ -292,7 +292,7 @@ impl<S: Name> Request<S> for Logged {
         EVENTS.lock().unwrap().push(format!("add {}", S::N));
     }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(w: Wire)]
 #[listener]
 pub struct LL;
@@ -310,7 +310,7 @@ impl Component for LL {
         None
     }
 }
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(Btc(t)): LL)]
 pub struct LateReader;
 impl Component for LateReader {

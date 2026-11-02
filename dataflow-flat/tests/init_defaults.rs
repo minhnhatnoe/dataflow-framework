@@ -5,7 +5,7 @@
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Mutex;
 
-use dataflow_flat::{Component, ComponentSubscription, Configs, Demux, Initial, Pipeline, Root, Select};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Demux, Initial, Pipeline, Root, Select};
 
 static LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static SERIAL: Mutex<()> = Mutex::new(());
@@ -41,7 +41,7 @@ use wire::{Blob, Btc};
 
 macro_rules! reader {
     ($name:ident, [$($sub:tt)*], |$i:ident| $new:expr, |$u:ident| $upd:expr) => {
-        #[derive(ComponentSubscription)]
+        #[derive(ComponentSubscription, UpdateHandler)]
         #[subscribe($($sub)*)]
         pub struct $name;
         impl Component for $name {
@@ -72,7 +72,7 @@ fn plain_selected_edge_reads_default_in_new() {
 }
 
 // Nested chain: Some(Btc(a)) over an Option; the last selector's value.
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(w: Wire)]
 pub struct Wrap;
 impl Component for Wrap {
@@ -100,7 +100,7 @@ fn nested_chain_reads_the_last_selectors_default() {
 }
 
 // Result
-#[derive(ComponentSubscription)]
+#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(w: Wire)]
 pub struct Parse;
 impl Component for Parse {
