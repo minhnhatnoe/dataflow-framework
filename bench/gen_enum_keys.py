@@ -20,6 +20,9 @@ import sys
 
 n = int(sys.argv[1])
 out = sys.argv[2]
+# DIFF=1: Book<S>::update (and the hand-written step) runs one of 8 structurally different operations chosen by the
+# symbol's index, each with a per-symbol constant, so the arms cannot be merged into one tail.
+DIFF = os.environ.get("DIFF", "0") == "1"
 FN = f"Frame{n}"
 MOD = f"frame{n}"
 
@@ -133,6 +136,25 @@ BOOK_BODY = """    fn new((): (), _: Self::Init<'_>) -> (Self, Tob) {
         Tob { bid: i.t.bid, ask: i.t.ask + (self.n & 1) as i64, seq: i.t.seq.wrapping_add(self.n) }
     }"""
 
+# `KEXPR` is the symbol's index as a u32 constant expression; `self.n` is the book's counter.
+DIFF_OPS = """        let k: u32 = KEXPR;
+        let c = (k as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+        match k % 8 {
+            0 => { self.n += 1; Tob { bid: i.t.bid, ask: i.t.ask + (self.n & 1) as i64, seq: i.t.seq.wrapping_add(self.n) } }
+            1 => { self.n ^= c; Tob { bid: i.t.bid + (self.n & 3) as i64, ask: i.t.ask, seq: i.t.seq ^ self.n } }
+            2 => { self.n = self.n.rotate_left(k % 13 + 1).wrapping_add(c); Tob { bid: i.t.bid ^ (k as i64), ask: i.t.ask.wrapping_mul(3), seq: i.t.seq.wrapping_add(self.n >> 7) } }
+            3 => { self.n += 1; if self.n % (k as u64 + 3) == 0 { Tob { bid: i.t.ask, ask: i.t.bid, seq: i.t.seq } } else { Tob { bid: i.t.bid - k as i64, ask: i.t.ask + k as i64, seq: i.t.seq + self.n } } }
+            4 => { self.n = self.n.wrapping_mul(c).wrapping_add(1); Tob { bid: i.t.bid.wrapping_mul(k as i64 | 1), ask: i.t.ask >> (k % 5), seq: i.t.seq ^ (self.n >> 11) } }
+            5 => { let mut a = i.t.ask; for j in 0..(self.n & 3) { a = a.wrapping_add((j as i64) * (k as i64 + 1)); } self.n += 1; Tob { bid: i.t.bid, ask: a, seq: i.t.seq.wrapping_add(c) } }
+            6 => { self.n = (self.n ^ (self.n >> 3)).wrapping_add(k as u64); Tob { bid: i.t.bid.min(i.t.ask - k as i64), ask: i.t.ask.max(i.t.bid + k as i64), seq: i.t.seq.wrapping_sub(self.n) } }
+            _ => { self.n += (k as u64 & 7) + 1; Tob { bid: i.t.bid + (i.t.seq & 7) as i64, ask: i.t.ask - (self.n & 7) as i64, seq: i.t.seq.rotate_left(k % 7 + 1) ^ self.n } }
+        }"""
+
+def book_body(kexpr):
+    if not DIFF:
+        return BOOK_BODY
+    return BOOK_BODY.split("    fn update")[0] + "    fn update(&mut self, i: Self::Input<'_>) -> Tob {\n" + DIFF_OPS.replace("KEXPR", kexpr) + "\n    }"
+
 def handles(prefix):
     return ", ".join(f"Book<{prefix}S{i}>" for i in range(n))
 
@@ -199,7 +221,7 @@ pub struct Book<S: Symbol> {{ n: u64, _p: core::marker::PhantomData<S> }}
 impl<S: Symbol> Component for Book<S> {{
     type Config = ();
     type Output = Tob;
-{BOOK_BODY}
+{book_body("<S as Symbol>::KEY")}
 }}
 """
 write("f", f_body)
@@ -233,7 +255,7 @@ pub struct Book<S: Select<{FN}, Out = Tob>> {{ n: u64, _p: core::marker::Phantom
 impl<S: Select<{FN}, Out = Tob>> Component for Book<S> {{
     type Config = ();
     type Output = Tob;
-{BOOK_BODY}
+{book_body("<S as Select<%s>>::KEY" % FN)}
 }}
 """
 
@@ -282,6 +304,12 @@ pub fn tob_of(x: &{FN}) -> &Tob {{
 """ + ws_and_book()
 write("e", e_body)
 
+# ---- E2 (diagnostic): E with a branchless-looking `select`: (key_of(x) == i).then(|| tob_of(x)) ----
+e2_body = e_body.replace("{ if key_of(x) == ", "{ (key_of(x) == ").replace(" { Some(tob_of(x)) } else { None } }", ").then(|| tob_of(x)) }")
+import re
+e2_body = re.sub(r"\(key_of\(x\) == (\d+) \)", r"(key_of(x) == \1)", e2_body)
+write("e2", e2_body)
+
 # ---- K: E plus `KEYED = true` (and a #[listener] on Ws), so the plan treats the selectors as keyed like `On<S>` ----
 k_body = e_body.replace("    const KEY: u32 =", "    const KEYED: bool = true;\n    const KEY: u32 =")
 k_body = k_body.replace("#[subscribe(p: Packet)]\npub struct Ws;", "#[subscribe(p: Packet)]\n#[listener]\npub struct Ws;\nimpl Listener for Ws { fn subscribe(&mut self, keys: &[u32]) { REQUESTED.fetch_add(keys.len() as u64, Ordering::Relaxed); } }")
@@ -297,7 +325,7 @@ write("d", d_body)
 
 # ---- H: hand-written ---------------------------------------------------------------------------------------
 arms = "\n".join(
-    f"            {i} => {{ let o = self.books[{i}].step(&tob); fold(&mut buf, &o); }}" for i in range(n)
+    f"            {i} => {{ let o = self.books[{i}].step::<{i}>(&tob); fold(&mut buf, &o); }}" for i in range(n)
 )
 HEAD = COMMON.split("//@@SINK")[0]
 DRIVE = COMMON.split("//@@DRIVE")[1].split("//@@MAIN")[0]
@@ -311,9 +339,8 @@ fn fold(buf: &mut (u64, u64), t: &Tob) {{
 pub struct BookH {{ n: u64 }}
 impl BookH {{
     #[inline(always)]
-    fn step(&mut self, t: &Tob) -> Tob {{
-        self.n += 1;
-        Tob {{ bid: t.bid, ask: t.ask + (self.n & 1) as i64, seq: t.seq.wrapping_add(self.n) }}
+    fn step<const K: u32>(&mut self, t: &Tob) -> Tob {{
+%STEP%
     }}
 }}
 pub struct Hand {{ books: [BookH; N], d: u64 }}
@@ -341,5 +368,7 @@ fn main() {
     drive(|x| asm_push(&mut h, x), &args);
 }
 """
+step = ("        let i = Inp { t };\n" + DIFF_OPS.replace("KEXPR", "K")) if DIFF else "        self.n += 1;\n        Tob { bid: t.bid, ask: t.ask + (self.n & 1) as i64, seq: t.seq.wrapping_add(self.n) }"
+h_body = h_body.replace("%STEP%", step).replace("#[derive(Default, Clone, Copy)]\npub struct BookH", "struct Inp<'a> { t: &'a Tob }\n#[derive(Default, Clone, Copy)]\npub struct BookH", 1)
 write("h", h_body)
 print(f"wrote f e d h with N={n} under {out}")
