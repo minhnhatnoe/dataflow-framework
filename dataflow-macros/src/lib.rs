@@ -23,23 +23,36 @@ use proc_macro::TokenStream;
 /// incremental compilation, so generated items located at the user's
 /// declaration would turn the queries that read them red when the
 /// declaration moves.
+thread_local! {
+    /// Names of `for` variables: tokens with these names keep the span the user wrote, so
+    /// rustc's help ("restrict type parameter `S`") points at the `for` entry.
+    static KEEP_NAMES: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 fn respan(ts: TokenStream2, loc: Span) -> TokenStream2 {
     use proc_macro2::{Group, TokenTree};
-    ts.into_iter()
-        .map(|tt| match tt {
+    let kept = |t: &TokenTree| matches!(t, TokenTree::Ident(i) if KEEP_NAMES.with(|k| k.borrow().iter().any(|n| i == n)));
+    let toks: Vec<TokenTree> = ts.into_iter().collect();
+    let mut out = Vec::with_capacity(toks.len());
+    for (idx, tt) in toks.iter().enumerate() {
+        out.push(match tt {
             // A selector path keeps the span the user wrote it at (see `chain_ty`).
-            TokenTree::Group(g) if g.delimiter() == proc_macro2::Delimiter::None => TokenTree::Group(g),
+            TokenTree::Group(g) if g.delimiter() == proc_macro2::Delimiter::None => tt.clone(),
             TokenTree::Group(g) => {
                 let mut n = Group::new(g.delimiter(), respan(g.stream(), loc));
                 n.set_span(loc);
                 TokenTree::Group(n)
             }
-            mut t => {
+            // A `for` variable (and the `'` of a kept `'static`) keeps its span.
+            t if kept(t) || (matches!(t, TokenTree::Punct(p) if p.as_char() == '\'') && toks.get(idx + 1).is_some_and(kept)) => t.clone(),
+            t => {
+                let mut t = t.clone();
                 t.set_span(loc);
                 t
             }
-        })
-        .collect()
+        });
+    }
+    out.into_iter().collect()
 }
 
 /// Tokens `respan` leaves at the span they were built with (an invisible group).
@@ -48,10 +61,25 @@ fn keep_span(ts: TokenStream2) -> TokenStream2 {
     TokenStream2::from(proc_macro2::TokenTree::Group(g))
 }
 
+/// Like `keep_span`, with the invisible group itself located at `at` (rustc reports
+/// a bound that fails on the group's type there).
+fn keep_span_at(ts: TokenStream2, at: Span) -> TokenStream2 {
+    let mut g = proc_macro2::Group::new(proc_macro2::Delimiter::None, ts);
+    g.set_span(at);
+    TokenStream2::from(proc_macro2::TokenTree::Group(g))
+}
+
 fn finish(r: syn::Result<TokenStream2>, loc: Span) -> TokenStream {
     match r {
-        Ok(ts) => respan(ts, loc).into(),
-        Err(e) => e.to_compile_error().into(),
+        Ok(ts) => {
+            let out = respan(ts, loc);
+            KEEP_NAMES.with(|k| k.borrow_mut().clear());
+            out.into()
+        }
+        Err(e) => {
+            KEEP_NAMES.with(|k| k.borrow_mut().clear());
+            e.to_compile_error().into()
+        }
     }
 }
 use proc_macro2::{Span, TokenStream as TokenStream2};
@@ -476,7 +504,7 @@ impl Parse for Entry {
         if !content.is_empty() {
             return Err(syn::Error::new(
                 content.span(),
-                "a `for` body is one node type, `for S in Catalog { Quoter<S> }`: named entries and selector patterns are not supported in it yet",
+                "a `for` body is one node type, `for S in Catalog { Quoter<S> }`: a named entry (`x: Ws`) or a selected one (`Some(S(_)): Ws`) is not supported in it yet (a selected handled entry needs a generic `<struct>_edges` marker per element to key its `UpdateHandler` impl, which `Map` does not carry; write the entries out, or put the selector in a component generic over it, `Quoter<S>`)",
             ));
         }
         Ok(Entry::For(ForGroup { span, pat, catalog, body, at: 0 }))
@@ -997,17 +1025,27 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
                         })
                         .collect();
                     let mut mg = generics.clone();
+                    // The variable's `S` and `'static` keep the span the user wrote, and the body's bound
+                    // sits in a group located at the `for`: a bound of the body that the header lacks is
+                    // reported at the `for` entry, with rustc's help pointing there too.
                     for (v, bounds) in &vars_of {
-                        mg.params.push(parse_quote!(#v: 'static #(+ #bounds)*));
+                        KEEP_NAMES.with(|k| k.borrow_mut().push(v.to_string()));
+                        KEEP_NAMES.with(|k| k.borrow_mut().push("static".to_string()));
+                        let st = quote_spanned!(v.span()=> 'static);
+                        mg.params.push(parse_quote!(#v: #st #(+ #bounds)*));
                     }
                     {
-                        let body = keep_span(f.body.to_token_stream());
+                        let body = keep_span_at(f.body.to_token_stream(), f.span);
+                        let node = keep_span_at(quote_spanned!(f.span=> #krate::Node), f.span);
                         let wc = mg.make_where_clause();
-                        wc.predicates.push(parse_quote!(#body: #krate::Node));
-                        wc.predicates.push(parse_quote!(#name #ty_generics: #krate::UpdateHandler<#body>));
+                        wc.predicates.push(parse_quote!(#body: #node));
+                        let nm = Ident::new(&name.to_string(), f.span);
+                        let at = keep_span_at(quote_spanned!(f.span=> #nm #ty_generics), f.span);
+                        let uh = keep_span_at(quote_spanned!(f.span=> #krate::UpdateHandler<#body>), f.span);
+                        wc.predicates.push(parse_quote!(#at: #uh));
                     }
                     let (mimpl, _, mwhere) = mg.split_for_impl();
-                    let (elem, body) = (f.pat.elem(), keep_span(f.body.to_token_stream()));
+                    let (elem, body) = (f.pat.elem(), keep_span_at(f.body.to_token_stream(), f.span));
                     mappers.push(quote! {
                         #[doc(hidden)]
                         #[allow(non_camel_case_types)]
@@ -1578,9 +1616,18 @@ fn expand_demux(input: DeriveInput) -> syn::Result<TokenStream2> {
     // With `markers`, the module only re-exports them, so `Enum::Variant` in a
     // pattern names the same (shared) type.
     let module_body = if markers.is_some() { quote!(#(#reexports)*) } else { quote!(#(#structs)*) };
+    // `module::All`: the catalog of the variants' markers, in declaration order, for
+    // `for S in module::All { .. }` (skipped when a variant is itself called `All`).
+    let all = if data.variants.iter().any(|v| v.ident == "All") {
+        quote!()
+    } else {
+        let vnames = data.variants.iter().map(|v| &v.ident);
+        quote!(#vis type All = #krate::catalog![#(#vnames),*];)
+    };
     Ok(quote! {
         #vis mod #module {
             #module_body
+            #all
         }
         impl #name {
             #[doc(hidden)]

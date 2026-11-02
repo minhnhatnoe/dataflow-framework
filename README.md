@@ -449,7 +449,7 @@ When a handler runs (the OR rule over *all* its entries, named and unnamed), eac
     // the same `impl<S: ..> UpdateHandler<Quoter<S>> for Oms2` as above
     ```
 
-    A catalog is a nested tuple built by `catalog![A, B, C]`, or one of the combinators, which take catalogs: `Concat<A, B>` (the elements of `A`, then `B`), `Product<A, B>` (all pairs, row by row), `Zip<A, B>` (position-wise pairs; `A` and `B` must have the same shape). Pairs are `M<X, S>`, destructured in the `for`: `for (X: Tag, S: Symbol) in Product<Venues, Coins> { Book<X, S> }`, and `((X, S), Y)` for nesting. The derive cannot see what a catalog contains, so it generates a mapper from the body; there is no filtering. The body must be one node type (`a `for` body is one node type`), and a pattern with more than a pair is rejected (``a `for` pattern destructures a pair: `(X, S)` ``).
+    A catalog is a nested tuple built by `catalog![A, B, C]`, or one of the combinators, which take catalogs: `Concat<A, B>` (the elements of `A`, then `B`), `Product<A, B>` (all pairs, row by row), `Zip<A, B>` (position-wise pairs; `A` and `B` must have the same shape). Pairs are `M<X, S>`, destructured in the `for`: `for (X: Tag, S: Symbol) in Product<Venues, Coins> { Book<X, S> }`, and `((X, S), Y)` for nesting. The derive cannot see what a catalog contains, so it generates a mapper from the body; there is no filtering. An enum with `#[derive(Demux)]` is a catalog of its markers (`mkt::All`, below). The body must be one node type (`a `for` body is one node type`), and a pattern with more than a pair is rejected (``a `for` pattern destructures a pair: `(X, S)` ``).
 
 ### Handler buffer guidance
 
@@ -464,7 +464,42 @@ Some tests do use `mem::take` and a `Vec` output for brevity; they are not perfo
 
 ### How the `for` form feels
 
-Checked by building `Oms2` above. It works and the expansion is as cheap as the written-out form (`bench/gen_handler.py N OUT for` generates the same plan and code). In practice it is awkward in three ways. The bounds of the element variable must be repeated: the `for` header and the `UpdateHandler` impl both carry `S: Symbol + Select<Tick, Out = Quote>`, and leaving them off the header gives ``the trait bound `S: Symbol` is not satisfied`` pointing at the struct, with a "consider restricting" help that suggests a nonsensical `pub struct Oms2 + handlers::Symbol`. The catalog must be listed by hand (`catalog![..]` or type aliases of it), because Rust cannot enumerate impls. And the body is one node type, so a `for` entry cannot be named or selected (a selected handled entry per element is not available). Nobody outside the tests has used it yet.
+Checked by building `Oms2` above. It works and the expansion is as cheap as the written-out form (`bench/gen_handler.py N OUT for` generates the same plan and code). Three rough edges were found; this is where each stands.
+
+* **The element bounds are written twice, and that stays.** The `for` header and the `UpdateHandler` impl both carry `S: Symbol + Select<Tick, Out = Quote>`. The header cannot be derived from `Quoter<S>`: Rust checks that `Quoter<S>` is well formed wherever it is written, and a macro cannot read the bounds of another type, so the generated `impl<S> Map<S>` has to state them (the impl is the same: Rust never infers bounds). What was fixed is the error when they are missing. It used to point at the struct with a help that suggested `pub struct Oms2 + handlers::Symbol`; it is now rustc's own error spanned at the `for` entry, with a help that edits the entry:
+
+    ```text
+    error[E0277]: the trait bound `S: Sym` is not satisfied
+      |  #[subscribe(for S in dataflow_flat::catalog![A] { Q<S> })]
+      |                                                    ^^^^ the trait `Sym` is not implemented for `S`
+    note: required by a bound in `Q`
+    help: consider further restricting type parameter `S` with trait `Sym`
+      |  #[subscribe(for S + Sym in dataflow_flat::catalog![A] { Q<S> })]
+    ```
+
+    (rustc writes `S + Sym` where the entry wants `S: Sym`; that is rustc's rendering of "add a bound to a parameter that already has `'static`", but it is at the right place.) `check_errors.sh for_missing_bound` keeps this.
+* **An enum is a catalog of its markers.** `#[derive(Demux)]` generates `<enum_snake>::All`, `catalog![Variant, ..]` in declaration order, next to the markers (with `#[demux(markers = path)]` the shared markers are listed). It is skipped if a variant is itself named `All`. So no list is written:
+
+    ```rust
+    #[derive(Demux)]
+    pub enum Mkt { A(u64), B(u64), C(u64) }
+    // `MktWs` has Output = Option<Mkt>.
+
+    #[derive(ComponentSubscription)]
+    #[subscribe(Some(S(u)): MktWs)]
+    pub struct Leg<S: Select<Mkt, Out = u64>>(PhantomData<S>);
+    // Component for Leg<S>: update returns *u * 10
+
+    #[derive(ComponentSubscription)]
+    #[subscribe(for S: Select<Mkt, Out = u64> in mkt::All { Leg<S> })]
+    pub struct Fan;
+    impl<S: Select<Mkt, Out = u64>> UpdateHandler<Leg<S>> for Fan { /* S::KEY is the variant index */ }
+    ```
+
+    (compiled in `tests/for_form.rs`, `enum_is_a_catalog_of_its_markers`.) A catalog of another enum's markers works the same through `markers = path`; the catalog still has to be the one whose elements the body accepts.
+* **The body is one node type, and that stays.** ``for S in All { Some(S(_)): Ws }`` is rejected: ``a `for` body is one node type, ..: a named entry (`x: Ws`) or a selected one (`Some(S(_)): Ws`) is not supported in it yet``. A selected handled entry is keyed by a generated `<struct>_edges::<Name>` marker; one per element would be a generic marker `Name<S>` that `Map` must also return (with the chain, instead of the fixed `Hd<Node, ()>` of `MapDeps`), that the derive declares and the user's impl names (`UpdateHandler<oms_edges::Sel<S>>`), plus a way to give each element's entry an `Initial` for an unread input. The workaround is the one in the example above: put the selector in a component generic over the marker (`Leg<S>`), which is also what the other examples do.
+
+Nobody outside the tests has used it yet.
 
 ## Listeners
 
