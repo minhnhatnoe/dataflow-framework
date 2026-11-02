@@ -242,7 +242,7 @@ impl Default for Body {{ fn default() -> Self {{ Body::Depth(DepthUpd::default()
 {derive_wire}
 pub enum Wire {{ {wire_variants} }}
 """)
-    write(f"{lib}/src/stats.rs", """//! Observable results: components write checksums here so the framework and the baseline can be compared.
+    stats_src = ("""//! Observable results: components write checksums here so the framework and the baseline can be compared.
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 pub static QCHK: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
 pub static SENT: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
@@ -274,6 +274,10 @@ pub fn snapshot() -> [u64; 8] {
      RISK.load(Relaxed), BIG.load(Relaxed)]
 }
 """)
+    if not REQ:  # the request counter needs the new library API
+        i = stats_src.index("/// `req` mode"); j = stats_src.index("pub static RISK")
+        stats_src = stats_src[:i] + stats_src[j:]
+    write(f"{lib}/src/stats.rs", stats_src)
     if ENUM:
         PUSH = """        v.push(match e {
             0 => Wire::Lighter(crate::catalog::lighter::make_ev(key, body)),
