@@ -1,6 +1,8 @@
+> **Note (2026-11-02):** the root `README.md` and `CLAUDE.md` were rewritten for the current model and supersede this file where they differ. `=>` examples and `#[handles]` below are the syntax of the time (now patterns and unnamed `#[subscribe]` entries).
+
 # Handoff: state of the dataflow framework work (2026-11-01)
 
-The root `README.md` and `CLAUDE.md` still describe the **old** model. This file and `handoff/event-spec.md` are the current picture.
+This file and `handoff/event-spec.md` were the picture at the time; the root `README.md` and `CLAUDE.md` are now current.
 
 **Latest:** `handoff/session-2.md` (what session 2 merged, measured and left next) supersedes sections 4–6 below where they differ.
 

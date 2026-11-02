@@ -482,8 +482,8 @@ impl Component for Covered {
     type Config = ();
     type Output = i64;
     fn new((): (), i: Self::Init<'_>) -> (Self, i64) {
-        // No slot, so no initial value (it would be a panic to dereference it).
-        log(format!("Covered.new {}", i.n.get().is_none()));
+        // No slot, but Book is Default, so new gets the default.
+        log(format!("Covered.new {}", i.n.get().is_none())); // Book is Default
         (Covered, 0)
     }
     fn update(&mut self, i: Self::Input<'_>) -> i64 {
@@ -518,7 +518,7 @@ fn a_payload_without_default_compiles_when_not_read_unmatched() {
     let _g = lock();
     take();
     let mut p = Pipeline::<Raw, (Covered,)>::build(Configs::new()).unwrap();
-    assert_eq!(take(), ["Covered.new true"]);
+    assert_eq!(take(), ["Covered.new false"]);
     p.push(Raw::Num(Book { bid: 1 }));
     p.push(Raw::Blob(Opaque(1)));
     // Watch reads Num (stored: it also runs on Blob) and handles Blob.

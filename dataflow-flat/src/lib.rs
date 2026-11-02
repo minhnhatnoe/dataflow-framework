@@ -1,6 +1,5 @@
 //! Event-driven dataflow, wired at compile time, safe at run time. Requires
-//! nightly. **Status: redesign in progress (phase 1b); see the README and the
-//! event spec.**
+//! nightly. See the README for the model, the syntax and the limits.
 //!
 //! A program is a [`Pipeline<R, Sinks>`](Pipeline): one *root* type `R`
 //! (`#[derive(Root)]`), fed with `pipeline.push(value)`, and *components*
@@ -37,7 +36,10 @@
 //! selectors matched, or, before the first match, the selector's [`Initial`]
 //! value (`Default::default()` of the payload for `#[derive(Demux)]`, `Some`,
 //! `Ok` and `Err`; a hand-written selector implements `Initial`), and
-//! `new` is given that value too (a [`SelInit`], which dereferences to the part).
+//! `new` is given that value too, slot or not (a [`SelInit`], which dereferences
+//! to the part; it panics when read if the payload has no default, which
+//! is also the case in a component generic over its selector or payload unless the
+//! edge has a slot).
 //! The plan stores a value only for an input that needs it, namely one some of
 //! whose subscriber's terms do not imply it: one slot per (source, selector
 //! chain), shared by all such subscribers, written right after the source runs
@@ -66,7 +68,7 @@
 //! 3. **Construction** (`drive`, `gather`). The pass visits positions in
 //!    execution order; each `new` is given the outputs built so far.
 //! 4. **Push** (`drive`, `gather`). The same driver visits the positions again:
-//!    for each, if its condition holds (`drive::Cond`, "always" in phase 1a),
+//!    for each, if its condition holds (`drive::Cond`, "always" for unconditional components),
 //!    gather its inputs as references into the stored outputs and the pushed
 //!    root, call `update`, store the output. Every step is a separately
 //!    monomorphized `#[inline(always)]` function, so a push is straight-line
@@ -145,7 +147,7 @@ pub use plan::{MAX_COMPONENTS, MAX_DECISIONS, MAX_EDGES, MAX_TERMS};
 pub use request::{Listener, Request};
 pub use select::{option, result, Initial, SelInit, Select, GUARD};
 #[doc(hidden)]
-pub use select::{ChainInitial, Identity, Keep};
+pub use select::{probe, ChainInitial, Identity, Keep};
 #[doc(hidden)]
 pub use select::ChainKey;
 #[doc(hidden)]

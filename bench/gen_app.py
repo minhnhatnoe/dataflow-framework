@@ -73,8 +73,10 @@ def mname(e, b):
 CARGO_CONFIG = """[build]
 # Without this, exported_generic_symbols re-runs on any edit that changes a line's length (dev rebuild 4.9 s vs 0.8 s).
 rustflags = ["-Zshare-generics=n", "-Ctarget-cpu=native"]
-# Sets _RJEM_MALLOC_CONF for rustc ([env] does not reach it); the script is copied into the app, so it can live anywhere.
-rustc-wrapper = "scripts/rustc-env.sh"
+
+[env]
+# rustc's jemalloc reads MALLOC_CONF (not _RJEM_MALLOC_CONF): never return memory to the OS.
+MALLOC_CONF = "dirty_decay_ms:-1,muzzy_decay_ms:-1"
 """
 
 PROFILE = """
@@ -1099,8 +1101,6 @@ def main():
 resolver = "2"
 members = ["marketlib", "app", "baseline", "runner"]
 """ + PROFILE)
-    os.makedirs(f"{out}/scripts", exist_ok=True)
-    shutil.copy(f"{os.path.dirname(os.path.abspath(__file__))}/../scripts/rustc-env.sh", f"{out}/scripts/rustc-env.sh")
     shutil.copy(f"{LIB}/rust-toolchain.toml", f"{out}/rust-toolchain.toml")
     write(f"{out}/.cargo/config.toml", CARGO_CONFIG)
     if os.path.exists(f"{LIB}/Cargo.lock") and not os.path.exists(f"{out}/Cargo.lock"):

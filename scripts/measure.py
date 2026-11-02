@@ -236,7 +236,7 @@ def main():
     ap.add_argument("--sizes", default="tiny,small")
     ap.add_argument("--mode", required=True, help="1a | enum | req (see bench/gen_app.py)")
     ap.add_argument("--lib", help="dataflow checkout to build against (default: this repo)")
-    ap.add_argument("--out", default="/tmp/claude-1000/-home-noe-TGT-dataflow-framework/093ee37d-6bfd-475e-b7a4-1d29416bf0b3/scratchpad/harness")
+    ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "target", "harness"))
     ap.add_argument("--steps", default="gen,release,mono,run,dev")
     ap.add_argument("--cpu", type=int, default=2)
     ap.add_argument("--procs", type=int, default=5)

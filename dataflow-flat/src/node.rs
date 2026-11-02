@@ -1,6 +1,6 @@
 //! Nodes: everything a component can subscribe to.
 //!
-//! [`Node`] is sealed (the derives implement it). In phase 1a there are two
+//! [`Node`] is sealed (the derives implement it). There are two
 //! kinds of node a user can name: the **root** (`#[derive(Root)]`, the value
 //! passed to `Pipeline::push`) and **components** (`#[derive(ComponentSubscription)]`
 //! + `impl Component`). The pipeline also has one internal node, the `Anchor`,

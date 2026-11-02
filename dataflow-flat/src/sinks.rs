@@ -16,7 +16,7 @@ use crate::node::{AnchorKind, Comp, Node, Root, KIND_ANCHOR};
 use crate::plan::{Plan, Planned, Upstream};
 use crate::store::{Empty, Finish, OutM, OutOptM, StateM, StateOptM};
 
-/// A tuple of 1 to 7 components: the sinks of a pipeline. The graph is
+/// A tuple of 1 to 15 components: the sinks of a pipeline. The graph is
 /// everything upstream of the sinks.
 ///
 /// ```ignore
