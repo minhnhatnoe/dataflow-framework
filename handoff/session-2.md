@@ -296,6 +296,6 @@ With incremental off, 4,079 to 12,412 is about linear.
 Optimization paused by the user's agreement; the parked list is in `MEMORY`'s scale target and the sections above.
 
 - **Patterns (`b3f0804`), listeners (`35619c9`), unit selectors and `=>` removal (`1c00bbc`) are merged.** `.text` is byte-identical at typical for patterns and for `=>` removal. Listeners: +0.13% `.text` in enum mode, run time 108.3–108.8 → 108.8–109.5 ns (probably layout, unproven), release memory 1.31 → 1.46 GB.
-- **`On`, `KeyListener`, `Keyed` remain** only for `bench/gen_app.py --mode on`, the run-time comparison for the enum gap.
+- `On`, `KeyListener`, `Keyed`, `Symbol` and `collect_requests` are removed on branch `remove-on` (enums are the only keyed form); branch `keep-on-mode` keeps them for the run-time comparison.
 - **Unknown limits:** one component can't read two variants of one listener (existing plan rule). `Data: E` on a data variant compiles and ignores the payload.
 - `handoff/README.md` and `handoff/event-spec.md` still show `=>` examples.

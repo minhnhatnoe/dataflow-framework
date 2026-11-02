@@ -3,13 +3,12 @@
 
 usage: bench/gen_enum_keys.py N OUTDIR
 
-Writes four crates under OUTDIR (each its own workspace, path dependency on dataflow-flat):
+Writes crates under OUTDIR (each its own workspace, path dependency on dataflow-flat):
 
-  f  variant F: the listener outputs `Frame { key: Option<u32>, tob }` (Keyed); `Book<S: Symbol>` reads `On::<S>(t): Ws`
   e  variant E: the listener outputs `enum FrameN { S0(Tob), .. }`; one marker per symbol (`markets::S0`) with a
      hand-written `impl Select<FrameN>` whose `key_of` is ONE shared function; `Book<S: Select<FrameN, Out = Tob>>`
      reads `S(t): Ws`
-  k  variant E plus `const KEYED: bool = true` in every impl and `#[key_listener]` on Ws\n  d  variant E with `#[derive(Demux)]` on the enum as it stands (compile time only; selectors are `framen::S0`)
+  d  variant E with `#[derive(Demux)]` on the enum as it stands (compile time only; selectors are `framen::S0`)
   h  hand-written baseline: a `match` on the symbol with the books in an array
 
 Every side has the same 827 `Book<S>` bodies, the same handler sink `Oms` + `Probe`, and the same pre-computed packet
@@ -35,7 +34,6 @@ use dataflow_flat::*;
 
 pub const N: usize = {n};
 pub static DIGEST: AtomicU64 = AtomicU64::new(0);
-pub static REQUESTED: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Root)]
 pub struct Packet {{ pub symbol: u32, pub bid: i64, pub ask: i64, pub seq: u64 }}
@@ -122,7 +120,6 @@ fn main() {{
     let mut p = Pipeline::<Packet, (Probe,)>::build(Configs::new()).unwrap();
     black_box(asm_push as fn(&mut Pipeline<Packet, (Probe,)>, Packet));
     drive(|x| asm_push(&mut p, x), &args);
-    eprintln!("components={{}} requested={{}}", p.len(), REQUESTED.load(Ordering::Relaxed));
 }}
 """
 
@@ -178,51 +175,6 @@ def write(name, main):
     os.makedirs(os.path.join(d, "src"), exist_ok=True)
     open(os.path.join(d, "Cargo.toml"), "w").write(cargo(f"ek_{name}"))
     open(os.path.join(d, "src", "main.rs"), "w").write(main)
-
-# ---- F ---------------------------------------------------------------------------------------------------
-syms = "\n".join(f"    pub struct S{i}; impl Symbol for S{i} {{ const KEY: u32 = {i}; const NAME: &'static str = \"S{i}\"; }}" for i in range(n))
-f_body = COMMON.replace("%HANDLES%", handles("markets::")).replace("%UPDATE_HANDLER%", """impl<S: Symbol> UpdateHandler<Book<S>> for Oms {
-    #[inline(always)]
-    fn on_update(&mut self, t: &Tob) { fold(&mut self.acc, t) }
-}""") + f"""
-pub mod markets {{
-    use dataflow_flat::Symbol;
-{syms}
-}}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Frame {{ pub key: Option<u32>, pub tob: Tob }}
-impl Keyed for Frame {{
-    type Item = Tob;
-    fn key(&self) -> Option<u32> {{ self.key }}
-    fn item(&self) -> &Tob {{ &self.tob }}
-}}
-
-#[derive(ComponentSubscription)]
-#[subscribe(p: Packet)]
-#[key_listener]
-pub struct Ws;
-impl KeyListener for Ws {{ fn subscribe(&mut self, keys: &[u32]) {{ REQUESTED.fetch_add(keys.len() as u64, Ordering::Relaxed); }} }}
-impl Component for Ws {{
-    type Config = ();
-    type Output = Frame;
-    fn new((): (), _: Self::Init<'_>) -> (Self, Frame) {{ (Ws, Frame::default()) }}
-    fn update(&mut self, i: Self::Input<'_>) -> Frame {{
-        let m = i.p;
-        Frame {{ key: Some(m.symbol), tob: Tob {{ bid: m.bid, ask: m.ask, seq: m.seq }} }}
-    }}
-}}
-
-#[derive(ComponentSubscription)]
-#[subscribe(On::<S>(t): Ws)]
-pub struct Book<S: Symbol> {{ n: u64, _p: core::marker::PhantomData<S> }}
-impl<S: Symbol> Component for Book<S> {{
-    type Config = ();
-    type Output = Tob;
-{book_body("<S as Symbol>::KEY")}
-}}
-"""
-write("f", f_body)
 
 # ---- E and D ---------------------------------------------------------------------------------------------
 variants = ",\n".join(f"    S{i}(Tob)" for i in range(n))
@@ -308,11 +260,6 @@ import re
 e2_body = re.sub(r"\(key_of\(x\) == (\d+) \)", r"(key_of(x) == \1)", e2_body)
 write("e2", e2_body)
 
-# ---- K: E plus `KEYED = true` (and a #[key_listener] on Ws), so the plan treats the selectors as keyed like `On<S>` ----
-k_body = e_body.replace("    const KEY: u32 =", "    const KEYED: bool = true;\n    const KEY: u32 =")
-k_body = k_body.replace("#[subscribe(p: Packet)]\npub struct Ws;", "#[subscribe(p: Packet)]\n#[key_listener]\npub struct Ws;\nimpl KeyListener for Ws { fn subscribe(&mut self, keys: &[u32]) { REQUESTED.fetch_add(keys.len() as u64, Ordering::Relaxed); } }")
-write("k", k_body)
-
 d_body = COMMON.replace("%HANDLES%", handles(f"{MOD}::")).replace("%UPDATE_HANDLER%", UH_E) + f"""
 #[derive(Clone, Copy, Debug, Demux)]
 pub enum {FN} {{
@@ -369,4 +316,4 @@ fn main() {
 step = ("        let i = Inp { t };\n" + DIFF_OPS.replace("KEXPR", "K")) if DIFF else "        self.n += 1;\n        Tob { bid: t.bid, ask: t.ask + (self.n & 1) as i64, seq: t.seq.wrapping_add(self.n) }"
 h_body = h_body.replace("%STEP%", step).replace("#[derive(Default, Clone, Copy)]\npub struct BookH", "struct Inp<'a> { t: &'a Tob }\n#[derive(Default, Clone, Copy)]\npub struct BookH", 1)
 write("h", h_body)
-print(f"wrote f e d h with N={n} under {out}")
+print(f"wrote e e2 d h with N={n} under {out}")

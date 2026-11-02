@@ -36,7 +36,7 @@
 //! Ws)]` runs on both and reads both. The input then gives the last value its
 //! selectors matched, or, before the first match, the selector's [`Initial`]
 //! value (`Default::default()` of the payload for `#[derive(Demux)]`, `Some`,
-//! `Ok`, `Err` and `On`; a hand-written selector implements `Initial`), and
+//! `Ok` and `Err`; a hand-written selector implements `Initial`), and
 //! `new` is given that value too (a [`SelInit`], which dereferences to the part).
 //! The plan stores a value only for an input that needs it, namely one some of
 //! whose subscriber's terms do not imply it: one slot per (source, selector
@@ -125,7 +125,6 @@ mod flat;
 mod gather;
 mod handler;
 mod identity;
-mod listen;
 #[doc(hidden)]
 pub mod request;
 mod node;
@@ -144,7 +143,7 @@ pub use node::{InitOf, Node, Root};
 pub use pipeline::Pipeline;
 pub use plan::{MAX_COMPONENTS, MAX_DECISIONS, MAX_EDGES, MAX_TERMS};
 pub use request::{Listener, Request};
-pub use select::{option, result, Initial, Keyed, KeyListener, On, SelInit, Select, Symbol, GUARD};
+pub use select::{option, result, Initial, SelInit, Select, GUARD};
 #[doc(hidden)]
 pub use select::{ChainInitial, Identity, Keep};
 #[doc(hidden)]

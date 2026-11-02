@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use dataflow_flat::{
-    Component, ComponentSubscription, Configs, Demux, Keyed, On, Pipeline, Root, Symbol, UpdateHandler,
+    Component, ComponentSubscription, Configs, Demux, Pipeline, Root, Select, UpdateHandler,
 };
 
 static LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -22,9 +22,22 @@ fn log(s: impl Into<String>) {
     LOG.lock().unwrap().push(s.into());
 }
 
+/// The symbols, as marker types shared by `Frame`'s variants.
+pub mod syms {
+    pub struct Btc;
+    pub struct Eth;
+    pub struct Sol;
+    pub struct Other;
+}
+use syms::{Btc, Eth, Sol};
+
+/// A symbol: its marker selects its variant of `Frame`.
+pub trait Symbol: Select<Frame, Out = u64> {
+    const KEY: u32;
+    const NAME: &'static str;
+}
 macro_rules! symbol {
     ($name:ident, $key:expr) => {
-        pub struct $name;
         impl Symbol for $name {
             const KEY: u32 = $key;
             const NAME: &'static str = stringify!($name);
@@ -42,18 +55,14 @@ pub struct Msg {
     pub v: u64,
 }
 
-pub struct Frame {
-    key: Option<u32>,
-    v: u64,
-}
-impl Keyed for Frame {
-    type Item = u64;
-    fn key(&self) -> Option<u32> {
-        self.key
-    }
-    fn item(&self) -> &u64 {
-        &self.v
-    }
+#[derive(Demux)]
+#[demux(markers = syms)]
+pub enum Frame {
+    Btc(u64),
+    Eth(u64),
+    Sol(u64),
+    /// Any other key, or none: nobody selects it.
+    Other(u64),
 }
 
 #[derive(ComponentSubscription)]
@@ -68,20 +77,25 @@ impl Component for Ws {
     }
     fn update(&mut self, i: Self::Input<'_>) -> Option<Frame> {
         log("Ws.update");
-        Some(Frame { key: i.m.key, v: i.m.v })
+        Some(match i.m.key {
+            Some(0) => Frame::Btc(i.m.v),
+            Some(1) => Frame::Eth(i.m.v),
+            Some(2) => Frame::Sol(i.m.v),
+            _ => Frame::Other(i.m.v),
+        })
     }
 }
 
 /// A quoter per symbol; its initial output is 1000 + key.
 #[derive(ComponentSubscription)]
-#[subscribe(Some(On::<S>(u)): Ws)]
+#[subscribe(Some(S(u)): Ws)]
 pub struct Quoter<S: Symbol>(PhantomData<S>);
 impl<S: Symbol> Component for Quoter<S> {
     type Config = ();
     type Output = u64;
     fn new((): (), _: Self::Init<'_>) -> (Self, u64) {
         log(format!("Quoter<{}>.new", S::NAME));
-        (Quoter(PhantomData), 1000 + S::KEY as u64)
+        (Quoter(PhantomData), 1000 + <S as Symbol>::KEY as u64)
     }
     fn update(&mut self, i: Self::Input<'_>) -> u64 {
         log(format!("Quoter<{}>", S::NAME));
@@ -488,7 +502,7 @@ fn edges_with_conditional_parents_are_tested_by_flag() {
 // ---------------------------------------------------------------------------
 
 #[derive(ComponentSubscription)]
-#[subscribe(Some(On::<Btc>(_)): Ws, Some(On::<Eth>(_)): Ws, Quoter<Sol>)]
+#[subscribe(Some(Btc(_)): Ws, Some(Eth(_)): Ws, Quoter<Sol>)]
 pub struct Fills {
     acc: Vec<String>,
 }

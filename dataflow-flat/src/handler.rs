@@ -13,9 +13,9 @@
 //! ```
 //!
 //! A bare type is a handled entry keyed by the node type. A selected handled
-//! entry is written with `_` as the leaf, `Some(On::<Btc>(_)): Ws`, and is
+//! entry is written with `_` as the leaf, `Some(Ev::Btc(_)): Ws`, and is
 //! keyed by a marker the derive generates, `<struct_snake>_edges::Btc` (named
-//! after the innermost selector, or its one generic argument), because the
+//! after the innermost selector), because the
 //! value's type depends on the parent and the orphan rules forbid an impl of
 //! [`HandledEdge`] for the selector itself.
 //!

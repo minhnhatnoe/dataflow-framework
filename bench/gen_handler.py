@@ -6,8 +6,8 @@ usage: bench/gen_handler.py N OUTDIR [for]
 With `for`, the handler lists its quoters as one `for S in catalog![S0, ..] { Quoter<S> }` entry instead of
 N written-out entries (same plan, same code).
 
-One root `Msg { key, v }` -> `Feed` (Option<Frame>, keyed) -> `Quoter<Sn>` for N symbols
-(`Some(On::<Sn>(u)): Feed`, exclusive keys) -> one joining node, in three flavours selected by cargo
+One root `Msg { key, v }` -> `Feed` (Option<Frame>, an enum) -> `Quoter<Sn>` for N symbols
+(`Some(S(u)): Feed`, the variants of the enum `Frame`, exclusive) -> one joining node, in three flavours selected by cargo
 features of the generated crate:
 
   handler    `Oms`, a handler component: `on_update` per fired quoter, then `update`
@@ -27,14 +27,13 @@ n = int(sys.argv[1])
 out = sys.argv[2]
 os.makedirs(os.path.join(out, "src"), exist_ok=True)
 
-syms = "\n".join(
-    f"pub struct S{i}; impl Symbol for S{i} {{ const KEY: u32 = {i}; const NAME: &'static str = \"S{i}\"; }}" for i in range(n)
-)
+variants = "\n".join(f"    S{i}(u64)," for i in range(n))
+feed_arms = "\n".join(f"            {i} => Frame::S{i}(i.m.v)," for i in range(n))
 if len(sys.argv) > 3 and sys.argv[3] == "for":
-    handles = "for S: Symbol in catalog![" + ", ".join(f"S{i}" for i in range(n)) + "] { Quoter<S> }"
+    handles = "for S: Sym in catalog![" + ", ".join(f"frame::S{i}" for i in range(n)) + "] { Quoter<S> }"
 else:
-    handles = ", ".join(f"Quoter<S{i}>" for i in range(n))
-fields = ", ".join(f"q{i}: Quoter<S{i}>" for i in range(n))
+    handles = ", ".join(f"Quoter<frame::S{i}>" for i in range(n))
+fields = ", ".join(f"q{i}: Quoter<frame::S{i}>" for i in range(n))
 hand_fields = " ".join(f"q{i}: (u64, u64)," for i in range(n))
 hand_init = " ".join(f"q{i}: (0, 0)," for i in range(n))
 hand_arms = "\n".join(f"            {i} => {{ self.q{i} = (m.v, m.v * 2 + {i}); self.oms = (self.q{i}.1, 1); self.tail(); }}" for i in range(n))
@@ -66,18 +65,21 @@ main = f"""#![allow(dead_code, unused_imports)]
 use std::sync::atomic::{{AtomicU64, Ordering}};
 use std::time::Instant;
 
-use dataflow_flat::{{catalog, Component, ComponentSubscription, Configs, Keyed, On, Pipeline, Root, Symbol, UpdateHandler}};
+use dataflow_flat::{{catalog, Component, ComponentSubscription, Configs, Demux, Pipeline, Root, Select, UpdateHandler}};
 
 pub const N: usize = {n};
 
 #[derive(Root)]
 pub struct Msg {{ pub key: u32, pub v: u64 }}
-pub struct Frame {{ key: Option<u32>, v: u64 }}
-impl Keyed for Frame {{
-    type Item = u64;
-    fn key(&self) -> Option<u32> {{ self.key }}
-    fn item(&self) -> &u64 {{ &self.v }}
+/// One variant per symbol (the selectors are `frame::S0`, ..), and `Other` for keys nobody reads.
+#[derive(Demux)]
+pub enum Frame {{
+{variants}
+    Other(u64),
 }}
+/// A symbol: a selector of `Frame` that yields the payload.
+pub trait Sym: Select<Frame, Out = u64> {{}}
+impl<S: Select<Frame, Out = u64>> Sym for S {{}}
 
 #[derive(ComponentSubscription)]
 #[subscribe(m: Msg)]
@@ -86,20 +88,21 @@ impl Component for Feed {{
     type Config = ();
     type Output = Option<Frame>;
     fn new((): (), _: Self::Init<'_>) -> (Self, Option<Frame>) {{ (Feed, None) }}
-    fn update(&mut self, i: Self::Input<'_>) -> Option<Frame> {{ Some(Frame {{ key: Some(i.m.key), v: i.m.v }}) }}
+    fn update(&mut self, i: Self::Input<'_>) -> Option<Frame> {{ Some(match i.m.key {{
+{feed_arms}
+        _ => Frame::Other(i.m.v),
+    }}) }}
 }}
-
-{syms}
 
 /// (sequence, value)
 #[derive(ComponentSubscription)]
-#[subscribe(Some(On::<S>(u)): Feed)]
-pub struct Quoter<S: Symbol>(std::marker::PhantomData<S>);
-impl<S: Symbol> Component for Quoter<S> {{
+#[subscribe(Some(S(u)): Feed)]
+pub struct Quoter<S: Sym>(std::marker::PhantomData<S>);
+impl<S: Sym> Component for Quoter<S> {{
     type Config = ();
     type Output = (u64, u64);
     fn new((): (), _: Self::Init<'_>) -> (Self, (u64, u64)) {{ (Quoter(std::marker::PhantomData), (0, 0)) }}
-    fn update(&mut self, i: Self::Input<'_>) -> (u64, u64) {{ (*i.u, *i.u * 2 + S::KEY as u64) }}
+    fn update(&mut self, i: Self::Input<'_>) -> (u64, u64) {{ (*i.u, *i.u * 2 + <S as Select<Frame>>::KEY as u64) }}
 }}
 
 pub static DIGEST: AtomicU64 = AtomicU64::new(0);
@@ -118,7 +121,7 @@ pub mod h {{
         #[inline(always)]
         fn update(&mut self, _: Self::Input<'_>) -> (u64, u64) {{ std::mem::take(&mut self.acc) }}
     }}
-    impl<S: Symbol> UpdateHandler<Quoter<S>> for Oms {{
+    impl<S: Sym> UpdateHandler<Quoter<S>> for Oms {{
         #[inline(always)]
         fn on_update(&mut self, v: &(u64, u64)) {{ self.acc.0 += v.1; self.acc.1 += 1; }}
     }}

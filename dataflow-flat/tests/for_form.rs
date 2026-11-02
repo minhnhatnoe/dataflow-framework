@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 use std::sync::Mutex;
 
 use dataflow_flat::{
-    catalog, Component, ComponentSubscription, Concat, Configs, Keyed, On, Pipeline, Product, Root, Symbol,
+    catalog, Component, ComponentSubscription, Concat, Configs, Initial, Pipeline, Product, Root, Select,
     UpdateHandler, Zip,
 };
 
@@ -28,13 +28,29 @@ pub struct Frame {
     key: Option<u32>,
     v: u64,
 }
-impl Keyed for Frame {
-    type Item = u64;
-    fn key(&self) -> Option<u32> {
-        self.key
+
+/// A symbol: a type-level name with an integer key.
+pub trait Symbol: 'static {
+    const KEY: u32;
+    const NAME: &'static str;
+}
+
+/// A hand-written selector for the symbol `S`: matches iff the frame has key `S::KEY`.
+/// Different keys at one place are mutually exclusive.
+pub struct Pick<S>(PhantomData<fn() -> S>);
+impl<S: Symbol> Select<Frame> for Pick<S> {
+    type Out = u64;
+    const KEY: u32 = S::KEY;
+    fn select(x: &Frame) -> Option<&u64> {
+        (x.key == Some(S::KEY)).then_some(&x.v)
     }
-    fn item(&self) -> &u64 {
-        &self.v
+    fn key_of(x: &Frame) -> u32 {
+        x.key.unwrap_or(dataflow_flat::GUARD)
+    }
+}
+impl<S: Symbol> Initial<Frame> for Pick<S> {
+    fn initial() -> u64 {
+        0
     }
 }
 
@@ -60,7 +76,7 @@ impl<const K: usize> Symbol for Sy<K> {
 }
 
 #[derive(ComponentSubscription)]
-#[subscribe(Some(On::<S>(u)): Ws)]
+#[subscribe(Some(Pick::<S>(u)): Ws)]
 pub struct Quoter<S: Symbol>(PhantomData<S>);
 impl<S: Symbol> Component for Quoter<S> {
     type Config = ();
@@ -237,7 +253,7 @@ impl<X: Tag, S: Symbol> Symbol for Pair<X, S> {
 }
 
 #[derive(ComponentSubscription)]
-#[subscribe(Some(On::<Pair<X, S>>(u)): Ws)]
+#[subscribe(Some(Pick::<Pair<X, S>>(u)): Ws)]
 pub struct Book<X: Tag, S: Symbol>(PhantomData<(X, S)>);
 impl<X: Tag, S: Symbol> Component for Book<X, S> {
     type Config = ();

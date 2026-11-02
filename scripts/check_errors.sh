@@ -471,7 +471,7 @@ impl Component for A {
 fn main() {}
 EOF
 
-# --- keyed selectors (On<S>) ---------------------------------------------------------------------------
+# --- plan rules ---------------------------------------------------------------------------
 
 # Rule 6 when the orphan is the first leaf (it takes execution position 0, not the root): reported by the
 # plan, not as an arithmetic underflow in the component position.
@@ -496,61 +496,6 @@ impl Component for B {
     fn update(&mut self, _: Self::Input<'_>) -> u64 { 0 }
 }
 fn main() { let _ = Pipeline::<Poll, (B,)>::build(Configs::new()); }
-EOF2
-
-# On<S> on a parent whose output is not Keyed.
-CMD[on_not_keyed]=check
-PATTERN[on_not_keyed]='E0277.*On<_>. needs an output that implements .Keyed.'
-read -r -d '' BODY[on_not_keyed] <<'EOF2'
-use dataflow_flat::{On, Symbol};
-pub struct Btc;
-impl Symbol for Btc { const KEY: u32 = 0; const NAME: &'static str = "Btc"; }
-#[derive(ComponentSubscription)]
-#[subscribe(On::<Btc>(x): Src)]
-pub struct A;
-impl Component for A {
-    type Config = ();
-    type Output = u64;
-    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (A, 0) }
-    fn update(&mut self, _: Self::Input<'_>) -> u64 { 0 }
-}
-fn main() {}
-EOF2
-
-# Two different symbol types with one KEY on one parent.
-CMD[symbols_share_key]=build
-PATTERN[symbols_share_key]='E0080.*symbols Btc and Xbt share key 0'
-read -r -d '' BODY[symbols_share_key] <<'EOF2'
-use dataflow_flat::{Keyed, On, Symbol};
-pub struct Btc;
-impl Symbol for Btc { const KEY: u32 = 0; const NAME: &'static str = "Btc"; }
-pub struct Xbt;
-impl Symbol for Xbt { const KEY: u32 = 0; const NAME: &'static str = "Xbt"; }
-pub struct Frame(u32, u64);
-impl Keyed for Frame {
-    type Item = u64;
-    fn key(&self) -> Option<u32> { Some(self.0) }
-    fn item(&self) -> &u64 { &self.1 }
-}
-#[derive(ComponentSubscription)]
-#[subscribe(p: Poll)]
-pub struct Ws;
-impl Component for Ws {
-    type Config = ();
-    type Output = Frame;
-    fn new((): (), _: Self::Init<'_>) -> (Self, Frame) { (Ws, Frame(0, 0)) }
-    fn update(&mut self, _: Self::Input<'_>) -> Frame { Frame(0, 0) }
-}
-#[derive(ComponentSubscription)]
-#[subscribe(On::<Btc>(a): Ws, On::<Xbt>(b): Ws)]
-pub struct A;
-impl Component for A {
-    type Config = ();
-    type Output = u64;
-    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (A, 0) }
-    fn update(&mut self, _: Self::Input<'_>) -> u64 { 0 }
-}
-fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }
 EOF2
 
 # --- handler components (handled entries in `#[subscribe]`) ----------------------------------------------
@@ -872,7 +817,7 @@ ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        keep_input_reference name_input_struct_outside unused_config
        non_exclusive_join exclusive_join_ok deep_non_exclusive_join deep_exclusive_join_ok demux_reader_not_implied stored_selector_ok
        stored_payload_no_default stored_payload_no_clone unstored_payload_ok selector_unreachable_component
-       selector_wrong_input orphan_first on_not_keyed symbols_share_key
+       selector_wrong_input orphan_first
        handler_missing_update handler_missing_update_note handler_non_exclusive_join handler_exclusive_ok handler_duplicate_marker handler_selected_missing_update handler_bare_wildcard
        for_ok for_missing_update for_not_a_catalog for_zip_shapes for_body_named for_pattern_triple
        pattern_struct pattern_multi_field pattern_range pattern_range_literal pattern_guard pattern_or pattern_literal

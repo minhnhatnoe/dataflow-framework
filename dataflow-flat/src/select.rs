@@ -39,12 +39,6 @@ pub trait Select<In>: 'static {
     /// different keys at the same place are mutually exclusive; [`GUARD`]
     /// means "a condition that may hold together with anything".
     const KEY: u32;
-    /// Is this a keyed selector ([`On`])? The plan collects the keys of keyed
-    /// decisions as the requests of a [`KeyListener`](crate::KeyListener), and two
-    /// keyed selectors with the same `KEY` at one place are an error.
-    const KEYED: bool = false;
-    /// The name used in messages about a keyed selector (the symbol's name).
-    const LABEL: &'static str = "";
     /// Is this selector *requested* of a [`Listener`](crate::Listener)? True for
     /// the selectors of `#[derive(Demux)]`: reading one downstream of a
     /// listener calls `Request<Self>::add` on its requests, and that impl must
@@ -68,7 +62,7 @@ pub trait Select<In>: 'static {
 #[doc(hidden)]
 #[diagnostic::on_unimplemented(
     message = "the selector chain `{Self}` cannot be applied to a value of type `{In}`",
-    label = "each selector must implement `Select<_>` for the output of the one before it (a `Some`/`None` needs an `Option`, an `On<_>` needs an output that implements `Keyed`)"
+    label = "each selector must implement `Select<_>` for the output of the one before it (a `Some`/`None` needs an `Option`)"
 )]
 pub trait SelectChain<In: 'static>: 'static {
     /// The value at the end of the chain.
@@ -170,13 +164,13 @@ fn no_initial_value() -> ! {
 /// The value a selector's part has before the selector has ever matched.
 /// `#[derive(Demux)]` selectors implement it with `Default::default()` of the
 /// payload (a variant whose payload is not `Default` has no usable impl, which
-/// only matters if it is read in steps where it does not match). `Some`, `Ok`,
-/// `Err` and `On` do likewise; a hand-written selector implements it however
+/// only matters if it is read in steps where it does not match). `Some` and `Ok`,
+/// `Err` do likewise; a hand-written selector implements it however
 /// it likes.
 #[diagnostic::on_unimplemented(
     message = "the selector `{Self}` has no initial value for `{In}`",
     label = "a selected input that is read in steps where its selectors do not match starts from the selector's initial value",
-    note = "the payload must implement `Default` (for `#[derive(Demux)]`, `Some`, `Ok`, `Err` and `On`), or write `impl Initial<{In}> for {Self}`"
+    note = "the payload must implement `Default` (for `#[derive(Demux)]`, `Some`, `Ok` and `Err`), or write `impl Initial<{In}> for {Self}`"
 )]
 pub trait Initial<In: 'static>: Select<In> {
     fn initial() -> Self::Out;
@@ -287,89 +281,9 @@ const impl<In: 'static, S: Select<In>, T: [const] ChainWalk<S::Out>> ChainWalk<I
             dn,
             TypeId::of::<S>(),
             <S as Select<In>>::KEY,
-            <S as Select<In>>::KEYED,
-            if <S as Select<In>>::LABEL.is_empty() { core::any::type_name::<S>() } else { <S as Select<In>>::LABEL },
         );
         T::walk(plan, parent, d)
     }
-}
-
-/// A symbol: a type-level name with an integer key, such as a market
-/// (`struct Btc; impl Symbol for Btc { const KEY: u32 = 0; .. }`). Keys are
-/// dense per source in the intended use (0..n).
-pub trait Symbol: 'static {
-    /// Identifies the symbol among those selected from one parent.
-    const KEY: u32;
-    /// Shown in messages.
-    const NAME: &'static str;
-}
-
-/// A value that carries a key and an item, such as a message of a multiplexed
-/// feed: the thing [`On`] selects from.
-#[diagnostic::on_unimplemented(
-    message = "`{Self}` is not `Keyed`, so `On<_>` can't select from it",
-    label = "`On<S>` needs the output of the subscribed node to implement `dataflow_flat::Keyed`"
-)]
-pub trait Keyed {
-    /// What `On` hands to the subscriber.
-    type Item: 'static;
-    /// The key of this value, if it has one.
-    fn key(&self) -> Option<u32>;
-    /// The payload.
-    fn item(&self) -> &Self::Item;
-}
-
-/// The keyed selector: matches iff the parent's value has key `S::KEY`; the
-/// part is the item. Two `On`s with different symbols at one place are
-/// mutually exclusive, and the keys of the `On`s that read a
-/// [`KeyListener`](crate::KeyListener) are its requests.
-///
-/// ```ignore
-/// #[subscribe(Some(On::<Btc>(u)): Ws)]
-/// ```
-pub struct On<S>(core::marker::PhantomData<fn() -> S>);
-
-impl<In: Keyed, S: Symbol> Select<In> for On<S> {
-    type Out = In::Item;
-    const KEY: u32 = S::KEY;
-    const KEYED: bool = true;
-    const LABEL: &'static str = S::NAME;
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn select(x: &In) -> Option<&In::Item> {
-        if x.key() == Option::Some(S::KEY) {
-            Option::Some(x.item())
-        } else {
-            Option::None
-        }
-    }
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn key_of(x: &In) -> u32 {
-        match x.key() {
-            Option::Some(k) => k,
-            Option::None => GUARD,
-        }
-    }
-}
-
-impl<In: Keyed + 'static, S: Symbol> Initial<In> for On<S>
-where
-    In::Item: Default,
-{
-    fn initial() -> In::Item {
-        Default::default()
-    }
-}
-
-/// A component that wants to know which keys its subscribers read: declared
-/// with `#[listener]` on the `ComponentSubscription` derive. At
-/// [`Pipeline::build`](crate::Pipeline::build), after every component is
-/// constructed and before it returns, `subscribe` is called once with the
-/// sorted, deduplicated keys of every [`On`] that reads this component's
-/// output (directly or after other selectors).
-pub trait KeyListener {
-    fn subscribe(&mut self, keys: &[u32]);
 }
 
 /// Built-in selectors for `Option`.

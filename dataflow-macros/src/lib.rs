@@ -484,7 +484,7 @@ impl Parse for Entry {
 }
 
 /// The marker name of a selected handled entry: the innermost selector's name,
-/// or, for a generic selector such as `On::<Btc>`, its one type argument's.
+/// or, for a generic selector such as `Tag::<Btc>`, its one type argument's.
 fn marker_ident(sel: &Type, span: Span) -> Ident {
     if let Type::Path(p) = sel {
         if let Some(seg) = p.path.segments.last() {
@@ -687,13 +687,13 @@ fn chain_ty(chain: &[Type]) -> TokenStream2 {
 }
 
 /// `#[derive(ComponentSubscription)]` with `#[subscribe(..)]`. An entry with no
-/// `:` (`Average`), or a pattern with `_` as the leaf (`Some(On::<Btc>(_)): Ws`),
+/// `:` (`Average`), or a pattern with `_` as the leaf (`Some(Tag::<Btc>(_)): Ws`),
 /// is *handled*: the component implements `UpdateHandler<Entry>` for it instead
 /// of reading it in `update`, and it is not a field of `Input` or `Init`. For
 /// a selected handled entry the derive generates a marker type
 /// `<struct_snake>_edges::<Name>` (the innermost selector's name) that keys the
 /// `UpdateHandler` impl.
-#[proc_macro_derive(ComponentSubscription, attributes(subscribe, listener, key_listener))]
+#[proc_macro_derive(ComponentSubscription, attributes(subscribe, listener))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let loc = input.ident.span();
@@ -1056,18 +1056,8 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
 
     // `Node` for a component. Its bounds are the component's own.
     let handler = !fors.is_empty() || subs.iter().any(|s| s.handled);
-    let key_listener = input.attrs.iter().any(|a| a.path().is_ident("key_listener"));
     let listener = input.attrs.iter().any(|a| a.path().is_ident("listener"));
-    let mut node_items = if key_listener {
-        quote! {
-            const LISTENER: bool = true;
-            fn __subscribe(this: &mut Self, keys: &[u32]) {
-                <Self as #krate::KeyListener>::subscribe(this, keys)
-            }
-        }
-    } else {
-        quote!()
-    };
+    let mut node_items = quote!();
     if handler {
         node_items = quote!(#node_items const HANDLER: bool = true;);
     }
@@ -1310,12 +1300,12 @@ mod tests {
     #[test]
     fn mixed_lists() {
         let p = syn::punctuated::Punctuated::<Subscription, Token![,]>::parse_terminated;
-        let l = syn::parse::Parser::parse_str(p, "a: A, Some(B(c)): C, Gone: W, Ev::Gone: W, None: S, d: D, On::<S>(e): X").unwrap();
+        let l = syn::parse::Parser::parse_str(p, "a: A, Some(B(c)): C, Gone: W, Ev::Gone: W, None: S, d: D, Tag::<S>(e): X").unwrap();
         let names: Vec<_> = l.iter().map(|s| s.unit).collect();
         assert_eq!(names, [false, false, true, true, true, false, false]);
         assert_eq!(l[1].chain.len(), 2);
         assert_eq!(l[2].chain.len(), 1);
-        assert_eq!(chain_of("On::<S>(e): X").1, ["On::<S>"]);
+        assert_eq!(chain_of("Tag::<S>(e): X").1, ["Tag::<S>"]);
         assert_eq!(chain_of("<S as Symbol>::Sel(u): X").1, ["<SasSymbol>::Sel"]);
     }
 
@@ -1332,7 +1322,7 @@ mod tests {
     fn handled_entries() {
         let s = sub("Foo(_): Ws").unwrap();
         assert!(s.handled && s.name.unwrap() == "Foo" && s.chain.len() == 1);
-        let s = sub("Some(On::<Btc>(_)): Ws").unwrap();
+        let s = sub("Some(Tag::<Btc>(_)): Ws").unwrap();
         assert!(s.handled && s.name.unwrap() == "Btc" && s.chain.len() == 2);
         let s = sub("Quoter<Btc>").unwrap();
         assert!(s.handled && s.name.is_none() && s.chain.is_empty());

@@ -11,7 +11,6 @@ use crate::drive::{
 };
 use crate::flat::{FlatTop, Whole};
 use crate::gather::Layout;
-use crate::listen::{ListenCtx, ListenPh};
 use crate::request::{ReqCtx, ReqPh};
 use crate::node::{AnchorKind, Comp, Node, Root, KIND_ANCHOR};
 use crate::plan::{Plan, Planned, Upstream};
@@ -120,9 +119,6 @@ pub trait Sinks<R>: SinkList {
     /// First pass: collect the requests of the listeners (nothing is constructed).
     #[doc(hidden)]
     fn requests(pass: &mut ConstructPass);
-    /// Tell each key listener the keys its subscribers read. Called once by `build`.
-    #[doc(hidden)]
-    fn listen(store: &mut Self::Store);
 }
 
 impl<R: Root, S: SinkList> Sinks<R> for S
@@ -132,7 +128,6 @@ where
     Whole<Anchor<R, S>>:
         Drive<Anchor<R, S>, ConstructPh<Anchor<R, S>>, <Whole<Anchor<R, S>> as RgCl>::Cl>,
     Pn<Anchor<R, S>, { RootProg::<Anchor<R, S>>::N }>: Exec<Anchor<R, S>, PushPh<Anchor<R, S>>>,
-    Whole<Anchor<R, S>>: Drive<Anchor<R, S>, ListenPh<Anchor<R, S>>, <Whole<Anchor<R, S>> as RgCl>::Cl>,
     Whole<Anchor<R, S>>: Drive<Anchor<R, S>, ReqPh<Anchor<R, S>>, <Whole<Anchor<R, S>> as RgCl>::Cl>,
     AllSlots<Anchor<R, S>>: RgCl,
     AllSlots<Anchor<R, S>>: Drive<Anchor<R, S>, SlotInitPh<Anchor<R, S>>, <AllSlots<Anchor<R, S>> as RgCl>::Cl>,
@@ -178,9 +173,4 @@ where
         <Whole<A<R, S>> as Drive<A<R, S>, ReqPh<A<R, S>>, <Whole<A<R, S>> as RgCl>::Cl>>::drive(&mut ctx);
     }
 
-    fn listen(store: &mut Self::Store) {
-        type A<R, S> = Anchor<R, S>;
-        let mut ctx = ListenCtx::<A<R, S>> { states: &mut store.states };
-        <Whole<A<R, S>> as Drive<A<R, S>, ListenPh<A<R, S>>, <Whole<A<R, S>> as RgCl>::Cl>>::drive(&mut ctx);
-    }
 }

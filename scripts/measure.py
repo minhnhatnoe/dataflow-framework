@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measurement harness for the generated market app (bench/gen_app.py).
 
-usage: scripts/measure.py [--sizes tiny,small,typical] [--mode 1a|enum|on] [--lib CHECKOUT] [--out DIR] [--steps gen,release,run,dev,mono]
+usage: scripts/measure.py [--sizes tiny,small,typical] [--mode 1a|enum|req] [--lib CHECKOUT] [--out DIR] [--steps gen,release,run,dev,mono]
                           [--cpu 2] [--procs 5] [--cap-small 60] [--cap-big 600] [--sink-scan 8] [--keep-going]
 
 For each size it generates the workspace under DIR/gen/<size>-<mode>/ and records CSVs under DIR/csv/:
@@ -223,7 +223,7 @@ def do_size(a, size):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sizes", default="tiny,small")
-    ap.add_argument("--mode", default="1a", help="1a | enum | on (see bench/gen_app.py)")
+    ap.add_argument("--mode", default="1a", help="1a | enum | req (see bench/gen_app.py)")
     ap.add_argument("--lib", help="dataflow checkout to build against (default: this repo)")
     ap.add_argument("--out", default="/tmp/claude-1000/-home-noe-TGT-dataflow-framework/093ee37d-6bfd-475e-b7a4-1d29416bf0b3/scratchpad/harness")
     ap.add_argument("--steps", default="gen,release,mono,run,dev")

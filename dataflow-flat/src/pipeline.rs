@@ -58,8 +58,8 @@ impl<R, S: Sinks<R>> Pipeline<R, S> {
     /// execution order; each `new` is given the first outputs of its
     /// subscriptions. Components without a config entry get
     /// `Config::default()`; a config supplied for a component outside the
-    /// graph is a [`BuildError`]. Then each component declared `#[listener]` is
-    /// told the keys its subscribers read ([`KeyListener`](crate::KeyListener)).
+    /// graph is a [`BuildError`].
+    /// A `#[listener]` gets, in `new`, the requests its subscribers' selectors make.
     pub fn build(configs: Configs) -> Result<Self, BuildError> {
         // Configs for components outside the graph are reported before any
         // constructor runs: the plan says which `TypeId`s are in it.
@@ -72,8 +72,7 @@ impl<R, S: Sinks<R>> Pipeline<R, S> {
 
         let mut pass = ConstructPass::new(configs.map);
         S::requests(&mut pass);
-        let mut store = S::make(&mut pass);
-        S::listen(&mut store);
+        let store = S::make(&mut pass);
         Ok(Pipeline { store, order: pass.order, _root: PhantomData })
     }
 

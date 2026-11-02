@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generator for the realistic multi-crate market app (benchmark / profiling harness).
 
-usage: bench/gen_app.py --size tiny|small|typical|perps|full|m<L>-<B>-<H> [--mode 1a|enum|req|on] [--out DIR] [--lib CHECKOUT]
+usage: bench/gen_app.py --size tiny|small|typical|perps|full|m<L>-<B>-<H> [--mode 1a|enum|req] [--out DIR] [--lib CHECKOUT]
                         [--markets L,B,H] [--sink-scan N|all] [--big-width N] [--core-inline none|hint]
 
 Writes a self-contained cargo workspace to DIR (default: ./gen/<size>-<mode>):
@@ -21,8 +21,6 @@ Modes:
        `match` on the same enum. Every component runs only when its edges fire.
   req  `enum`, but each exchange's feed component is a `#[listener]` whose `Requests` counts the distinct
        selectors the graph reads from it (`Request<S>::add`); measures the cost of the request pass.
-  on   the spec's keyed selector: `#[subscribe(On::<S>(body::Depth(u)): W)]` plus `Keyed` for the frame.
-       Not on master yet: generated against the spec, UNTESTED.
 
 Layout of what is generated (per market: Book, Trades, Mid, Imbalance, Spread, Vwap, Vol, Momentum, Fair, Quoter):
 
@@ -135,7 +133,7 @@ class Model:
 # marketlib
 # ---------------------------------------------------------------------------------------------
 def gen_lib(out, M, MODE, core_inline):
-    SEL, ENUM, ON = MODE != "1a", MODE == "enum", MODE == "on"
+    SEL, ENUM = MODE != "1a", MODE == "enum"
     inl = "#[inline]" if core_inline == "hint" else ""
     lib = f"{out}/marketlib"
     write(f"{lib}/Cargo.toml", f"""[package]
@@ -146,7 +144,7 @@ edition = "2021"
 [dependencies]
 dataflow-flat = {{ path = "{LIB}/dataflow-flat" }}
 """)
-    sel_use = {"1a": "", "enum": "use dataflow_flat::Demux;\n", "on": "use dataflow_flat::{Demux, Keyed, On};\n"}[MODE]
+    sel_use = {"1a": "", "enum": "use dataflow_flat::Demux;\n"}[MODE]
     write(f"{lib}/src/lib.rs", """//! Stable market library: symbols as types, wire types, cores, thin generic components.
 pub mod catalog;
 pub mod cores;
@@ -164,16 +162,7 @@ pub use wire::*;
     type Ev: 'static;
     type Sel: dataflow_flat::Select<Self::Ev, Out = crate::wire::Body>;
 """ if ENUM else ""
-    if ON:
-        # `On<S>` needs dataflow_flat::Symbol (KEY, NAME); ours adds the exchange index.
-        write(f"{lib}/src/symbol.rs", """/// A market: `dataflow_flat::Symbol` (dense per-exchange key and name) plus its exchange.
-pub trait Symbol: dataflow_flat::Symbol {
-    /// 0 = Lighter, 1 = Binance, 2 = Hyperliquid.
-    const EXCH: usize;
-}
-""")
-    else:
-      write(f"{lib}/src/symbol.rs", f"""/// A market: a type with a dense per-exchange key and a name.
+    write(f"{lib}/src/symbol.rs", f"""/// A market: a type with a dense per-exchange key and a name.
 pub trait Symbol: 'static {{
     const KEY: u32;
     const NAME: &'static str;
@@ -201,10 +190,6 @@ pub trait Symbol: 'static {{
             lines += ["    }", "}"]
         for k in range(M.n[e]):
             extra = f" type Ev = Ev; type Sel = ev::M{k};" if ENUM else ""
-            if ON:
-                lines.append(
-                    f'pub struct M{k};\nimpl dataflow_flat::Symbol for M{k} {{ const KEY: u32 = {k}; const NAME: &\'static str = "{mname(e, k)}"; }}\nimpl Symbol for M{k} {{ const EXCH: usize = {e}; }}')
-                continue
             lines.append(
                 f'pub struct M{k};\nimpl Symbol for M{k} {{ const KEY: u32 = {k}; const NAME: &\'static str = "{mname(e, k)}"; const EXCH: usize = {e};{extra} }}')
         write(f"{lib}/src/catalog/{mod}.rs", "\n".join(lines) + "\n")
@@ -218,13 +203,6 @@ pub trait Symbol: 'static {{
 pub struct Frame { pub key: u32, pub body: Body }
 """
     derive_body = "#[derive(Clone, Copy, Debug, PartialEq, Demux)]" if SEL else "#[derive(Clone, Copy, Debug, PartialEq)]"
-    keyed = """
-impl Keyed for Frame {
-    type Item = Body;
-    fn key(&self) -> Option<u32> { Some(self.key) }
-    fn item(&self) -> &Body { &self.body }
-}
-""" if ON else ""
     write(f"{lib}/src/wire.rs", f"""//! What arrives on the NIC.
 use dataflow_flat::Root;
 {sel_use}
@@ -237,7 +215,7 @@ pub struct TradeUpd {{ pub seq: u32, pub px: u64, pub qty: u64 }}
 pub enum Body {{ Depth(DepthUpd), Trade(TradeUpd) }}
 impl Default for Body {{ fn default() -> Self {{ Body::Depth(DepthUpd::default()) }} }}
 
-{frame_def}{keyed}
+{frame_def}
 /// The root: one packet from one of the three exchanges.
 {derive_wire}
 pub enum Wire {{ {wire_variants} }}
@@ -464,12 +442,6 @@ impl DigestCore {{
 pub trait Feed<S: Symbol>: Node<Output = <S as Symbol>::Ev> {}
 impl<S: Symbol, W: Node<Output = <S as Symbol>::Ev>> Feed<S> for W {}
 """
-    elif ON:
-        book_sub, trade_sub = "On::<S>(body::Depth(u)): W", "On::<S>(body::Trade(u)): W"
-        book_upd = trade_upd = "self.core.apply(i.u)"
-        ws_use = "use dataflow_flat::On;\nuse crate::wire::{body, wire};\n"
-        lsub = lambda v: f"wire::{v}(w): Wire"
-        feed_def = "/// A listener component: a node whose output is the exchange's latest frame.\npub trait Feed<S>: Node<Output = Frame> {}\n"
     else:
         book_sub, trade_sub = "u: W", "u: W"
         book_upd = "match &i.u.body { Body::Depth(d) if i.u.key == S::KEY => self.core.apply(d), _ => self.core.top() }"
@@ -507,25 +479,13 @@ pub struct {ws};
             upd = "*i.w"
         else:
             upd = f"if let Wire::{var}(f) = i.w {{ self.last = *f }}\n        self.last"
-        listen = ""
-        if ON:
-            listen = f"""
-impl dataflow_flat::KeyListener for {ws} {{
-    /// Records the keys the graph reads from this exchange (a real listener opens one combined subscription).
-    fn subscribe(&mut self, keys: &[u32]) {{
-        self.keys = keys.to_vec();
-        crate::stats::SUBS[{e}].store(keys.len() as u64, std::sync::atomic::Ordering::Relaxed);
-        crate::stats::SUBKEYS[{e}].store(keys.iter().fold(0u64, |a, k| a.wrapping_mul(31).wrapping_add(*k as u64 + 1)), std::sync::atomic::Ordering::Relaxed);
-    }}
-}}
-"""
         comp.append(f"""#[derive(ComponentSubscription)]
-#[subscribe({lsub(var)})]{"" if not ON else chr(10) + "#[key_listener]"}
-pub struct {ws} {{ last: Frame{", keys: Vec<u32>" if ON else ""} }}{listen}
+#[subscribe({lsub(var)})]
+pub struct {ws} {{ last: Frame }}
 impl Component for {ws} {{
     type Config = ();
     type Output = Frame;
-    fn new((): (), _: Self::Init<'_>) -> (Self, Frame) {{ ({ws} {{ last: Frame::default(){', keys: Vec::new()' if ON else ''} }}, Frame::default()) }}
+    fn new((): (), _: Self::Init<'_>) -> (Self, Frame) {{ ({ws} {{ last: Frame::default() }}, Frame::default()) }}
     fn update(&mut self, i: Self::Input<'_>) -> Frame {{ {upd} }}
 }}
 impl<S> Feed<S> for {ws} {{}}
@@ -1094,8 +1054,8 @@ fn main() {{
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--size", default="tiny")
-    ap.add_argument("--mode", default="1a", choices=["1a", "enum", "req", "on"],
-                    help="1a: no selectors, everything runs; enum: selectors via one #[derive(Demux)] enum per exchange (works on phase 1b); on: On<S> keyed selectors per the spec (not on master yet)")
+    ap.add_argument("--mode", default="1a", choices=["1a", "enum", "req"],
+                    help="1a: no selectors, everything runs; enum: selectors via one #[derive(Demux)] enum per exchange (works on phase 1b)")
     ap.add_argument("--lib", help="path of the dataflow checkout to depend on (default: this repo)")
     ap.add_argument("--out")
     ap.add_argument("--markets", help="L,B,H overrides the size")
