@@ -278,12 +278,29 @@ pub(crate) const fn class(lo: usize, hi: usize) -> usize {
 
 /// Components per child of a node of width `w > 8`: 8, 64, 512, ... whichever
 /// is the least with `8 * cap >= w`.
-const fn cap(w: usize) -> usize {
+pub(crate) const fn cap(w: usize) -> usize {
     let mut c = ARITY;
     while c * ARITY < w {
         c *= ARITY;
     }
     c
+}
+
+/// The field of a block over `LO..HI` that holds position `P`: the block's
+/// shape is fixed by `(LO, HI)` (a leaf of `HI - LO <= 8` slots, or 8 children of
+/// `cap(HI - LO)` positions), so this is arithmetic, not a test of every child.
+#[doc(hidden)]
+pub struct FieldIdx<const LO: usize, const HI: usize, const P: usize>;
+impl<const LO: usize, const HI: usize, const P: usize> FieldIdx<LO, HI, P> {
+    pub const K: usize = field_idx(LO, HI, P);
+}
+pub(crate) const fn field_idx(lo: usize, hi: usize, p: usize) -> usize {
+    assert!(lo <= p && p < hi, "position not in this block");
+    if hi - lo <= ARITY {
+        p - lo
+    } else {
+        (p - lo) / cap(hi - lo)
+    }
 }
 
 pub(crate) const fn bound(lo: usize, hi: usize, k: usize) -> usize {
