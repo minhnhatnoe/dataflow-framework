@@ -286,3 +286,5 @@ With incremental off, 4,079 to 12,412 is about linear.
 | Edit | 0.7 s | 8.5 s | 3.6 s | 46 s |
 
 **`perps` release:** OOM-killed at the 18 GB cap, reaching `Compiling app`, about 2:40 CPU. Which phase hit the cap is unknown.
+
+**Worktree cleanup (2026-11-02).** Finished worktrees were removed; branches were kept. Raw data under the `.claude/worktrees/agent-*/target/` paths named in these notes is gone, except `agent-ae262aab3ddfbb8d8` and `agent-adba54fa14ed56a76`. Small tools were saved to `handoff/tools/`: the `LD_PRELOAD` memset shim (`memset-shim/`), the self-profile aggregators (`profile-reader/`: `agg`, `keys`, `selfw`), the bound probes (`pv.sh`, `probes-scratch.diff`), and the `excl_group` differential and counters. Not saved: the reader's plain `src/main.rs`.

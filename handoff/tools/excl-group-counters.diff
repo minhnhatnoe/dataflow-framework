@@ -1,0 +1,156 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 21eeb71..5cff3f4 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -75,3 +75,7 @@ name = "unicode-ident"
+ version = "1.0.27"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
++
++[[patch.unused]]
++name = "aq"
++version = "0.1.0"
+diff --git a/dataflow-flat/src/lib.rs b/dataflow-flat/src/lib.rs
+index 6f8cf1a..efcc9bd 100644
+--- a/dataflow-flat/src/lib.rs
++++ b/dataflow-flat/src/lib.rs
+@@ -129,6 +129,8 @@ pub use select::ChainKey;
+ #[doc(hidden)]
+ pub use select::SelectChain;
+ pub use sinks::{SinkList, Sinks};
++#[doc(hidden)]
++pub use sinks::__plan_rt;
+ pub use handler::{Collect, HandledEdge, UpdateHandler};
+ #[doc(hidden)]
+ pub use handler::{FeedInit, Hd, HdChain, InitRef};
+diff --git a/dataflow-flat/src/plan.rs b/dataflow-flat/src/plan.rs
+index 9fd8d71..16f5d3e 100644
+--- a/dataflow-flat/src/plan.rs
++++ b/dataflow-flat/src/plan.rs
+@@ -513,6 +513,7 @@ pub struct Plan {
+     failed: bool,
+     msg: [u8; MSG],
+     msg_len: usize,
++    pub dbg: [u64; 128],
+ }
+ 
+ impl Plan {
+@@ -632,6 +633,7 @@ impl Plan {
+             failed: false,
+             msg: [0; MSG],
+             msg_len: 0,
++            dbg: [0; 128],
+         };
+         visit::<A>(&mut plan, NO_PARENT, 0);
+         if !plan.failed && (plan.root_idx == NO_PARENT || plan.post_of[plan.root_idx as usize] != 0) {
+@@ -1022,6 +1024,9 @@ impl Plan {
+         if hi - lo <= 1 {
+             return true;
+         }
++        self.dbg[0] += 1;
++        self.dbg[1] += (hi - lo) as u64;
++        if (hi - lo) as u64 > self.dbg[4] { self.dbg[4] = (hi - lo) as u64; }
+         let t0 = self.sc_ord[lo];
+         let n0 = self.term_len(t0);
+         let mut place = NONE;
+@@ -1029,8 +1034,10 @@ impl Plan {
+         while k < n0 {
+             let pl = self.dn_place[self.term_item(t0, k) as usize];
+             if !self.sc_used[pl as usize] {
+-                place = pl;
+-                break;
++                // SCRATCH: prefer the root-most unused place (smallest chain depth).
++                if place == NONE || self.dn_depth[pl as usize] < self.dn_depth[place as usize] {
++                    place = pl;
++                }
+             }
+             k += 1;
+         }
+@@ -1059,7 +1066,25 @@ impl Plan {
+             self.sc_keys[q] = key;
+             q += 1;
+         }
++        if hi - lo >= 250 && self.dbg[7] < 3 {
++            // log: slot base 60 - not enough room; use 3 snapshots of 1 each in a separate region
++            let base = 8 + 5 * 10 + 4 * self.dbg[7] as usize; // 58..
++            let mut zero = 0u64;
++            let mut qq = lo;
++            while qq < hi {
++                if self.sc_keys[qq] == 0 { zero += 1; }
++                qq += 1;
++            }
++            self.dbg[7] += 1;
++            if base + 3 < 128 {
++                self.dbg[base] = place as u64;
++                self.dbg[base + 1] = zero;
++                self.dbg[base + 2] = (hi - lo) as u64;
++                self.dbg[base + 3] = self.term_len(self.sc_ord[lo]) as u64;
++            }
++        }
+         if guard {
++            self.dbg[3] += 1;
+             return self.excl_pairs(lo, hi);
+         }
+         // Sort the group by key.
+@@ -1103,6 +1128,8 @@ impl Plan {
+             i = j;
+         }
+         if none_end > lo {
++            self.dbg[2] += ((none_end - lo) * (hi - none_end)) as u64;
++            self.dbg[5] += 1;
+             // The terms without the place against all the others.
+             let mut u = lo;
+             while u < none_end {
+@@ -1187,10 +1214,20 @@ impl Plan {
+                 self.sc_ord[q] = self.sc_offs[q];
+                 q += 1;
+             }
++            let (b0, b2, b1) = (self.dbg[0], self.dbg[2], self.dbg[1]);
+             if !self.excl_group(0, n) {
+                 self.fail(name, " joins branches that can fire in the same step", "");
+                 return;
+             }
++            if n >= 50 && self.dbg[6] < 10 {
++                let s = 8 + 5 * self.dbg[6] as usize;
++                self.dbg[s] = i as u64;
++                self.dbg[s + 1] = n as u64;
++                self.dbg[s + 2] = self.dbg[0] - b0;
++                self.dbg[s + 3] = self.dbg[2] - b2;
++                self.dbg[s + 4] = self.dbg[1] - b1;
++                self.dbg[6] += 1;
++            }
+         }
+         // Rule 5: every term of the condition implies each selected edge.
+         let mut e = self.up_head[i];
+diff --git a/dataflow-flat/src/sinks.rs b/dataflow-flat/src/sinks.rs
+index 6dd411c..97c9cde 100644
+--- a/dataflow-flat/src/sinks.rs
++++ b/dataflow-flat/src/sinks.rs
+@@ -53,6 +53,27 @@ where
+     const PLAN: &'static Plan = &Plan::of::<Anchor<R, S>>(TypeId::of::<R>());
+ }
+ 
++/// SCRATCH profiling hook (not to be committed): run the plan walk at run time.
++#[doc(hidden)]
++pub fn __plan_rt<R: Root, S: SinkList>() -> (usize, usize, usize)
++where
++    S::Subs: const Upstream,
++{
++    let h = std::thread::Builder::new().stack_size(1 << 29).spawn(|| {
++        let t = std::time::Instant::now();
++        let p = Box::new(Plan::of::<Anchor<R, S>>(TypeId::of::<R>()));
++        eprintln!("plan runtime: {:?}", t.elapsed());
++        eprintln!("excl iters={} scanned={} nonePairs={} guard={} maxgrp={} noneBlocks={} logged={}", p.dbg[0], p.dbg[1], p.dbg[2], p.dbg[3], p.dbg[4], p.dbg[5], p.dbg[6]);
++        eprintln!("big groups [place,zero,size,len0]: {:?}", &p.dbg[58..70]);
++        for k in 0..p.dbg[6] as usize {
++            let s = 8 + 5 * k;
++            eprintln!("  comp idx {} terms {} iters {} nonePairs {} scanned {}", p.dbg[s], p.dbg[s + 1], p.dbg[s + 2], p.dbg[s + 3], p.dbg[s + 4]);
++        }
++        (p.len(), p.n_components(), p.prog_len())
++    });
++    h.unwrap().join().unwrap()
++}
++
+ impl<R: Root, S: SinkList> Layout for Anchor<R, S>
+ where
+     Anchor<R, S>: Planned

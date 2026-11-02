@@ -1,0 +1,50 @@
+diff --git a/dataflow-flat/src/lib.rs b/dataflow-flat/src/lib.rs
+index 6f8cf1a..ae2f99f 100644
+--- a/dataflow-flat/src/lib.rs
++++ b/dataflow-flat/src/lib.rs
+@@ -128,7 +128,7 @@ pub use select::{option, Keyed, Listener, On, Select, Symbol, GUARD};
+ pub use select::ChainKey;
+ #[doc(hidden)]
+ pub use select::SelectChain;
+-pub use sinks::{SinkList, Sinks};
++pub use sinks::{SinkList, Sinks, PrA, PrB, PrC, PrD};
+ pub use handler::{Collect, HandledEdge, UpdateHandler};
+ #[doc(hidden)]
+ pub use handler::{FeedInit, Hd, HdChain, InitRef};
+diff --git a/dataflow-flat/src/sinks.rs b/dataflow-flat/src/sinks.rs
+index 6dd411c..1e1b460 100644
+--- a/dataflow-flat/src/sinks.rs
++++ b/dataflow-flat/src/sinks.rs
+@@ -161,3 +161,32 @@ where
+         <Whole<A<R, S>> as Drive<A<R, S>, ListenPh<A<R, S>>, <Whole<A<R, S>> as RgCl>::Cl>>::drive(&mut ctx);
+     }
+ }
++
++// ---- scratch probes (profiling only) ----
++pub trait ProbeA<R> {}
++impl<R: Root, S: SinkList> ProbeA<R> for S where Anchor<R, S>: Layout<Root = R> {}
++pub trait ProbeB<R> {}
++impl<R: Root, S: SinkList> ProbeB<R> for S
++where
++    Anchor<R, S>: Layout<Root = R>,
++    Whole<Anchor<R, S>>: RgCl,
++    Whole<Anchor<R, S>>:
++        Drive<Anchor<R, S>, ConstructPh<Anchor<R, S>>, <Whole<Anchor<R, S>> as RgCl>::Cl>,
++{}
++pub trait ProbeC<R> {}
++impl<R: Root, S: SinkList> ProbeC<R> for S
++where
++    Anchor<R, S>: Layout<Root = R>,
++    Pn<Anchor<R, S>, { RootProg::<Anchor<R, S>>::N }>: Exec<Anchor<R, S>, PushPh<Anchor<R, S>>>,
++{}
++pub trait ProbeD<R> {}
++impl<R: Root, S: SinkList> ProbeD<R> for S
++where
++    Anchor<R, S>: Layout<Root = R>,
++    Whole<Anchor<R, S>>: RgCl,
++    Whole<Anchor<R, S>>: Drive<Anchor<R, S>, ListenPh<Anchor<R, S>>, <Whole<Anchor<R, S>> as RgCl>::Cl>,
++{}
++pub struct PrA<R, S: ProbeA<R>>(PhantomData<fn(R, S)>);
++pub struct PrB<R, S: ProbeB<R>>(PhantomData<fn(R, S)>);
++pub struct PrC<R, S: ProbeC<R>>(PhantomData<fn(R, S)>);
++pub struct PrD<R, S: ProbeD<R>>(PhantomData<fn(R, S)>);
