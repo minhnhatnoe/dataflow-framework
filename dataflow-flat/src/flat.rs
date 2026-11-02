@@ -396,7 +396,7 @@ nth_s_impl!(crate::store::StateM, crate::store::OutM, crate::store::StateOptM, c
 pub struct Loc<R, const P: usize>(std::marker::PhantomData<R>);
 impl<R: Planned, const P: usize> Loc<R, P> {
     pub const IDX: usize = {
-        R::PLAN.check();
+        R::CHECK;
         R::PLAN.idx_at_post(P + 1)
     };
     pub const KIND: u8 = R::PLAN.kind(0, Self::IDX);

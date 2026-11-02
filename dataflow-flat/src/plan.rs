@@ -67,10 +67,10 @@ pub const MAX_TERMS: usize = 1 << 13;
 /// Sizes of the push program (see [`Plan::build_program`]): nodes, child
 /// entries, the stack of component lists of the construction, the stack of
 /// small per-switch arrays, and the nesting depth of switches.
-const MAX_PROG: usize = 32768;
-const MAX_PCH: usize = 32768;
-const MAX_LST: usize = 1 << 16;
-const KPOOL: usize = 32768;
+const MAX_PROG: usize = 1 << 17;
+const MAX_PCH: usize = 1 << 17;
+const MAX_LST: usize = 1 << 18;
+const KPOOL: usize = 1 << 16;
 /// `lst_t` value: the entry's candidates are all terms of its component.
 const ALLT: u32 = u32::MAX - 1;
 const MAX_CTX: usize = 32;
