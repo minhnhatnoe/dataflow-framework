@@ -430,6 +430,37 @@ fn a_wide_subscriber_with_a_selected_view() {
 }
 
 // ---------------------------------------------------------------------------
+// Two fields spelled alike: two entries, each gets its own value in `new` and `update`
+// ---------------------------------------------------------------------------
+
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(FrameView::Book(first): Feed, FrameView::Book(second): Feed)]
+pub struct Twin;
+impl Component for Twin {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), i: Self::Init<'_>) -> (Self, u64) {
+        let (a, b): (Option<&Book>, Option<&Book>) = (i.first, i.second);
+        assert_eq!((a.map(|b| b.px), b.map(|b| b.px)), (Some(100), Some(100)));
+        (Twin, 0)
+    }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 {
+        log(format!("update Twin {} {}", i.first.px, i.second.px));
+        i.first.px + i.second.px
+    }
+}
+
+#[test]
+fn two_fields_spelled_alike() {
+    let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    reset();
+    let mut p = Pipeline::<Msg, (Twin,)>::build(Configs::new()).unwrap();
+    p.push(Msg::A(4));
+    p.push(Msg::A(6));
+    assert_eq!(take().into_iter().filter(|l| l.contains("Twin")).collect::<Vec<_>>(), ["update Twin 6 6"]);
+}
+
+// ---------------------------------------------------------------------------
 // A hand-written view selector (a guard) on an owned view
 // ---------------------------------------------------------------------------
 
