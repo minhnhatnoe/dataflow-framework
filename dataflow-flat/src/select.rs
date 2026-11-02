@@ -21,6 +21,14 @@
 //! The plan sees a selector as a *decision* `(parent, position in the chain,
 //! key)`: two decisions at the same place with different keys are mutually
 //! exclusive (the variants of one enum), unless one is a guard.
+//!
+//! A `#[handle]` component has no stored output to select from: its subscribers read a *view*.
+//! A selector on it implements [`SelectView<In>`] instead, where `In` is the view (with its
+//! lifetime) and the selected part is a view too (`#[derive(Demux)]` on an enum with a lifetime
+//! parameter writes them; `option::Some` and the other library selectors have both impls). The
+//! derive wraps the chain by the kind of the source (`ChainWrap`): for a handle source it becomes
+//! a [`ViewC`], a [`SelectChain`] whose operations take the parent's state (see `gather.rs`).
+//! Nothing selected from a view is stored.
 
 use std::any::TypeId;
 use std::marker::PhantomData;

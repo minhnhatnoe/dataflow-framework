@@ -739,7 +739,7 @@ fn chain_ty(chain: &[Type]) -> TokenStream2 {
 }
 
 /// The chain of an entry as the library sees it: `()` for a plain entry; for a selected one, the
-/// selectors wrapped by the kind of the source (`NodeKind::Chain`): the chain itself for a by-value
+/// selectors wrapped by the kind of the source (`ChainWrap`): the chain itself for a by-value
 /// source, a `ViewC` (the chain selects from the view) for a `#[handle]` component.
 fn wrapped_chain(krate: &TokenStream2, s: &Subscription) -> TokenStream2 {
     let raw = chain_ty(&s.chain);

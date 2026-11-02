@@ -133,8 +133,6 @@ pub(crate) const NO_FLAG: usize = usize::MAX;
 /// Longest error message kept in the plan.
 const MSG: usize = 512;
 
-/// Assemble the parts into a byte buffer (`panic!` can't format in a `const
-/// fn`). Returns the buffer and the length used.
 /// The `k`-th comma-separated name of `names` (empty if there is none).
 const fn nth_name(names: &str, k: usize) -> &[u8] {
     let b = names.as_bytes();
@@ -152,6 +150,8 @@ const fn nth_name(names: &str, k: usize) -> &[u8] {
     &[]
 }
 
+/// Assemble the parts into a byte buffer (`panic!` can't format in a `const
+/// fn`). Returns the buffer and the length used.
 const fn message(parts: &[&[u8]]) -> ([u8; MSG], usize) {
     let mut buf = [0u8; MSG];
     let mut n = 0;
@@ -1818,7 +1818,7 @@ impl Plan {
             let n = self.emit_switch(k, j, x, prev);
             let fuse = prev == NONE && self.ib_len > mark && !self.failed && {
                 let last = self.ib[self.ib_len - 1] as usize;
-                self.pg_kind[last] == PG_RUN && self.by_cpos[self.pg_a[last] as usize] == x && !self.hnd[x as usize]
+                self.pg_kind[last] == PG_RUN && self.by_cpos[self.pg_a[last] as usize] == x
             };
             if fuse {
                 let last = self.ib[self.ib_len - 1] as usize;
@@ -2406,6 +2406,24 @@ impl Plan {
         self.pg_e[n] as usize
     }
     /// Whether the program below node `n` (including `n`) has a switch.
+    /// Is program node `n` a single run of a component with a handle parent (`PG_RUN_VIEW`,
+    /// `PG_RUN_IF_VIEW`, alone or as the only item of a sequence)? A switch arm like that is
+    /// inlined into the switch, not outlined (`drive::exec_arm`): its work is a few loads of the
+    /// parent's state, and outlined it would wait for the handle to come back from memory.
+    pub(crate) const fn prog_view_leaf(&self, n: usize) -> bool {
+        let kind = self.pg_kind[n];
+        if kind == PG_RUN_VIEW || kind == PG_RUN_IF_VIEW {
+            return true;
+        }
+        if kind == PG_SEQ && self.pg_b[n] >= 1 && self.pg_b[n] <= 2 {
+            // The run of the view reader, then at most one more run (its join).
+            let a = self.pg_a[n] as usize;
+            return self.prog_view_leaf(self.ch_node[a] as usize)
+                && (self.pg_b[n] == 1 || self.pg_kind[self.ch_node[a + 1] as usize] == PG_RUN);
+        }
+        false
+    }
+
     pub(crate) const fn prog_has_switch(&self, n: usize) -> bool {
         let kind = self.pg_kind[n];
         if kind == PG_SWITCH || kind == PG_RUNSW {

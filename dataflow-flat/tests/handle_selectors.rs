@@ -428,3 +428,74 @@ fn a_wide_subscriber_with_a_selected_view() {
     p.push(Msg::A(7));
     assert_eq!(WIDE_OUT.load(SeqCst) as u64, base + 7);
 }
+
+// ---------------------------------------------------------------------------
+// A hand-written view selector (a guard) on an owned view
+// ---------------------------------------------------------------------------
+
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(Msg::B(v): Msg)]
+#[handle]
+pub struct Level {
+    v: u64,
+}
+impl HandleComponent for Level {
+    type Config = ();
+    type Handle = ();
+    type View<'a> = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, ()) {
+        (Level { v: 0 }, ())
+    }
+    fn update(&mut self, i: Self::Input<'_>) {
+        self.v = *i.v;
+    }
+    fn view<'a>(&'a self, (): &'a ()) -> u64 {
+        self.v
+    }
+}
+
+/// Matches an odd level; the part is the level.
+pub struct Odd;
+impl dataflow_flat::SelectView<u64> for Odd {
+    type Out = u64;
+    const KEY: u32 = dataflow_flat::GUARD;
+    fn select(x: u64) -> Option<u64> {
+        if x % 2 == 1 {
+            Some(x)
+        } else {
+            None
+        }
+    }
+    fn key_of(_: &u64) -> u32 {
+        dataflow_flat::GUARD
+    }
+}
+
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(Odd(n): Level)]
+pub struct OnOdd;
+impl Component for OnOdd {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), i: Self::Init<'_>) -> (Self, u64) {
+        assert_eq!(i.n, None);
+        (OnOdd, 0)
+    }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 {
+        log(format!("update OnOdd {}", i.n));
+        i.n
+    }
+}
+
+#[test]
+fn a_hand_written_view_selector() {
+    let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    reset();
+    let mut p = Pipeline::<Msg, (OnOdd,)>::build(Configs::new()).unwrap();
+    p.push(Msg::B(2));
+    p.push(Msg::B(3));
+    p.push(Msg::A(5));
+    p.push(Msg::B(8));
+    p.push(Msg::B(9));
+    assert_eq!(take(), ["update OnOdd 3", "update OnOdd 9"]);
+}

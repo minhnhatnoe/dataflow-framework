@@ -25,7 +25,7 @@ use std::marker::PhantomData;
 use crate::build::ConstructPass;
 use crate::component::{Component, ComponentSubscription, DepList};
 use crate::flat::{bound, class, ClassOf, EntryPos, Inner, Leaf, Loc, NthS, NthT, PickEdge, PosSelect, Whole};
-use crate::gather::{ChainKeyAt, GatherCx, GatherIn, GatherInit, Layout, Ready, Source};
+use crate::gather::{ChainKeyAt, ChainKeyPre, GatherCx, GatherIn, GatherInit, Layout, Ready, Source};
 use crate::split::SplitAt;
 use crate::select::{ChainInitial, ChainKey, Keep, SelectChain};
 use crate::node::{Comp, SlotNode, Vertex};
@@ -506,6 +506,7 @@ impl<A: Planned, const N: usize> PnC<A, N> {
     pub const SI: usize = A::PLAN.sw_entry(N);
     pub const SJ: usize = A::PLAN.sw_depth(N);
     pub const HAS_SW: bool = A::PLAN.prog_has_switch(N);
+    pub const VIEW_LEAF: bool = A::PLAN.prog_view_leaf(N);
 }
 /// The root node of the program of `A`.
 #[doc(hidden)]
@@ -815,7 +816,7 @@ pub fn exec_arm<A: Layout, Ph, const N: usize>(ctx: &mut PushCtx<'_, A>)
 where
     Pn<A, N>: Exec<A, Ph>,
 {
-    if PnC::<A, N>::HAS_SW {
+    if PnC::<A, N>::HAS_SW || PnC::<A, N>::VIEW_LEAF {
         <Pn<A, N> as Exec<A, Ph>>::exec(ctx)
     } else {
         exec_out::<A, Ph, N>(ctx)
@@ -879,24 +880,25 @@ where
     }
 }
 
-/// The switch node `M` driven by a key taken from a value of type `O` (the output of
-/// the component run just before it, which is the switch's source).
+/// The switch node `M` driven by a key taken from the source `T` (the component run just before
+/// it) and the value `O` its `update` just returned: for a by-value source the key comes from
+/// `o`, for a handle source from the view of its state `me` and the handle `o`.
 #[doc(hidden)]
-pub trait SwitchPre<A: Layout, Ph, O: 'static> {
-    fn key(o: &O) -> u32;
+pub trait SwitchPre<A: Layout, Ph, T: Vertex<Stored = O>, O: 'static> {
+    fn key(me: &T, o: &O) -> u32;
     fn bst(ctx: &mut PushCtx<'_, A>, key: u32);
 }
-impl<A: Layout, Ph, O: 'static, const M: usize> SwitchPre<A, Ph, O> for Pn<A, M>
+impl<A: Layout, Ph, T: Vertex<Stored = O>, O: 'static, const M: usize> SwitchPre<A, Ph, T, O> for Pn<A, M>
 where
     Pn<A, M>: SwInfo<A, Ph>,
-    <Pn<A, M> as SwInfo<A, Ph>>::Ch: ChainKey<O, { PnC::<A, M>::SJ }>,
+    <Pn<A, M> as SwInfo<A, Ph>>::Ch: ChainKeyPre<T, { PnC::<A, M>::SJ }>,
     NodeRg<A, M>: RgCl,
     NodeRg<A, M>: BstExec<A, Ph, <NodeRg<A, M> as RgCl>::Cl>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn key(o: &O) -> u32 {
-        <<Pn<A, M> as SwInfo<A, Ph>>::Ch as ChainKey<O, { PnC::<A, M>::SJ }>>::key(o)
+    fn key(me: &T, o: &O) -> u32 {
+        <<Pn<A, M> as SwInfo<A, Ph>>::Ch as ChainKeyPre<T, { PnC::<A, M>::SJ }>>::key_pre(me, o)
     }
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
@@ -908,17 +910,17 @@ where
 /// What a fused run does with the value `update` returned: take the switch key from it, and
 /// afterwards run the decision tree.
 #[doc(hidden)]
-pub trait SwFn<A: Layout, O: 'static> {
-    fn key(o: &O) -> u32;
+pub trait SwFn<A: Layout, T: Vertex<Stored = O>, O: 'static> {
+    fn key(me: &T, o: &O) -> u32;
     fn bst(ctx: &mut PushCtx<'_, A>, key: u32);
 }
 #[doc(hidden)]
 pub struct Fused<Ph, S>(PhantomData<(Ph, S)>);
-impl<A: Layout, Ph, S: SwitchPre<A, Ph, O>, O: 'static> SwFn<A, O> for Fused<Ph, S> {
+impl<A: Layout, Ph, S: SwitchPre<A, Ph, T, O>, T: Vertex<Stored = O>, O: 'static> SwFn<A, T, O> for Fused<Ph, S> {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn key(o: &O) -> u32 {
-        S::key(o)
+    fn key(me: &T, o: &O) -> u32 {
+        S::key(me, o)
     }
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
@@ -933,7 +935,9 @@ impl<A: Layout, Ph, S: SwitchPre<A, Ph, O>, O: 'static> SwFn<A, O> for Fused<Ph,
 pub trait RunSwAt<Ph, const P: usize>: Layout {
     /// The output of the component at `P`.
     type Out: 'static;
-    fn run_sw<F: SwFn<Self, Self::Out>>(ctx: &mut PushCtx<'_, Self>);
+    /// The component at `P`, whose `Stored` is `Out`.
+    type Me: Vertex<Stored = Self::Out>;
+    fn run_sw<F: SwFn<Self, Self::Me, Self::Out>>(ctx: &mut PushCtx<'_, Self>);
 }
 impl<A: Layout, const P: usize> RunSwAt<PushPh<A>, P> for A
 where
@@ -947,10 +951,11 @@ where
     SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
 {
     type Out = <<A as NthT<P>>::T as Component>::Output;
+    type Me = <A as NthT<P>>::T;
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn run_sw<F: SwFn<A, Self::Out>>(ctx: &mut PushCtx<'_, A>) {
-        let key = run_body_pre!(upd_val, A, P, ctx, |o| F::key(o));
+    fn run_sw<F: SwFn<A, Self::Me, Self::Out>>(ctx: &mut PushCtx<'_, A>) {
+        let key = run_body_pre!(upd_val, A, P, ctx, |o| F::key(<A::States as AtPos<<A as NthT<P>>::T, P>>::at(&*ctx.states), o));
         F::bst(ctx, key);
     }
 }
@@ -962,7 +967,7 @@ pub trait FuLink<A: Layout, Ph, const P: usize> {
 impl<A: Layout, Ph, const P: usize, const M: usize> FuLink<A, Ph, P> for Pn<A, M>
 where
     A: RunSwAt<Ph, P>,
-    Pn<A, M>: SwitchPre<A, Ph, <A as RunSwAt<Ph, P>>::Out>,
+    Pn<A, M>: SwitchPre<A, Ph, <A as RunSwAt<Ph, P>>::Me, <A as RunSwAt<Ph, P>>::Out>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]

@@ -49,7 +49,7 @@ use std::marker::PhantomData;
 use crate::component::ComponentSubscription;
 use crate::drive::{CondAt, Ch, Drive, EntryOf, ExecK, FiredOf, FiredOps, HRunK, Pn, PnC, PushCtx, PushPh, Rg, RgCl, SlotWriteBy, SrcSlots};
 use crate::flat::{EntryPos, Inner, Leaf, NthT, PickEdge, PosSelect};
-use crate::gather::{ChainKeyAt, ChainRead, ChainReadCx, ChainSeed, ChainTest, ChainTestCx, CtxOf, GatherCx, GatherIn, Layout, Ready, Source};
+use crate::gather::{ChainKeyAt, ChainKeyPre, ChainRead, ChainReadCx, ChainSeed, ChainTest, ChainTestCx, CtxOf, GatherCx, GatherIn, Layout, Ready, Source};
 use crate::component::Component;
 use crate::node::{Comp, Edge, Vertex};
 use crate::split::SplitAt;
@@ -188,6 +188,13 @@ impl<E: Source<A>, A: Layout, Em: 'static, C: ChainTestCx<E, A, P>, const P: usi
         A::States: SplitAt<P>,
     {
         C::test_cx(root, outs, cx)
+    }
+}
+impl<E: Vertex, Em: 'static, C: ChainKeyPre<E, J>, const J: usize> ChainKeyPre<E, J> for Hd<Em, C> {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn key_pre(me: &E, o: &E::Stored) -> u32 {
+        C::key_pre(me, o)
     }
 }
 impl<E: Source<A>, A: Layout, Em: 'static, C: ChainKeyAt<E, A, J>, const J: usize> ChainKeyAt<E, A, J> for Hd<Em, C> {

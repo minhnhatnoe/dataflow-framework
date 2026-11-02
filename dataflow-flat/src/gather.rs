@@ -601,6 +601,38 @@ where
     }
 }
 
+/// The key of the alternative the chain is at depth `J` at a *fused* switch: from the source `E`'s
+/// state `me` and the value `o` its `update` just returned (before it is stored): `o` itself for
+/// a by-value source, the view of `me` and the handle `o` for a handle source.
+#[doc(hidden)]
+pub trait ChainKeyPre<E: Vertex, const J: usize>: SelectChain<E::Stored> {
+    fn key_pre(me: &E, o: &E::Stored) -> u32;
+}
+impl<E: Vertex, const J: usize> ChainKeyPre<E, J> for () {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn key_pre(_: &E, _: &E::Stored) -> u32 {
+        crate::select::GUARD
+    }
+}
+impl<E: Vertex, S: Select<E::Stored>, T: SelectChain<S::Out>, const J: usize> ChainKeyPre<E, J> for (S, T)
+where
+    (S, T): ChainKey<E::Stored, J>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn key_pre(_: &E, o: &E::Stored) -> u32 {
+        <(S, T) as ChainKey<E::Stored, J>>::key(o)
+    }
+}
+impl<E: crate::node::HandleView, C: ViewChain<E>, const J: usize> ChainKeyPre<E, J> for ViewC<E, C> {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn key_pre(me: &E, o: &E::Stored) -> u32 {
+        C::key::<J>(me.__view(o))
+    }
+}
+
 /// As [`ChainTest`], inside the split of the states at position `P` (a handle source's state is
 /// read from the context).
 #[doc(hidden)]
