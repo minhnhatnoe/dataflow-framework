@@ -430,6 +430,79 @@ fn a_wide_subscriber_with_a_selected_view() {
 }
 
 // ---------------------------------------------------------------------------
+// A handle source that itself reads a handle parent (its run is not fused with the switch: the key
+// is taken from the stored handle)
+// ---------------------------------------------------------------------------
+
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(l: Level)]
+#[handle]
+pub struct Feed3 {
+    book: Book,
+    last: u64,
+}
+impl HandleComponent for Feed3 {
+    type Config = ();
+    type Handle = ();
+    type View<'a> = FrameView<'a>;
+    fn new((): (), _: Self::Init<'_>) -> (Self, ()) {
+        (Feed3 { book: Book { px: 0 }, last: 0 }, ())
+    }
+    fn update(&mut self, i: Self::Input<'_>) {
+        self.last = i.l;
+        self.book.px = i.l * 10;
+    }
+    fn view<'a>(&'a self, (): &'a ()) -> FrameView<'a> {
+        if self.last % 2 == 0 {
+            FrameView::Book(&self.book)
+        } else {
+            FrameView::Seq(self.last)
+        }
+    }
+}
+
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(FrameView::Book(b): Feed3)]
+pub struct Bk3;
+impl Component for Bk3 {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) {
+        (Bk3, 0)
+    }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 {
+        log(format!("update Bk3 {}", i.b.px));
+        i.b.px
+    }
+}
+
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(FrameView::Seq(n): Feed3)]
+pub struct Sq3;
+impl Component for Sq3 {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) {
+        (Sq3, 0)
+    }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 {
+        log(format!("update Sq3 {}", i.n));
+        i.n
+    }
+}
+
+#[test]
+fn a_handle_source_below_a_handle_source() {
+    let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    reset();
+    let mut p = Pipeline::<Msg, (Bk3, Sq3)>::build(Configs::new()).unwrap();
+    p.push(Msg::B(3));
+    p.push(Msg::A(1)); // not for this chain
+    p.push(Msg::B(4));
+    assert_eq!(take(), ["update Sq3 3", "update Bk3 40"]);
+}
+
+// ---------------------------------------------------------------------------
 // Two fields spelled alike: two entries, each gets its own value in `new` and `update`
 // ---------------------------------------------------------------------------
 
