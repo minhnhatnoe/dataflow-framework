@@ -1,3 +1,5 @@
+> **Superseded in part (2026-11-02).** The model in this file is built, but the syntax moved on: `=>` selector chains are gone (write patterns: `Some(Packet::Binance(m)): Nic`), `On<S>`/`Symbol`/`Keyed` were removed (enums with `#[derive(Demux)]` are the only keyed form), rule 5 became stored selector values, `#[derive(Handler)]`/`#[handles]`/`Collect` became ordinary components with unnamed `#[subscribe]` entries and `UpdateHandler`, and `ARITY` is 16. The current description is the root `README.md`; examples below are left as written.
+
 # Event-driven redesign: spec (user-approved 2026-11-01)
 
 The user approved building everything, committed straight to `master`, and is asleep: **do not ask questions; make reasonable choices and document them.**

@@ -39,7 +39,7 @@ pub trait ComponentSubscription: 'static {
 /// step, itself in this same order. The blocks come in listing order, so a
 /// later-listed dependency that is upstream of an earlier one runs inside the
 /// earlier block. A component runs at most once per step, after everything it
-/// subscribes to. (In this phase every component runs in every step.)
+/// subscribes to. (A component runs only when one of its edges fired; see the README.)
 /// `Pipeline::order` reports the *construction* order, which is the same order.
 ///
 /// # Stored outputs
@@ -85,21 +85,20 @@ pub struct Sub<N, C, const I: usize>(PhantomData<(N, C)>);
 /// In the shapes below an entry `A` stands for [`Sub<A, i>`](Sub), `i` being
 /// its position in the listing.
 ///
-/// * a leaf, a plain tuple of 0 to 7 nodes: `()` (no subscriptions),
-///   `(A,)`, `(A, B)`, up to `(A, B, C, D, E, F, G)`;
-/// * an inner node, exactly a tuple of 8 child nodes `(K0, .., K7)` and no
+/// * a leaf, a plain tuple of 0 to `ARITY - 1` (15) nodes: `()` (no
+///   subscriptions), `(A,)`, `(A, B)`, and so on;
+/// * an inner node, exactly a tuple of `ARITY` (16) child nodes and no
 ///   entries of its own (unused children are the empty leaf `()`), used for
-///   more than 7 subscriptions. A tuple of 8 is therefore always an inner node
-///   and a shorter one always a leaf.
+///   more than 15 subscriptions. A tuple of 16 is therefore always an inner
+///   node and a shorter one always a leaf.
 ///
 /// Listing order is the leaves left to right. The derive keeps the tree as
 /// shallow as possible and fills it from the left: with `d` the least depth
-/// whose capacity `7 * 8^d` holds the subscriptions, the 8 children get
-/// `7 * 8^(d-1)` each, in order, until nothing is left (depth grows with log8
-/// of the number of subscriptions). 12 subscriptions are
-/// `((A, .., G), (H, .., L), (), (), (), (), (), ())`.
+/// whose capacity `15 * 16^d` holds the subscriptions, the 16 children get
+/// `15 * 16^(d-1)` each, in order, until nothing is left (depth grows with
+/// log16 of the number of subscriptions).
 ///
-/// The number 8 is `ARITY` in `dataflow-macros`, the only place it is written:
+/// `ARITY` is defined in `dataflow-macros`, the only place it is written:
 /// the impls for each shape below are generated from it by the callback macros
 /// `leaf_shapes!` and `inner_shape!`.
 pub trait DepList: 'static {

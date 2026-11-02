@@ -1,6 +1,5 @@
 //! Event-driven dataflow, wired at compile time, safe at run time. Requires
-//! nightly. **Status: redesign in progress (phase 1b); see the README and the
-//! event spec.**
+//! nightly. See the README for the model, the syntax and the limits.
 //!
 //! A program is a [`Pipeline<R, Sinks>`](Pipeline): one *root* type `R`
 //! (`#[derive(Root)]`), fed with `pipeline.push(value)`, and *components*
@@ -66,7 +65,7 @@
 //! 3. **Construction** (`drive`, `gather`). The pass visits positions in
 //!    execution order; each `new` is given the outputs built so far.
 //! 4. **Push** (`drive`, `gather`). The same driver visits the positions again:
-//!    for each, if its condition holds (`drive::Cond`, "always" in phase 1a),
+//!    for each, if its condition holds (`drive::Cond`, "always" for unconditional components),
 //!    gather its inputs as references into the stored outputs and the pushed
 //!    root, call `update`, store the output. Every step is a separately
 //!    monomorphized `#[inline(always)]` function, so a push is straight-line

@@ -40,8 +40,8 @@ use crate::sinks::Sinks;
 /// subscription listing order, exactly as documented on
 /// [`Component`](crate::Component): for each component, its dependencies'
 /// blocks in listing order, then the component. The order is guaranteed and
-/// checked by `tests/order.rs`. In this phase every component runs on every
-/// push.
+/// checked by `tests/order.rs`. A component runs only when one of its edges
+/// fired.
 ///
 /// # Outputs
 ///

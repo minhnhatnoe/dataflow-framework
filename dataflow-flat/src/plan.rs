@@ -11,7 +11,7 @@
 //! incremental compilation stays linear):
 //!
 //! * for every node, its `TypeId` (identity), its **kind** (root, component,
-//!   anchor; demuxers in phase 1b), the node it was first reached from and the
+//!   anchor), the node it was first reached from and the
 //!   position of the entry that reached it, the extent of its subtree, its depth
 //!   in the first-parent tree;
 //! * the **execution position** of every node: its place in the post-order of

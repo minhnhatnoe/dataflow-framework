@@ -1,57 +1,90 @@
-> **Status: redesign in progress (phase 1a done: root/components/sinks, `push`, stored outputs; demuxers and conditions are phase 1b). This file still describes the previous model; the source of truth for the new one is the event spec (`event-spec.md`, not yet in the repo). Do not rely on the sections below until the rewrite.**
-
 # Working on this repo
 
-Read `README.md` first. It covers the requirements, the full design, why each alternative was rejected, and the known limitations. The person cares about the concept more than polish, so check claims by building small artifacts rather than reasoning about them.
+Read `README.md` first. It covers the requirements, the model, the syntax, why each alternative was rejected, performance and the known limits. The person cares about the concept more than polish, so check claims by building small artifacts rather than reasoning about them. `handoff/` holds design notes and session logs (`session-2.md` is a log; `README.md` and `event-spec.md` are earlier design notes with a note at the top on what is superseded).
 
 ## Toolchain and commands
 
-`rust-toolchain.toml` pins `nightly-2026-10-30`. Without rustup, use `RUSTC_BOOTSTRAP=1`. `dataflow-flat` enables `const_type_name` (the name hash that only chooses where the plan's table starts probing), `const_trait_impl` and `const_cmp` (the plan's walk, and `TypeId ==` in a `const fn`; syntax is `const trait` / `const impl` / `[const]` bounds on this nightly) and `generic_const_exprs`; the library prints a "not supported with the next-generation trait solver ... reverted" warning (and uses `#![allow(incomplete_features)]`). That is expected. User crates (`dataflow-flat/examples/*`, `bench`, the tests, the error cases) must not need any `#![feature]`.
+`rust-toolchain.toml` pins `nightly-2026-10-30`. Without rustup, use `RUSTC_BOOTSTRAP=1`. `dataflow-flat` enables `const_type_name`, `const_trait_impl`, `const_cmp`, `panic_internals` and `generic_const_exprs`; the library prints a "not supported with the next-generation trait solver ... reverted" warning (and uses `#![allow(incomplete_features)]`). That is expected. User crates (`dataflow-flat/examples/*`, `bench`, the tests, the error cases) must not need any `#![feature]`.
 
-Always run cargo under a timeout: `timeout 120 cargo ...`. Large graphs compile slowly, and past bugs made builds exponential. Run long checks one at a time and write results to a file, rather than chaining many slow commands in one shell call.
+`.cargo/config.toml` sets `-Zshare-generics=n` (dev edit time), `-Ctarget-cpu=native` and `scripts/rustc-env.sh` as the rustc wrapper (jemalloc never returns memory; `[env]` does not reach rustc). Release means that plus the `[profile.release]` in `Cargo.toml`; a number measured without them is not a release number.
+
+Always run cargo under a timeout and a memory cap (see "Rules for agents"). Large graphs compile slowly, and past bugs made builds exponential. Run long checks one at a time and write results to files.
 
 ```sh
-timeout 120 cargo test                           # plan assertions + runtime guarantees + execution order
-timeout 300 scripts/check_errors.sh              # or pass case names to run a subset
-timeout 120 cargo run -p dataflow-flat --example basic
-python3 bench/gen_bench.py full 20 && timeout 200 cargo run --release -p bench
-scripts/bench.sh [layers] [wide]       # robust benchmark: pinned, warm-up, 11 alternating rounds x 5 processes; restores `full 20`
+CARGO_BUILD_JOBS=1 timeout 600 cargo test -p dataflow-flat        # tests are heavy: build one test with --test name
+CARGO_BUILD_JOBS=1 timeout 300 cargo test --doc -p dataflow-flat  # doc tests (pipeline.rs, sinks.rs, node.rs)
+timeout 900 scripts/check_errors.sh                # all 48 cases; or pass case names to run a subset
+timeout 120 cargo run -p dataflow-flat --example exchanges   # also basic, diamond, selbench
+python3 bench/gen_app.py --size typical --mode enum --out DIR # --mode is required: 1a | enum | req
+python3 scripts/measure.py --mode enum --sizes tiny,small --out DIR   # pass --out; the default is an old path
+python3 scripts/gen_selbench.py [E S K packets]                        # writes examples/selbench.rs
+python3 bench/gen_bench.py full 20 && scripts/bench.sh                 # old flat-graph benchmark; restores `full 20`
 ```
 
-`bench` is excluded from default members because its release build takes about 5 s. `python3 bench/gen_bench.py <full|flat|hand> [layers] [wide]` (`wide`: the root subscribes to the last 5 layers, 100 components, to exercise a very wide subscription list) regenerates `bench/src/main.rs` (`flat` has only the framework side, `hand` only the baseline). Regenerate with `full 20` before committing; the committed file should be what the generator produces.
+Sizes of `bench/gen_app.py` (components): tiny 111, small 415, typical 823, then 2,044 (`m15-150-35`), 4,079 (`m30-300-70`), `perps` 12,412, `full` 29,650. Safe under a few GB: tiny, small, typical (dev first build about 2 GB, release about 1.5 to 3 GB). 2,044 check about 1.2 GB; 4,079 release about 6 GB (needs a larger cap, ask first); `perps` check needs `CARGO_INCREMENTAL=0` (6.7 GB); `perps` release and `full` do not fit in 16 GB. Apps above about 1,300 to 2,000 components need `#![allow(long_running_const_eval)]` in the application crate (`gen_app.py` adds it above 1,500). `bench/` is excluded from default members; `bench/gen_bench.py` output (`bench/src/main.rs`) should be what the generator produces (`full 20`) when committed.
 
 ## Invariants: don't break these without discussing
 
-1. **No dynamic dispatch while running.** No `dyn`, downcasts or lookups in `run` or the walk. Type-erased maps are only allowed in `Pipeline::build`.
-2. **Compile-time constants contain no references.** `Plan` is a plain value of integer arrays plus one `[TypeId; MAX_COMPONENTS]` (`Planned::PLAN` is one `&'static Plan` to it). A `TypeId` is pointer-typed inside const evaluation but plain integer data in the generated code, and measured no cost for incremental builds; it is the only exception to "integers only". A graph of `&'static` constants made incremental builds exponential. Keep constant arrays as integer arrays, not arrays of structs (validation is per field).
-2b. **Component identity is the `TypeId`, never a hash.** `==` is the only operation on `TypeId` in const (no ordering, no unsafe). Finding a component goes through `table.rs` (name hash to start, `TypeId ==` to confirm); do not replace that by a linear scan of the `TypeId`s (+1.2 s debug compile time at 397 components) and do not let a hash decide identity. After the plan, everything works on indices (`At::INDEX`). `dataflow-flat/tests/same_type_name.rs` (with `tests/samename/`) tests two types with the same `type_name`.
-3. **Use `#[inline(always)]` on the walk and lookup chain**: `Walk::walk`/`after`, `Find`, `Get`, `Select`, `GatherInputs`, `Context::shorten`, `Done::into_output`, `Root::run`, `Pipeline::run`. It is required: with plain `#[inline]` LLVM stops inlining the root's walk into `run` from about 477 components and the ~4 KB finished-outputs tree is returned by value (up to 4x slower). Debug-build size and time are not a concern for this project (the user's decision, 2026-10-30). On layered graphs of 20 components per layer the default recursion limit gives misleading E0080 errors from 28 layers with 4 dependencies each (556 components); a chain of 42 components already overflows with "queries overflow the depth limit" (README, "Graph depth").
-4. **Each component is constructed, run and dropped exactly once.** This now holds structurally: the typed `Tree` stores each component once (at the edge where `Edge::FIRST` is true; an edge is a parent and a position, so aliases of one type are two edges), construction is `Tree::make`, and drop is compiler drop glue. `tests/graphs.rs` and `tests/runtime.rs` check it.
-5. **`#![forbid(unsafe_code)]` stays.** The old raw-pointer soundness argument is gone; do not reintroduce `unsafe`. If a design needs it, discuss first.
-6. **Execution order is a guarantee**: depth-first post-order in subscription listing order (documented on `Component` and `Pipeline`, and in the README). `dataflow-flat/tests/order.rs` enforces it; change those tests only on purpose.
-7. **GCE is confined to the library.** `generic_const_exprs` is a feature of `dataflow-flat` only. User crates need no feature gate and generic user code needs exactly one bound, `Root`. `tests/generic_user.rs` and `check_errors.sh generic_root_bound_ok` enforce it.
-8. **`run` returns the root's output by value and nothing is stored between runs.** No `outputs()`, no `ran` flag, no `Option` per output.
-9. **Keep `scripts/check_errors.sh` passing**, and add a case for every new class of user mistake. Match on error codes and on our own panic messages, not on full compiler output.
+1. **No dynamic dispatch in a push.** No `dyn`, downcasts or lookups in the push program or the drivers. Type-erased maps (`dyn Any` configs and listener requests) are allowed only in `Pipeline::build` (`build.rs`, `request.rs`).
+2. **Compile-time constants contain no references.** `Plan` is a plain value of integer arrays plus one `[TypeId; MAX_COMPONENTS]`. A graph of `&'static` constants made incremental builds exponential. Keep constant arrays as integer arrays, not arrays of structs (validation is per field). A failed plan must give an empty program and one error, not a const panic mid-plan (a panic once hung for 13 GB).
+3. **Component identity is the `TypeId`, never a hash.** `==` is the only operation on `TypeId` in const. Finding a component goes through `table.rs` (name hash picks where to start, `TypeId ==` decides); do not replace it by a linear scan (+1.2 s at 397 components) and do not let a hash decide identity. After the plan, everything works on indices. `tests/same_type_name.rs` (with `tests/samename/`) tests two types with the same `type_name`.
+4. **`#[inline(always)]` only in release, on the push path.** The pattern is `#[cfg_attr(not(debug_assertions), inline(always))]` with `#[cfg_attr(debug_assertions, inline)]`; lookups in `gather.rs`/`store.rs` are plain `#[inline]`. Forced inlining in debug builds was exponential. Debug-build size and time are secondary to release run time.
+5. **Each component is constructed, run (at most once per push) and dropped exactly once.** It holds structurally (typed storage, construction in execution order, drop glue). `tests/lifecycle.rs` and `tests/duplicates.rs` check it. Aliases of one type are one component.
+6. **`#![forbid(unsafe_code)]` stays.** Do not reintroduce `unsafe`. The `update`-only reflection design needs it and is stashed.
+7. **Execution order is a guarantee**: depth-first post-order in subscription listing order, restricted to what runs (documented on `Component` and `Pipeline`, in the README). `tests/order.rs` enforces it.
+8. **GCE is confined to the library.** User crates need no feature gate and generic user code needs exactly one bound, `S: Sinks<R>`. `tests/generic_user.rs` and `check_errors.sh generic_sinks_bound_ok` enforce it.
+9. **The step semantics**: the root fires on every push; a component runs iff at least one edge fired (OR); an edge with selectors fires iff its parent fired and the pattern matched; outputs are stored and persist between pushes; `push` returns nothing and there is no accessor for stored outputs. After absorption, a component's condition terms must be pairwise exclusive (otherwise "joins branches that can fire in the same step"); every component must be reachable from the root, which must be `R`.
+10. **Selected inputs read the last matched value** (stored only where some subscriber's condition does not imply the match), `Clone` is required only for stored ones, and `new` is given initial values for selected inputs (the selector's `Initial`). Handled edges are never read in `update` and never stored.
+11. **Subscriptions are enum-style patterns only** (`Sel(Sel(name)): Src`, unit selectors, `_` for handled leaves); `=>` is a parse error. Anything else is a hand-written `Select`. Do not add syntax without discussing.
+12. **Keep `scripts/check_errors.sh` passing**, and add a case for every new class of user mistake. Match on error codes and on our own messages, not on full compiler output.
+
+Changed since the earlier model: `run` returning the root's output (replaced by `push` returning nothing and stored outputs), `Root` as a component (the root is a value type and the anchor is `Pipeline<R, Sinks>`), the fold with `Done`/`Find`/`Get`, the depth limit of 41, "inline(always) on the walk and lookup chain" (release-only on the push path now), and the 8-ary tree (`ARITY` is 16).
+
+## Rules for agents (from experience)
+
+* **Always pass `--mode`** to `bench/gen_app.py` and `scripts/measure.py` (`enum` for anything resembling a real app, `req` for listeners; `1a` has no selectors). The default of the old tools silently measured the wrong thing.
+* **Set memory caps from `MemAvailable`**: `systemd-run --user --scope -q -p MemoryMax=<cap> -p MemorySwapMax=0 -- timeout <s> ...`, with the cap the smaller of the coordinator's limit and `MemAvailable` minus 2 GB, `CARGO_BUILD_JOBS=1` (or 4 for a measurement), one build at a time. An OOM kill is a result to record, never a reason to repeat the build unchanged or to run uncapped. Don't build the whole test suite for a docs check; build the one example or scratch crate.
+* **No wait loops**: no `until`/`while` polling, no `pgrep -f`, no `tail --pid`. Run long builds in the background and wait for the completion notification. Keep tool output small (write to files, grep or tail them).
+* **`.text` comparisons** of two builds (to prove a change generates identical code) are only valid when both are built in identically named directories (paths are embedded in the code). Swap the contents of one directory; don't copy to another name. Keep every `-Z` flag identical across builds, including the profile dir, or the timed build rebuilds from scratch.
+* Put scratch work under the worktree's git-ignored `target/`, never `/tmp`. Never commit `Cargo.lock` changes made by scratch crates. Use literal absolute paths in commands (worktree guards refuse `$VAR` paths and compound commands that obscure them).
+* The run-time noise threshold is under 5 ns per packet at 1,000 components: do not act on a smaller difference without instruction counts (callgrind) and several processes.
+* One milestone per subagent; hand back at the milestone or at about 120k tokens of context with a 20 to 30 line report (global rules in `~/.claude/CLAUDE.md`).
 
 ## Map of the code
 
 | Path | What |
 |---|---|
-| `dataflow-flat/src/lib.rs` | Crate docs (the four stages, top-down), feature gates, module list, re-exports |
-| `dataflow-flat/src/component.rs` | `ComponentSubscription`, `Component`, `Sub<C, I>` (an entry's marker: the component and its position in the listing), `DepList` (the subscription tree the derive builds: leaves of 0-7 entries (`()` is the empty leaf), inner nodes that are exactly 8 child subtrees and no entries; a tuple of 8 is always an inner node. The 8 is `ARITY`, defined once in `dataflow-macros`, which generates every per-shape impl through callback macros (`leaf_shapes!`, `inner_shape!`, `tuple_sizes!`, ...); the derive fills children left to right, `7 * 8^(d-1)` each) |
-| `dataflow-flat/src/plan.rs` | The compile-time plan: the const dependency walk (`visit`, `Upstream`), `Plan` (`TypeId`s by index, first parents, the position that reached each, and subtree ends as indices), `Planned`, `Edge<R, P, H, I>` (`FIRST` = first parent and first position), and the `plan_trace` test |
-| `dataflow-flat/src/identity.rs`, `table.rs` | Component identity: `At::INDEX` (position of a component in a root's plan), `Hashed` (name hash used only as a probe start), the open-addressing `Table` confirmed by `TypeId ==` |
-| `dataflow-flat/src/storage.rs` | The typed states tree: `Tree`, `MaskN`/`StoredN` (only first-edge entries are stored), `DepStorage`, `Placed` |
-| `dataflow-flat/src/lookup.rs` | Finished outputs and lookups: `Done`, `Node` (a finished tuple node as a context entry), `Span` (plan range of a finished piece), `Select`/`Get`, `Context` (also the span of its head entry), `TopHolds`, `Find`, `GatherInputs` |
-| `dataflow-flat/src/walk.rs` | The fold (`Walk`: `Out`, `After`, `walk`, `after` per piece) and the `Root` bound |
-| `dataflow-flat/src/catalog.rs` | `for` entries: `Catalog` (nested tuple of types, `Product`/`Concat`/`Zip`, `M<X, S>`), `Map<A>` (generated mapper), `MapDeps<F, BASE>` (the catalog's tree with every element made an entry; positions `BASE + i`, the arithmetic sits in a where-clause (`Ent`) because a bare `{ BASE + i }` in the type overflows the user crate's solver); tests: `tests/for_form.rs` |
-| `dataflow-flat/src/handler.rs` | Handler components (a component with handled `#[subscribe]` entries: bare types or `Sel(_): P`; `UpdateHandler`): `Hd<marker, chain>` wraps a handled edge's chain (plan: no rule 5, edge flag), `PG_HRUN` program node = the listed `on_update`s, then `update` (`HItemAt`/`HDrive`/`HRunAt`); bench: `bench/gen_handler.py` |
-| `dataflow-flat/src/build.rs`, `pipeline.rs` | `Configs` (keyed by `TypeId`) and `ConstructPass` (configs, order); `Pipeline` |
-| `dataflow-flat/tests/` | `duplicates.rs` (the same dependency twice through an alias: constructed and updated once, `ptr::eq`), `runtime.rs` (run/drop/by-value guarantees), `graphs.rs` (lifecycle on diamond and example graphs, Send, panics, alignment), `order.rs` (execution order), `generic_user.rs` (one-bound generic code), `wide.rs` (lifecycle and values for 22 and 100 subscriptions), `same_type_name.rs` (two types with identical `type_name` are two components; uses the helper crates in `samename/foo-v1` and `foo-v2`, workspace members whose packages are `foo-v1`/`foo-v2` but whose library is `foo`) |
-| `dataflow-macros/src/lib.rs` | `#[derive(ComponentSubscription)]` + `#[subscribe(...)]` |
-| `dataflow-flat/examples/` | `basic/` (multi-file text pipeline with a root `App`; `cargo run -p dataflow-flat --example basic`) and `diamond.rs` (small graph for reading MIR/IR/asm; `cargo run -p dataflow-flat --example diamond`) |
-| `bench/` | Generated benchmark; `gen_bench.py` is the source of truth |
+| `dataflow-flat/src/lib.rs` | Crate docs, feature gates, module list, re-exports |
+| `dataflow-flat/src/component.rs` | `ComponentSubscription`, `Component`, `Sub<N, C, I>` (an entry: the node, its selector chain and its position in the listing), `DepList` (the subscription tree: leaves of 0 to 15 entries, inner nodes of exactly 16 subtrees; `ARITY` = 16 is defined once in `dataflow-macros`, which generates every per-shape impl through callback macros) |
+| `dataflow-flat/src/node.rs` | The sealed `Node` trait, `Root`, the kinds (root, component, anchor, stored-slot node), `InitOf` |
+| `dataflow-flat/src/select.rs` | `Select`, `SelectChain`, `SelInit`, `Initial`, `Keep`, `ChainKey`, `ChainWalk`, `option`/`result` selectors, `GUARD` |
+| `dataflow-flat/src/plan.rs` | The compile-time plan: the const walk, `Plan` (TypeIds, first parents, decisions, conditions, exclusivity, stored slots, the push program and its pools), `Planned`, limits (`MAX_COMPONENTS` etc.) |
+| `dataflow-flat/src/identity.rs`, `table.rs` | Component identity (`TypeId`) and the open-addressing table (name hash to start, `TypeId ==` to decide) |
+| `dataflow-flat/src/flat.rs` | Balanced flat type-level structure: `NthT` halving descent, `FlatOf`, positions and ranges |
+| `dataflow-flat/src/store.rs` | Flat storage of states and stored outputs, `Slot`, constant descents (`AtPos`, `SelP`) |
+| `dataflow-flat/src/gather.rs` | Reading inputs from stored outputs and the pushed root (`GatherIn`) and at construction (`GatherInit`) |
+| `dataflow-flat/src/drive.rs` | The phases over component positions: construction pass and push program (`Seq`/`Run`/`RunIf`/`Switch`/handler runs) |
+| `dataflow-flat/src/build.rs`, `pipeline.rs`, `sinks.rs` | `Configs` and the construction pass; `Pipeline<R, S>` (`build`, `push`, `order`, `len`); `SinkList`, `Sinks<R>` (the one bound), the anchor |
+| `dataflow-flat/src/request.rs` | Listeners: `Listener`, `Request<S>`, the first pass that collects requested selectors |
+| `dataflow-flat/src/handler.rs` | Handlers: `UpdateHandler`, `HandledEdge`, `Hd` wrapper, handler runs in the push program |
+| `dataflow-flat/src/catalog.rs` | Catalogs for `for` entries: `Catalog`, `Concat`, `Product`, `Zip`, `M`, `Map`/`MapDeps` |
+| `dataflow-flat/tests/` | `lifecycle.rs`, `duplicates.rs`, `order.rs`, `selectors.rs`, `patterns.rs`, `stored_selectors.rs`, `handlers.rs`, `for_form.rs` (+ `for_form_cats.inc`), `listeners.rs`, `wide.rs`, `generic_user.rs`, `smoke.rs`, `same_type_name.rs` (+ `samename/foo-v1`, `foo-v2`, workspace members whose library is named `foo`) |
+| `dataflow-flat/examples/` | `basic/`, `exchanges/` (NIC, two exchanges, listeners, exclusive join, handler sink), `diamond.rs` (small graph for reading MIR/IR/asm), `selbench.rs` (generated by `scripts/gen_selbench.py`) |
+| `dataflow-macros/src/lib.rs` | `#[derive(ComponentSubscription)]` + `#[subscribe]` + `#[listener]`, `#[derive(Root)]`, `#[derive(Demux)]` + `#[demux(markers = ..)]`, `catalog!`, the callback macros (`leaf_shapes!`, `inner_shape!`, `tuple_sizes!`, `sink_tuples!`, ...) |
+| `bench/gen_app.py` | The multi-crate market app generator (the main benchmark); `--mode 1a|enum|req` required |
+| `bench/gen_handler.py`, `gen_enum_keys.py`, `enum_keys_build.sh`, `enum_keys_run.sh` | Handler graph (`for` option), enum-key comparison and its build/run drivers |
+| `bench/gen_bench.py`, `bench/src/main.rs`, `bench/Cargo.toml` | The old layered flat-graph benchmark; `main.rs` is generated (`full 20`) |
+| `bench/sfb/sfb.rs` | Standalone store-forwarding repro (no framework dependency) |
+| `scripts/check_errors.sh` | 48 error cases, each a tiny crate under `target/error-cases/` |
+| `scripts/measure.py`, `scripts/bench.sh`, `scripts/gen_selbench.py` | Measurement harness for generated apps; pinned flat-graph benchmark; selector benchmark generator |
+| `scripts/rustc-env.sh` | rustc wrapper exporting `_RJEM_MALLOC_CONF` |
+| `handoff/tools/` | `memset-shim/` (`LD_PRELOAD` shim that found the incremental page-fault cost; hard-coded paths of a removed worktree), `profile-reader/` (self-profile aggregators), `excl-group-differential.py` and `excl-group-counters.diff` (old-vs-new differential for `excl_group`), `probes-scratch.diff`, `pv.sh` (hard-coded old path) |
+| `handoff/agent-env/` | `cap.sh` and `rules.md` for a container without systemd (hard-coded scratchpad path) |
 
-Suggested next steps are at the end of `README.md`. The first is per-run external input.
+## Compile-time notes
 
-Compile-time notes: the plan's `Upstream` bound is proved recursively by the trait solver, so graph depth costs solver depth (README, "Graph depth"); keep that proof two levels per layer (a bound on `C::Deps` rather than a trait on components), and the constant-evaluation walk at one stack frame per layer (the `Upstream` impls call `enter`/`leave` inline around `visit_all`; measured: the chain limit is 41 at the default recursion limit and set by query depth, not by frames) and keep `Upstream` implemented per tree node (a component's subscriptions must stay an 8-ary tree, not a list: the cons list overflowed the recursion limit at 20 subscriptions). Profile with `-Zself-profile` and `summarize` (README, "Inspecting compiler output") before changing anything for speed.
+* The plan's `Upstream` bound is proved recursively by the trait solver, so graph depth costs solver depth. Keep that proof two levels per layer (a bound on `C::Deps` rather than a trait on components), keep the constant-evaluation walk at one stack frame per layer (the `Upstream` impls call `enter`/`leave` inline), and keep `Upstream` implemented per tree node (an 8- or 16-ary tree, not a list: the cons list overflowed the recursion limit at 20 subscriptions).
+* Chains are the worst case: 85 components build in 2 s in debug, 90 in 14 s, 95 exhausts 2 GB. Typical graphs are wide and shallow.
+* At large sizes most `cargo check` time is incremental compilation bookkeeping (page faults); measure cold checks with `CARGO_INCREMENTAL=0`.
+* `cargo check` misses post-monomorphization errors (plan errors, exclusive joins); take limits from real builds.
+* Profile with `-Zself-profile` (format v9 needs analyzeme/decodeme 12.0.3 or newer) or `-Ztime-passes` before changing anything for speed. `query-keys` on a graph of more than a few hundred components makes a profile of tens of GB.
