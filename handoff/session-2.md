@@ -299,3 +299,13 @@ Optimization paused by the user's agreement; the parked list is in `MEMORY`'s sc
 - `On`, `KeyListener`, `Keyed`, `Symbol` and `collect_requests` are removed on branch `remove-on` (enums are the only keyed form); branch `keep-on-mode` keeps them for the run-time comparison.
 - **Unknown limits:** one component can't read two variants of one listener (existing plan rule). `Data: E` on a data variant compiles and ignores the payload.
 - `handoff/README.md` and `handoff/event-spec.md` still show `=>` examples.
+
+## Allocator setting, caching, release memory (2026-11-02)
+
+`MALLOC_CONF=dirty_decay_ms:-1,muzzy_decay_ms:-1` is set in `.cargo/config.toml` `[env]` (`_RJEM_MALLOC_CONF` is ignored on this nightly; results above naming it ran on defaults). Cold check, `enum`, incremental on: 4,079 48.9 s, 12.7M faults, 1.33 GB → 30.0 s, 0.68M, 1.49 GB; `perps` 125.9 s, 5.29 GB, 1.68M faults. It raises release peak: typical full profile 0.90 → 1.42 GB, so use a shell override such as `MALLOC_CONF=dirty_decay_ms:10000,muzzy_decay_ms:0` for large release builds.
+
+Release memory, full profile, `enum`, without the setting: 823 0.87 GB 16 s; 2,044 1.86 GB 59 s; 4,079 3.83 GB 226 s, linear at about 0.94 MB per component, peak at the end of `codegen_to_LLVM_IR`. `perps` extrapolates to about 11.7 GB and was killed at a 12 GB cap; `full` to about 28 GB. No single holder; flags tried made no difference.
+
+Caching, `enum`, typical, dev: component body 0.9-1.0 s, 1 of 93 units; big + 3 small 0.95 s; line length or inserted line 0.9 s; subscription list, add or remove component, or sink order 8-9 s (the whole plan re-evaluates); library edit 2.5-3.3 s even for a comment (about 123k queries, 1 unit), 5.9 s right after app-only edits. A second app over the same library reuses nothing. `-Zincremental-ignore-spans` makes a library comment edit 0.95 s and doesn't help real library edits. Default `-Zshare-generics` did not reproduce the 4.9 s regression in the config comment (0.98 vs 0.91 s). Cold dev build at 2,044 was killed at a 3 GB cap, so edit times at 2,044 and 4,079 are unmeasured.
+
+Chain depth: 85 components 2 s, 90 14 s, 95 killed at 2 GB (docs agent). `for` form works but repeats bounds, gives a nonsense rustc suggestion when they're missing, and its body can only be a single node type.
