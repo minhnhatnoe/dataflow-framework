@@ -1265,6 +1265,19 @@ fn expand_demux(input: DeriveInput) -> syn::Result<TokenStream2> {
                     #name::__demux_key(__x)
                 }
             }
+            // The initial value of the part: its `Default`. Conditional on a generic
+            // parameter bound to the payload type, so an enum with a payload that is not
+            // `Default` still compiles unless that variant is read when it does not match.
+            impl<__T> #krate::Initial<#name> for #marker
+            where
+                #out_ty: #krate::Identity<Is = __T>,
+                __T: ::core::default::Default,
+            {
+                #[inline(always)]
+                fn initial() -> #out_ty {
+                    <#out_ty as #krate::Identity>::from_is(<__T as ::core::default::Default>::default())
+                }
+            }
         });
     }
     // The impls are outside the module so that the variants' field types

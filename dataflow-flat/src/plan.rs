@@ -458,6 +458,23 @@ pub struct Plan {
     dn_opos: [u32; MAX_DECISIONS],
     /// Does a guarded run read whether this component fired?
     flag_need: [bool; MAX_COMPONENTS],
+    /// Stored selected values ("slots"). Edge `e` is *stored* when some term of its
+    /// subscriber's condition does not imply it (the subscriber reads it in a step where
+    /// its selectors do not match): `edge_need[e]`. Per decision (the last of a chain):
+    /// is its chain read by a stored edge, the subscriber and entry position of the
+    /// first such edge (to find the types), and its slot number. The slots are numbered
+    /// by the execution position of their source (the root first), so that those of one
+    /// source are a range: `slot_off[k]..slot_off[k + 1]` for key `k` (0 the root,
+    /// `cpos + 1` a component); `slot_dn[s]` is the decision of slot `s`.
+    edge_need: [bool; MAX_EDGES],
+    dn_need: [bool; MAX_DECISIONS],
+    dn_rep_sub: [u32; MAX_DECISIONS],
+    dn_rep_pos: [u32; MAX_DECISIONS],
+    dn_slot: [u32; MAX_DECISIONS],
+    slot_dn: [u32; MAX_DECISIONS],
+    slot_off: [u32; MAX_COMPONENTS + 2],
+    slot_cur: [u32; MAX_COMPONENTS + 2],
+    n_slots: usize,
     /// The push program: nodes (`pg_*`) and their children (`ch_*`).
     pg_len: usize,
     pg_kind: [u8; MAX_PROG],
@@ -593,6 +610,15 @@ impl Plan {
             dn_owner: [NONE; MAX_DECISIONS],
             dn_opos: [0; MAX_DECISIONS],
             flag_need: [false; MAX_COMPONENTS],
+            edge_need: [false; MAX_EDGES],
+            dn_need: [false; MAX_DECISIONS],
+            dn_rep_sub: [NONE; MAX_DECISIONS],
+            dn_rep_pos: [0; MAX_DECISIONS],
+            dn_slot: [NONE; MAX_DECISIONS],
+            slot_dn: [NONE; MAX_DECISIONS],
+            slot_off: [0; MAX_COMPONENTS + 2],
+            slot_cur: [0; MAX_COMPONENTS + 2],
+            n_slots: 0,
             pg_len: 0,
             pg_kind: [0; MAX_PROG],
             pg_a: [0; MAX_PROG],
@@ -639,6 +665,7 @@ impl Plan {
         }
         if !plan.failed {
             plan.number_components();
+            plan.assign_slots();
             plan.collect_requests();
         }
         if !plan.failed {
@@ -1154,8 +1181,8 @@ impl Plan {
         self.ol_len += 1;
     }
 
-    /// Compute the condition of component `i` from its edges, and check rules
-    /// 4 (exclusive joins) and 5 (selected edges implied by the condition).
+    /// Compute the condition of component `i` from its edges, check rule 4
+    /// (exclusive joins), and find its stored edges (rule 5, see `edge_need`).
     const fn cond_comp(&mut self, i: usize, name: &str) {
         if self.failed {
             return;
@@ -1197,7 +1224,8 @@ impl Plan {
                 return;
             }
         }
-        // Rule 5: every term of the condition implies each selected edge.
+        // Rule 5 (no longer an error): a selected edge that some term of the condition does not
+        // imply is read in steps where its selectors do not match; it is *stored* (a slot).
         let mut e = self.up_head[i];
         while e != NONE {
             let u = self.edge_to[e as usize] as usize;
@@ -1217,14 +1245,14 @@ impl Plan {
                         k += 1;
                     }
                     if !ok {
-                        let m = message(&[
-                            name.as_bytes(),
-                            b" reads ",
-                            self.edge_name(e as usize).as_bytes(),
-                            b" through selectors in steps where they do not match; subscribe to a component that stores it",
-                        ]);
-                        self.fail_msg(m);
-                        return;
+                        self.edge_need[e as usize] = true;
+                        let du = d as usize;
+                        self.dn_need[du] = true;
+                        if self.dn_rep_sub[du] == NONE {
+                            self.dn_rep_sub[du] = i as u32;
+                            self.dn_rep_pos[du] = self.edge_pos[e as usize];
+                        }
+                        break;
                     }
                     a += 1;
                 }
@@ -1258,6 +1286,91 @@ impl Plan {
                 e = self.edge_next[e as usize];
             }
         }
+    }
+
+    /// Number the slots: the decisions read by a stored edge, ordered by the execution
+    /// position of their source (a counting sort; the root is key 0).
+    const fn assign_slots(&mut self) {
+        let nc = self.n_comp;
+        let mut d = 0;
+        while d < self.dn_len {
+            if self.dn_need[d] {
+                let k = self.slot_key(d);
+                self.slot_off[k + 1] += 1;
+            }
+            d += 1;
+        }
+        let mut k = 0;
+        while k <= nc {
+            self.slot_off[k + 1] += self.slot_off[k];
+            self.slot_cur[k] = self.slot_off[k];
+            k += 1;
+        }
+        let mut d = 0;
+        while d < self.dn_len {
+            if self.dn_need[d] {
+                let k = self.slot_key(d);
+                let s = self.slot_cur[k] as usize;
+                self.slot_cur[k] += 1;
+                self.slot_dn[s] = d as u32;
+                self.dn_slot[d] = s as u32;
+            }
+            d += 1;
+        }
+        self.n_slots = self.slot_off[nc + 1] as usize;
+    }
+
+    /// The key of the slot of decision `d`: 0 for the root, else component position + 1.
+    const fn slot_key(&self, d: usize) -> usize {
+        let src = self.dn_node[d] as usize;
+        if self.kind[src] == KIND_ROOT {
+            0
+        } else {
+            self.cpos[src] as usize + 1
+        }
+    }
+
+    /// Number of slots.
+    pub(crate) const fn n_slots(&self) -> usize {
+        self.n_slots
+    }
+
+    /// The storage positions (after the components) of the slots of the root
+    /// (`root_slots`) and of the component at component position `p`.
+    pub(crate) const fn root_slots_lo(&self) -> usize {
+        self.n_comp + self.slot_off[0] as usize
+    }
+    pub(crate) const fn root_slots_hi(&self) -> usize {
+        self.n_comp + self.slot_off[1] as usize
+    }
+    pub(crate) const fn comp_slots_lo(&self, p: usize) -> usize {
+        self.n_comp + self.slot_off[p + 1] as usize
+    }
+    pub(crate) const fn comp_slots_hi(&self, p: usize) -> usize {
+        self.n_comp + self.slot_off[p + 2] as usize
+    }
+
+    /// The subscriber (component position) and the entry position of the edge that
+    /// names the type of the slot at storage position `pos`.
+    pub(crate) const fn slot_rep(&self, pos: usize) -> (usize, usize) {
+        let d = self.slot_dn[pos - self.n_comp] as usize;
+        (self.cpos[self.dn_rep_sub[d] as usize] as usize, self.dn_rep_pos[d] as usize)
+    }
+
+    /// The storage position of the slot the entry `i` of the component at position `p`
+    /// reads, or `usize::MAX` if it reads the source directly.
+    pub(crate) const fn edge_slot_pos(&self, p: usize, i: usize) -> usize {
+        let mut e = self.up_head[self.by_cpos[p] as usize];
+        while e != NONE {
+            if self.edge_pos[e as usize] as usize == i {
+                if self.edge_need[e as usize] {
+                    return self.n_comp + self.dn_slot[self.edge_dn[e as usize] as usize] as usize;
+                }
+                return usize::MAX;
+            }
+            e = self.edge_next[e as usize];
+        }
+        usize::MAX
     }
 
     /// The requests of the listeners: for each listener node, the sorted,
@@ -2438,12 +2551,17 @@ mod trace {
     }
 
     #[test]
-    fn rule_5_is_reported_by_check() {
-        // W = [z: Z (terms K0, K1), p: Poll => K0]: its condition has the K1 term, which does not imply K0.
+    fn rule_5_stores_the_edge() {
+        // W = [z: Z (terms K0, K1), K0(p): Poll]: its condition has the K1 term, which does not imply K0,
+        // so the edge `K0(p): Poll` is stored: one slot, sourced at the root.
         let plan = <Anchor<Poll, (W,)> as Planned>::PLAN;
-        assert!(plan.failed);
-        let msg = core::str::from_utf8(&plan.msg[..plan.msg_len]).unwrap();
-        assert!(msg.contains("through selectors in steps where they do not match"), "{msg}");
+        assert!(!plan.failed);
+        assert_eq!(plan.n_slots(), 1);
+        // W is the last component (position 3: X, Y, Z, W); its entry 1 (`K0(p): Poll`) reads slot 3 + 0.
+        assert_eq!(plan.edge_slot_pos(3, 1), 4);
+        assert_eq!(plan.edge_slot_pos(3, 0), usize::MAX);
+        assert_eq!((plan.root_slots_lo(), plan.root_slots_hi()), (4, 5));
+        assert_eq!(plan.slot_rep(4), (3, 1));
     }
 }
 

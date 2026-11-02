@@ -39,9 +39,9 @@
 use std::marker::PhantomData;
 
 use crate::component::{Component, ComponentSubscription};
-use crate::drive::{CondAt, Ch, EntryOf, ExecK, FiredOps, HRunK, Pn, PnC, PushCtx, PushPh, Rg, RgCl};
+use crate::drive::{CondAt, Ch, Drive, EntryOf, ExecK, FiredOps, HRunK, Pn, PnC, PushCtx, PushPh, Rg, RgCl, SlotWriteBy, SrcSlots};
 use crate::flat::{Inner, Leaf, NthT};
-use crate::gather::{ChainSeed, GatherIn, Layout, Ready, Source};
+use crate::gather::{ChainRead, ChainSeed, GatherIn, Layout, Ready, Source};
 use crate::node::{Comp, Node};
 use crate::plan::{Planned, NO_FLAG};
 use crate::select::{ChainKey, ChainWalk, SelectChain};
@@ -124,10 +124,19 @@ impl<In: 'static, Em: 'static, C: ChainKey<In, J>, const J: usize> ChainKey<In, 
     }
 }
 
-impl<N: Node, A: Layout, Em: 'static, C: ChainSeed<N, A>> ChainSeed<N, A> for Hd<Em, C> {
+impl<N: Node, A: Layout, Em: 'static, C: ChainSeed<N, A, P, I>, const P: usize, const I: usize> ChainSeed<N, A, P, I> for Hd<Em, C> {
     #[inline]
     fn seed<'a>(outs: &'a A::OutsOpt) -> <Self as SelectChain<N::Output>>::Init<'a, N> {
         C::seed(outs)
+    }
+}
+
+/// A handled edge reads nothing in `update` (the value goes to `on_update`).
+impl<E: Source<A>, A: Layout, Em: 'static, C: SelectChain<E::Output>, const P: usize, const I: usize> ChainRead<E, A, P, I> for Hd<Em, C> {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn read<'a>(_: &'a A::Root, _: &'a A::Outs) -> &'a () {
+        &()
     }
 }
 
@@ -245,11 +254,13 @@ pub trait HRunAt<Ph, const P: usize, const N: usize>: Layout {
 fn hrun_at<A: Layout, H: Component + Comp, const P: usize, const N: usize>(ctx: &mut PushCtx<'_, A>)
 where
     A: NthT<P, T = H>,
-    <H as ComponentSubscription>::Deps: GatherIn<A> + Ready<A>,
+    <H as ComponentSubscription>::Deps: GatherIn<A, P> + Ready<A>,
     A::States: AtPos<H, P>,
     A::Outs: AtPos<<H as Node>::Output, P>,
     HItems<A, N>: RgCl,
     HItems<A, N>: HDrive<A, PushPh<A>, H, P, <HItems<A, N> as RgCl>::Cl>,
+    SrcSlots<A, P>: RgCl,
+    SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
 {
     if A::PLAN.hr_guarded(N)
         && !<<H as ComponentSubscription>::Deps as Ready<A>>::ready(ctx.root, &*ctx.outs, &ctx.fired)
@@ -258,10 +269,11 @@ where
     }
     <HItems<A, N> as HDrive<A, PushPh<A>, H, P, <HItems<A, N> as RgCl>::Cl>>::items(ctx);
     let out = {
-        let inputs = <<H as ComponentSubscription>::Deps as GatherIn<A>>::gather(ctx.root, &*ctx.outs);
+        let inputs = <<H as ComponentSubscription>::Deps as GatherIn<A, P>>::gather(ctx.root, &*ctx.outs);
         <A::States as AtPos<H, P>>::at_mut(&mut *ctx.states).update(<H as ComponentSubscription>::input(inputs))
     };
     *<A::Outs as AtPos<<H as Node>::Output, P>>::at_mut(&mut *ctx.outs) = out;
+    <SrcSlots<A, P> as Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>>::drive(ctx);
     if CondAt::<A, P>::FLAG != NO_FLAG {
         ctx.fired.set(CondAt::<A, P>::FLAG);
     }
@@ -271,11 +283,13 @@ impl<A: Layout, const P: usize, const N: usize> HRunAt<PushPh<A>, P, N> for A
 where
     A: NthT<P>,
     <A as NthT<P>>::T: Component + Comp,
-    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A> + Ready<A>,
+    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P> + Ready<A>,
     A::States: AtPos<<A as NthT<P>>::T, P>,
     A::Outs: AtPos<<<A as NthT<P>>::T as Node>::Output, P>,
     HItems<A, N>: RgCl,
     HItems<A, N>: HDrive<A, PushPh<A>, <A as NthT<P>>::T, P, <HItems<A, N> as RgCl>::Cl>,
+    SrcSlots<A, P>: RgCl,
+    SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]

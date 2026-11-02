@@ -128,7 +128,9 @@ pub use node::{InitOf, Node, Root};
 pub use pipeline::Pipeline;
 pub use plan::{MAX_COMPONENTS, MAX_DECISIONS, MAX_EDGES, MAX_TERMS};
 pub use request::{Listener, Request};
-pub use select::{option, result, Keyed, KeyListener, On, Select, Symbol, GUARD};
+pub use select::{option, result, Initial, Keyed, KeyListener, On, SelInit, Select, Symbol, GUARD};
+#[doc(hidden)]
+pub use select::{ChainInitial, Identity, Keep};
 #[doc(hidden)]
 pub use select::ChainKey;
 #[doc(hidden)]

@@ -114,9 +114,9 @@ impl<const I: usize> Target for EntryPos<I> {
 #[doc(hidden)]
 pub trait PickEdge<W: Target, const S: usize> {
     type E: Node;
-    type Ch;
+    type Ch: crate::select::SelectChain<<Self::E as Node>::Output>;
 }
-impl<E: Node, C, const I: usize, W: Target> PickEdge<W, 0> for Sub<E, C, I> {
+impl<E: Node, C: crate::select::SelectChain<E::Output>, const I: usize, W: Target> PickEdge<W, 0> for Sub<E, C, I> {
     type E = E;
     type Ch = C;
 }
@@ -222,6 +222,142 @@ where
 {
     type T = <<C as Step1<R, A, J>>::X as Down<R, { Way::<R, A, J>::MID }, J, <Way<R, A, J> as Route>::K2>>::T;
 }
+
+// ---------------------------------------------------------------------------
+// Storage positions after the components: stored selected values (slots)
+// ---------------------------------------------------------------------------
+//
+// The traits below carry a mapper type `Ph` that only serves to keep their blanket
+// impls from matching a bound with a generic `Ph` (the same device as `EntryOf`'s
+// phase): without it the solver tries the impl while checking a generic impl whose
+// bound has an unevaluated constant, and recurses without end through `Down`.
+
+/// The node and selector chain of entry `I` of the component at position `P`
+/// (like `EntryOf`, but needing only the plan).
+#[doc(hidden)]
+pub trait EdgeAt<Ph, const P: usize, const I: usize>: Planned {
+    type E: Node;
+    type Ch: crate::select::SelectChain<<Self::E as Node>::Output>;
+}
+macro_rules! edge_at_impl {
+    ($($ph:ty),*) => {$(
+        impl<R: Planned, const P: usize, const I: usize> EdgeAt<$ph, P, I> for R
+        where
+            R: NthT<P>,
+            <R as NthT<P>>::T: crate::component::ComponentSubscription,
+            <<R as NthT<P>>::T as crate::component::ComponentSubscription>::Deps:
+                PosSelect<EntryPos<I>> + PickEdge<EntryPos<I>, { <<<R as NthT<P>>::T as crate::component::ComponentSubscription>::Deps as PosSelect<EntryPos<I>>>::POS }>,
+        {
+            type E = <<<R as NthT<P>>::T as crate::component::ComponentSubscription>::Deps as PickEdge<
+                EntryPos<I>,
+                { <<<R as NthT<P>>::T as crate::component::ComponentSubscription>::Deps as PosSelect<EntryPos<I>>>::POS },
+            >>::E;
+            type Ch = <<<R as NthT<P>>::T as crate::component::ComponentSubscription>::Deps as PickEdge<
+                EntryPos<I>,
+                { <<<R as NthT<P>>::T as crate::component::ComponentSubscription>::Deps as PosSelect<EntryPos<I>>>::POS },
+            >>::Ch;
+        }
+    )*};
+}
+edge_at_impl!(crate::store::StateM, crate::store::OutM, crate::store::StateOptM, crate::store::OutOptM);
+
+/// The reader and entry that name the slot at storage position `P` (after the
+/// components): the first edge that stores it.
+#[doc(hidden)]
+pub struct SlotRep<R, const P: usize>(std::marker::PhantomData<R>);
+impl<R: Planned, const P: usize> SlotRep<R, P> {
+    pub const SUB: usize = R::PLAN.slot_rep(P).0;
+    pub const ENTRY: usize = R::PLAN.slot_rep(P).1;
+}
+#[doc(hidden)]
+pub trait SlotEdge<Ph> {
+    type E: Node;
+    type Ch: crate::select::SelectChain<<Self::E as Node>::Output>;
+}
+impl<Ph, R: Planned, const P: usize> SlotEdge<Ph> for SlotRep<R, P>
+where
+    R: EdgeAt<Ph, { SlotRep::<R, P>::SUB }, { SlotRep::<R, P>::ENTRY }>,
+{
+    type E = <R as EdgeAt<Ph, { SlotRep::<R, P>::SUB }, { SlotRep::<R, P>::ENTRY }>>::E;
+    type Ch = <R as EdgeAt<Ph, { SlotRep::<R, P>::SUB }, { SlotRep::<R, P>::ENTRY }>>::Ch;
+}
+/// The slot node at storage position `P`.
+#[doc(hidden)]
+pub trait SlotTy<Ph, const P: usize>: Planned {
+    type T: Node;
+}
+impl<Ph, R: Planned, const P: usize> SlotTy<Ph, P> for R
+where
+    SlotRep<R, P>: SlotEdge<Ph>,
+{
+    type T = crate::node::SlotNode<<SlotRep<R, P> as SlotEdge<Ph>>::E, <SlotRep<R, P> as SlotEdge<Ph>>::Ch>;
+}
+
+/// Is storage position `P` a component or a slot? As a type, so that an
+/// unevaluated constant in a generic context can't match an impl.
+#[doc(hidden)]
+pub struct CompPos;
+#[doc(hidden)]
+pub struct SlotPos;
+#[doc(hidden)]
+pub trait PosKindOf<const K: u8> {
+    type Ty;
+}
+impl PosKindOf<0> for () {
+    type Ty = CompPos;
+}
+impl PosKindOf<1> for () {
+    type Ty = SlotPos;
+}
+#[doc(hidden)]
+pub struct IsSlot<R, const P: usize>(std::marker::PhantomData<R>);
+impl<R: Planned, const P: usize> IsSlot<R, P> {
+    pub const K: u8 = if P >= R::PLAN.n_components() { 1 } else { 0 };
+}
+#[doc(hidden)]
+pub trait PosClass {
+    type Ty;
+}
+impl<R: Planned, const P: usize> PosClass for IsSlot<R, P>
+where
+    (): PosKindOf<{ IsSlot::<R, P>::K }>,
+{
+    type Ty = <() as PosKindOf<{ IsSlot::<R, P>::K }>>::Ty;
+}
+#[doc(hidden)]
+pub trait NthBy<Ph, const P: usize, K>: Planned {
+    type T: Node;
+}
+impl<Ph, R: Planned, const P: usize> NthBy<Ph, P, CompPos> for R
+where
+    R: NthT<P>,
+{
+    type T = <R as NthT<P>>::T;
+}
+impl<Ph, R: Planned, const P: usize> NthBy<Ph, P, SlotPos> for R
+where
+    R: SlotTy<Ph, P>,
+{
+    type T = <R as SlotTy<Ph, P>>::T;
+}
+/// The node type at storage position `P`: the component at component position
+/// `P` (see [`NthT`]), or, after the components, a stored selected value.
+#[doc(hidden)]
+pub trait NthS<Ph, const P: usize>: Planned {
+    type T: Node;
+}
+macro_rules! nth_s_impl {
+    ($($ph:ty),*) => {$(
+        impl<R: Planned, const P: usize> NthS<$ph, P> for R
+        where
+            IsSlot<R, P>: PosClass,
+            R: NthBy<$ph, P, <IsSlot<R, P> as PosClass>::Ty>,
+        {
+            type T = <R as NthBy<$ph, P, <IsSlot<R, P> as PosClass>::Ty>>::T;
+        }
+    )*};
+}
+nth_s_impl!(crate::store::StateM, crate::store::OutM, crate::store::StateOptM, crate::store::OutOptM);
 
 /// Where component position `P` is: its plan index and the way from the
 /// anchor. (Execution position 0 is the root, so component position `P` is
@@ -378,9 +514,9 @@ macro_rules! flat_leaf {
     ($n:literal; $($k:literal)*) => {
         impl<R: Planned, M: Mapper, const LO: usize, const HI: usize> BlkF<M, LO, HI, Leaf<$n>> for R
         where
-            $(R: NthT<{ LO + $k }>,)*
+            $(R: NthS<M, { LO + $k }>,)*
         {
-            type F = ($(Slot<{ LO + $k }, M::Of<<R as NthT<{ LO + $k }>>::T>>,)*);
+            type F = ($(Slot<{ LO + $k }, M::Of<<R as NthS<M, { LO + $k }>>::T>>,)*);
         }
     };
 }
@@ -444,6 +580,9 @@ impl<R: Planned> Whole<R> {
     /// Components: all nodes but the root and the anchor.
     pub const N: usize = R::PLAN.len() - 2;
     pub const C: usize = class(0, Self::N);
+    /// Storage positions: the components, then the stored selected values.
+    pub const T: usize = Self::N + R::PLAN.n_slots();
+    pub const CT: usize = class(0, Self::T);
 }
 #[doc(hidden)]
 pub trait WholeTy {
@@ -455,6 +594,16 @@ where
 {
     type Cl = <() as ClassOf<{ Whole::<R>::C }>>::Ty;
 }
+#[doc(hidden)]
+pub trait TotalTy {
+    type Cl;
+}
+impl<R: Planned> TotalTy for Whole<R>
+where
+    (): ClassOf<{ Whole::<R>::CT }>,
+{
+    type Cl = <() as ClassOf<{ Whole::<R>::CT }>>::Ty;
+}
 
 #[doc(hidden)]
 pub trait FlatTop<M: Mapper> {
@@ -462,10 +611,10 @@ pub trait FlatTop<M: Mapper> {
 }
 impl<R: Planned, M: Mapper> FlatTop<M> for R
 where
-    Whole<R>: WholeTy,
-    R: FlatSpec<M, 0, { Whole::<R>::N }, <Whole<R> as WholeTy>::Cl>,
+    Whole<R>: TotalTy,
+    R: FlatSpec<M, 0, { Whole::<R>::T }, <Whole<R> as TotalTy>::Cl>,
 {
-    type Of = <R as FlatSpec<M, 0, { Whole::<R>::N }, <Whole<R> as WholeTy>::Cl>>::T;
+    type Of = <R as FlatSpec<M, 0, { Whole::<R>::T }, <Whole<R> as TotalTy>::Cl>>::T;
 }
 
 /// The balanced 8-ary tuple of what mapper `M` makes of each component of
