@@ -24,7 +24,7 @@
 
 use std::any::TypeId;
 
-use crate::node::Node;
+use crate::node::Vertex;
 use crate::plan::Plan;
 
 /// The `KEY` of a guard: it is exclusive with nothing.
@@ -70,7 +70,8 @@ pub trait SelectChain<In: 'static>: 'static {
     /// What `new` gets for an edge with this chain from node `N`: the stored
     /// output for a plain edge, a [`SelInit`] (the initial value of the slot)
     /// for a selected one.
-    type Init<'a, N: Node<Output = In>>;
+    type Init<'a, N: Vertex<Stored = In>>;
+    type Read<'a, N: Vertex>;
     /// Is the chain empty?
     const PLAIN: bool;
     /// Does the chain match?
@@ -81,7 +82,8 @@ pub trait SelectChain<In: 'static>: 'static {
 }
 impl<In: 'static> SelectChain<In> for () {
     type Out = In;
-    type Init<'a, N: Node<Output = In>> = crate::node::InitOf<'a, N>;
+    type Init<'a, N: Vertex<Stored = In>> = crate::node::InitOf<'a, N>;
+    type Read<'a, N: Vertex> = crate::node::ReadOf<'a, N>;
     const PLAIN: bool = true;
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
@@ -96,7 +98,8 @@ impl<In: 'static> SelectChain<In> for () {
 }
 impl<In: 'static, S: Select<In>, T: SelectChain<S::Out>> SelectChain<In> for (S, T) {
     type Out = T::Out;
-    type Init<'a, N: Node<Output = In>> = SelInit<'a, T::Out>;
+    type Init<'a, N: Vertex<Stored = In>> = SelInit<'a, T::Out>;
+    type Read<'a, N: Vertex> = &'a T::Out;
     const PLAIN: bool = false;
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
@@ -203,7 +206,7 @@ pub mod probe {
         }
     }
     pub trait ViaInitial<C: SelectedChain<In>, In: 'static> {
-        fn fill<'a, N: Node<Output = In>>(
+        fn fill<'a, N: Vertex<Stored = In>>(
             &self,
             raw: &C::Init<'a, N>,
             component: &'static str,
@@ -212,7 +215,7 @@ pub mod probe {
     }
     impl<C: SelectedChain<In> + ChainInitial<In>, In: 'static> ViaInitial<C, In> for Probe<C, In> {
         #[inline]
-        fn fill<'a, N: Node<Output = In>>(&self, raw: &C::Init<'a, N>, _: &'static str, _: &'static str) -> C::Init<'a, N> {
+        fn fill<'a, N: Vertex<Stored = In>>(&self, raw: &C::Init<'a, N>, _: &'static str, _: &'static str) -> C::Init<'a, N> {
             let s = C::view::<N>(raw);
             C::wrap::<N>(match s.0 {
                 SelInner::Empty => SelInit(SelInner::Owned(C::initial())),
@@ -222,7 +225,7 @@ pub mod probe {
         }
     }
     pub trait ViaNothing<C: SelectedChain<In>, In: 'static> {
-        fn fill<'a, N: Node<Output = In>>(
+        fn fill<'a, N: Vertex<Stored = In>>(
             &self,
             raw: &C::Init<'a, N>,
             component: &'static str,
@@ -231,7 +234,7 @@ pub mod probe {
     }
     impl<C: SelectedChain<In>, In: 'static> ViaNothing<C, In> for &Probe<C, In> {
         #[inline]
-        fn fill<'a, N: Node<Output = In>>(&self, raw: &C::Init<'a, N>, component: &'static str, input: &'static str) -> C::Init<'a, N> {
+        fn fill<'a, N: Vertex<Stored = In>>(&self, raw: &C::Init<'a, N>, component: &'static str, input: &'static str) -> C::Init<'a, N> {
             let s = C::view::<N>(raw);
             C::wrap::<N>(match s.0 {
                 SelInner::Empty => SelInit(SelInner::Missing {
@@ -247,19 +250,19 @@ pub mod probe {
     /// A non-empty chain, whose `Init` is a [`SelInit`] (the compiler cannot
     /// always see that through the associated type in generic code).
     pub trait SelectedChain<In: 'static>: SelectChain<In> {
-        fn view<'a, N: Node<Output = In>>(raw: &Self::Init<'a, N>) -> SelInit<'a, Self::Out>;
-        fn wrap<'a, N: Node<Output = In>>(s: SelInit<'a, Self::Out>) -> Self::Init<'a, N>;
+        fn view<'a, N: Vertex<Stored = In>>(raw: &Self::Init<'a, N>) -> SelInit<'a, Self::Out>;
+        fn wrap<'a, N: Vertex<Stored = In>>(s: SelInit<'a, Self::Out>) -> Self::Init<'a, N>;
     }
     impl<In: 'static, S: Select<In>, T: SelectChain<S::Out>> SelectedChain<In> for (S, T) {
         #[inline(always)]
-        fn view<'a, N: Node<Output = In>>(raw: &<Self as SelectChain<In>>::Init<'a, N>) -> SelInit<'a, T::Out> {
+        fn view<'a, N: Vertex<Stored = In>>(raw: &<Self as SelectChain<In>>::Init<'a, N>) -> SelInit<'a, T::Out> {
             match raw.0 {
                 SelInner::Slot(x) => SelInit(SelInner::Slot(x)),
                 _ => SelInit::empty(),
             }
         }
         #[inline(always)]
-        fn wrap<'a, N: Node<Output = In>>(s: SelInit<'a, T::Out>) -> <Self as SelectChain<In>>::Init<'a, N> {
+        fn wrap<'a, N: Vertex<Stored = In>>(s: SelInit<'a, T::Out>) -> <Self as SelectChain<In>>::Init<'a, N> {
             s
         }
     }

@@ -10,7 +10,7 @@
 //! (the state, the output, or either one while it is being constructed).
 
 use crate::component::Sub;
-use crate::node::Node;
+use crate::node::Vertex;
 use crate::store::Mapper;
 use crate::plan::Planned;
 
@@ -47,7 +47,7 @@ pub trait PosSpan {
     const LO: usize;
     const HI: usize;
 }
-impl<E: Node, C, const I: usize> PosSpan for Sub<E, C, I> {
+impl<E: Vertex, C, const I: usize> PosSpan for Sub<E, C, I> {
     const LO: usize = I;
     const HI: usize = I + 1;
 }
@@ -65,7 +65,7 @@ dataflow_macros::tuple_sizes!(pos_span_impl);
 pub trait PosSelect<W: Target> {
     const POS: usize;
 }
-impl<E: Node, C, const I: usize, W: Target> PosSelect<W> for Sub<E, C, I> {
+impl<E: Vertex, C, const I: usize, W: Target> PosSelect<W> for Sub<E, C, I> {
     const POS: usize = 0;
 }
 macro_rules! pos_select_impl {
@@ -85,9 +85,9 @@ dataflow_macros::select_tuples!(pos_select_impl);
 /// field `S`.
 #[doc(hidden)]
 pub trait Pick<W: Target, const S: usize> {
-    type T: Node;
+    type T: Vertex;
 }
-impl<E: Node, C, const I: usize, W: Target> Pick<W, 0> for Sub<E, C, I> {
+impl<E: Vertex, C, const I: usize, W: Target> Pick<W, 0> for Sub<E, C, I> {
     type T = E;
 }
 macro_rules! pick_impl {
@@ -113,10 +113,10 @@ impl<const I: usize> Target for EntryPos<I> {
 /// which holds it in field `S`.
 #[doc(hidden)]
 pub trait PickEdge<W: Target, const S: usize> {
-    type E: Node;
-    type Ch: crate::select::SelectChain<<Self::E as Node>::Output>;
+    type E: Vertex;
+    type Ch: crate::select::SelectChain<<Self::E as Vertex>::Stored>;
 }
-impl<E: Node, C: crate::select::SelectChain<E::Output>, const I: usize, W: Target> PickEdge<W, 0> for Sub<E, C, I> {
+impl<E: Vertex, C: crate::select::SelectChain<E::Stored>, const I: usize, W: Target> PickEdge<W, 0> for Sub<E, C, I> {
     type E = E;
     type Ch = C;
 }
@@ -219,19 +219,19 @@ kinds_of!(0 Same Same 1 Same Child 2 Same Far 3 Child Same 4 Child Child 5 Child
 
 /// The node type at the end of a way `W`, by kind.
 #[doc(hidden)]
-pub trait DownW<W, Kd>: Node {
-    type T: Node;
+pub trait DownW<W, Kd>: Vertex {
+    type T: Vertex;
 }
-impl<C: Node, W> DownW<W, Same> for C {
+impl<C: Vertex, W> DownW<W, Same> for C {
     type T = C;
 }
-impl<R: Planned, C: Node, const A: usize, const J: usize> DownW<Way<R, A, J>, Child> for C
+impl<R: Planned, C: Vertex, const A: usize, const J: usize> DownW<Way<R, A, J>, Child> for C
 where
     C::Subs: PosSelect<Way<R, A, J>> + Pick<Way<R, A, J>, { <C::Subs as PosSelect<Way<R, A, J>>>::POS }>,
 {
     type T = <C::Subs as Pick<Way<R, A, J>, { <C::Subs as PosSelect<Way<R, A, J>>>::POS }>>::T;
 }
-impl<R: Planned, C: Node, const A: usize, const J: usize> DownW<Way<R, A, J>, Far> for C
+impl<R: Planned, C: Vertex, const A: usize, const J: usize> DownW<Way<R, A, J>, Far> for C
 where
     Way<R, A, J>: Split,
     C: DownW<<<Way<R, A, J> as Split>::Both as Pair>::First, <<Way<R, A, J> as Split>::Ks as Pair>::First>,
@@ -245,10 +245,10 @@ where
 }
 
 #[doc(hidden)]
-pub trait Down<R: Planned, const A: usize, const J: usize, Kd>: Node {
-    type T: Node;
+pub trait Down<R: Planned, const A: usize, const J: usize, Kd>: Vertex {
+    type T: Vertex;
 }
-impl<R: Planned, C: Node + DownW<Way<R, A, J>, Kd>, const A: usize, const J: usize, Kd> Down<R, A, J, Kd> for C {
+impl<R: Planned, C: Vertex + DownW<Way<R, A, J>, Kd>, const A: usize, const J: usize, Kd> Down<R, A, J, Kd> for C {
     type T = <C as DownW<Way<R, A, J>, Kd>>::T;
 }
 
@@ -265,8 +265,8 @@ impl<R: Planned, C: Node + DownW<Way<R, A, J>, Kd>, const A: usize, const J: usi
 /// (like `EntryOf`, but needing only the plan).
 #[doc(hidden)]
 pub trait EdgeAt<Ph, const P: usize, const I: usize>: Planned {
-    type E: Node;
-    type Ch: crate::select::SelectChain<<Self::E as Node>::Output>;
+    type E: Vertex;
+    type Ch: crate::select::SelectChain<<Self::E as Vertex>::Stored>;
 }
 macro_rules! edge_at_impl {
     ($($ph:ty),*) => {$(
@@ -300,8 +300,8 @@ impl<R: Planned, const P: usize> SlotRep<R, P> {
 }
 #[doc(hidden)]
 pub trait SlotEdge<Ph> {
-    type E: Node;
-    type Ch: crate::select::SelectChain<<Self::E as Node>::Output>;
+    type E: Vertex;
+    type Ch: crate::select::SelectChain<<Self::E as Vertex>::Stored>;
 }
 impl<Ph, R: Planned, const P: usize> SlotEdge<Ph> for SlotRep<R, P>
 where
@@ -313,7 +313,7 @@ where
 /// The slot node at storage position `P`.
 #[doc(hidden)]
 pub trait SlotTy<Ph, const P: usize>: Planned {
-    type T: Node;
+    type T: Vertex;
 }
 impl<Ph, R: Planned, const P: usize> SlotTy<Ph, P> for R
 where
@@ -356,7 +356,7 @@ where
 }
 #[doc(hidden)]
 pub trait NthBy<Ph, const P: usize, K>: Planned {
-    type T: Node;
+    type T: Vertex;
 }
 impl<Ph, R: Planned, const P: usize> NthBy<Ph, P, CompPos> for R
 where
@@ -374,7 +374,7 @@ where
 /// `P` (see [`NthT`]), or, after the components, a stored selected value.
 #[doc(hidden)]
 pub trait NthS<Ph, const P: usize>: Planned {
-    type T: Node;
+    type T: Vertex;
 }
 macro_rules! nth_s_impl {
     ($($ph:ty),*) => {$(
@@ -415,7 +415,7 @@ where
 /// The node type at component position `P`.
 #[doc(hidden)]
 pub trait NthT<const P: usize>: Planned {
-    type T: Node;
+    type T: Vertex;
 }
 impl<R: Planned, const P: usize> NthT<P> for R
 where

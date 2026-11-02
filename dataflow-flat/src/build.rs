@@ -38,6 +38,13 @@ impl Configs {
         self.map.insert(TypeId::of::<C>(), entry);
         self
     }
+
+    /// The config of a handle component ([`HandleComponent`](crate::HandleComponent)).
+    pub fn with_handle<C: crate::component::HandleComponent>(mut self, config: C::Config) -> Self {
+        let entry = ConfigEntry { config: Box::new(config), name: type_name::<C>() };
+        self.map.insert(TypeId::of::<C>(), entry);
+        self
+    }
 }
 
 /// Construction state: hands each constructor its config (supplied, or the
@@ -63,10 +70,10 @@ impl ConstructPass {
             Some(b) => *b.downcast::<R>().expect("keyed by listener"),
         }
     }
-    pub(crate) fn take_config<C: Component>(&mut self) -> C::Config {
+    pub(crate) fn take_config<C: crate::node::Comp>(&mut self) -> C::Cfg {
         match self.configs.remove(&TypeId::of::<C>()) {
-            None => C::Config::default(),
-            Some(entry) => *entry.config.downcast::<C::Config>().expect("keyed by component type"),
+            None => C::Cfg::default(),
+            Some(entry) => *entry.config.downcast::<C::Cfg>().expect("keyed by component type"),
         }
     }
 }

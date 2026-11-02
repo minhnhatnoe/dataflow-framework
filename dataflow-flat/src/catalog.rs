@@ -25,7 +25,7 @@ use core::marker::PhantomData;
 
 use crate::component::{DepList, Sub};
 use crate::handler::Hd;
-use crate::node::Node;
+use crate::node::Vertex;
 
 /// A pair of types: the element of a [`Product`] or a [`Zip`], and what
 /// `for (X, S) in ..` destructures.
@@ -46,7 +46,7 @@ pub trait Catalog: 'static {
 #[doc(hidden)]
 pub trait Map<A>: 'static {
     /// The node subscribed to for the element `A`.
-    type Out: Node;
+    type Out: Vertex;
 }
 
 /// The subscription tree of a catalog under a mapper `F`, with positions from `B`.

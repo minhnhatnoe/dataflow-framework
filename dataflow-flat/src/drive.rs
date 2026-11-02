@@ -25,9 +25,10 @@ use std::marker::PhantomData;
 use crate::build::ConstructPass;
 use crate::component::{Component, ComponentSubscription, DepList};
 use crate::flat::{bound, class, ClassOf, EntryPos, Inner, Leaf, Loc, NthS, NthT, PickEdge, PosSelect, Whole};
-use crate::gather::{GatherIn, GatherInit, Layout, Ready, Source};
+use crate::gather::{GatherCx, GatherIn, GatherInit, Layout, Ready, Source};
+use crate::split::SplitAt;
 use crate::select::{ChainInitial, ChainKey, Keep, SelectChain};
-use crate::node::{Comp, Node, SlotNode};
+use crate::node::{ByVal, ByView, Comp, SlotNode, Vertex};
 use crate::plan::{Planned, NO_FLAG};
 use crate::store::AtPos;
 
@@ -174,19 +175,19 @@ where
     <A as NthT<P>>::T: Comp,
     <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherInit<A, P>,
     A::StatesOpt: AtPos<Option<<A as NthT<P>>::T>, P>,
-    A::OutsOpt: AtPos<Option<<<A as NthT<P>>::T as Node>::Output>, P>,
+    A::OutsOpt: AtPos<Option<<<A as NthT<P>>::T as Vertex>::Stored>, P>,
 {
     fn step(ctx: &mut ConstructCtx<'_, A>) {
         type C<A, const P: usize> = <A as NthT<P>>::T;
         let config = ctx.pass.take_config::<C<A, P>>();
         let (state, out) = {
-            let raw = <<C<A, P> as ComponentSubscription>::Deps as GatherInit<A, P>>::gather(&*ctx.outs);
+            let raw = <<C<A, P> as ComponentSubscription>::Deps as GatherInit<A, P>>::gather(&*ctx.states, &*ctx.outs);
             let mut init = <C<A, P> as ComponentSubscription>::init(raw);
             <C<A, P> as ComponentSubscription>::__fill_requests(&mut init, &mut *ctx.pass);
-            <C<A, P> as crate::component::Component>::new(config, init)
+            <C<A, P> as Comp>::__new(config, init)
         };
         *<A::StatesOpt as AtPos<Option<C<A, P>>, P>>::at_mut(&mut *ctx.states) = Some(state);
-        *<A::OutsOpt as AtPos<Option<<C<A, P> as Node>::Output>, P>>::at_mut(&mut *ctx.outs) = Some(out);
+        *<A::OutsOpt as AtPos<Option<<C<A, P> as Vertex>::Stored>, P>>::at_mut(&mut *ctx.outs) = Some(out);
         ctx.pass.order.push(type_name::<C<A, P>>());
     }
 }
@@ -289,15 +290,12 @@ macro_rules! run_body_pre {
         type C<A, const P: usize> = <A as NthT<P>>::T;
         // The inputs borrow the stored outputs and the root only while
         // `update` runs; the write to the output comes after.
-        let out = {
-            let inputs = <<C<$A, $P> as ComponentSubscription>::Deps as GatherIn<$A, $P>>::gather($ctx.root, &*$ctx.outs);
-            <$A::States as AtPos<C<$A, $P>, $P>>::at_mut(&mut *$ctx.states).update(<C<$A, $P> as ComponentSubscription>::input(inputs))
-        };
+        let out = <<C<$A, $P> as Comp>::Mode as UpdVia<$A, $P>>::upd_via($ctx);
         let pre = {
             let $o = &out;
             $pre
         };
-        *<$A::Outs as AtPos<<C<$A, $P> as Node>::Output, $P>>::at_mut(&mut *$ctx.outs) = out;
+        *<$A::Outs as AtPos<<C<$A, $P> as Vertex>::Stored, $P>>::at_mut(&mut *$ctx.outs) = out;
         // Stored selected values whose source is this component: written when their
         // selectors match, before any subscriber of this step reads them.
         <SrcSlots<$A, $P> as Drive<$A, SlotWriteBy<$A>, <SrcSlots<$A, $P> as RgCl>::Cl>>::drive($ctx);
@@ -306,6 +304,54 @@ macro_rules! run_body_pre {
         }
         pre
     }};
+}
+
+/// Gather the inputs of the component at `P` and call its `update`, in the way the mode `Self`
+/// says (`Comp::Mode`: `ByVal`, or `ByView` if a parent is a handle component).
+#[doc(hidden)]
+pub trait UpdVia<A, const P: usize> {
+    fn upd_via(ctx: &mut PushCtx<'_, A>) -> <<A as NthT<P>>::T as Vertex>::Stored
+    where
+        A: Layout + NthT<P>;
+}
+impl<A: Layout, const P: usize> UpdVia<A, P> for ByVal
+where
+    A: NthT<P>,
+    <A as NthT<P>>::T: Comp,
+    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P>,
+    A::States: AtPos<<A as NthT<P>>::T, P>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn upd_via(ctx: &mut PushCtx<'_, A>) -> <<A as NthT<P>>::T as Vertex>::Stored
+    where
+        A: Layout + NthT<P>,
+    {
+        type C<A, const P: usize> = <A as NthT<P>>::T;
+        // The inputs borrow the stored outputs and the root only while `update` runs; the write
+        // to the output comes after.
+        let inputs = <<C<A, P> as ComponentSubscription>::Deps as GatherIn<A, P>>::gather(ctx.root, &*ctx.outs);
+        <A::States as AtPos<C<A, P>, P>>::at_mut(&mut *ctx.states).__update(<C<A, P> as ComponentSubscription>::input(inputs))
+    }
+}
+impl<A: Layout, const P: usize> UpdVia<A, P> for ByView
+where
+    A: NthT<P>,
+    <A as NthT<P>>::T: Comp,
+    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherCx<A, P>,
+    A::States: SplitAt<P, Child = <A as NthT<P>>::T>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn upd_via(ctx: &mut PushCtx<'_, A>) -> <<A as NthT<P>>::T as Vertex>::Stored
+    where
+        A: Layout + NthT<P>,
+    {
+        type C<A, const P: usize> = <A as NthT<P>>::T;
+        let (cx, me) = <A::States as SplitAt<P>>::split_at(&mut *ctx.states);
+        let inputs = <<C<A, P> as ComponentSubscription>::Deps as GatherCx<A, P>>::gather(ctx.root, &*ctx.outs, &cx);
+        me.__update(<C<A, P> as ComponentSubscription>::input(inputs))
+    }
 }
 
 /// Run the component at component position `P` unconditionally: gather its
@@ -318,10 +364,9 @@ pub trait RunAt<Ph, const P: usize>: Layout {
 impl<A: Layout, const P: usize> RunAt<PushPh<A>, P> for A
 where
     A: NthT<P>,
+    <<A as NthT<P>>::T as Comp>::Mode: UpdVia<A, P>,
     <A as NthT<P>>::T: Comp,
-    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P>,
-    A::States: AtPos<<A as NthT<P>>::T, P>,
-    A::Outs: AtPos<<<A as NthT<P>>::T as Node>::Output, P>,
+    A::Outs: AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>,
     SrcSlots<A, P>: RgCl,
     SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
 {
@@ -357,10 +402,9 @@ where
 pub fn run_wide<A: Layout, const P: usize>(ctx: &mut PushCtx<'_, A>)
 where
     A: NthT<P>,
+    <<A as NthT<P>>::T as Comp>::Mode: UpdVia<A, P>,
     <A as NthT<P>>::T: Comp,
-    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P>,
-    A::States: AtPos<<A as NthT<P>>::T, P>,
-    A::Outs: AtPos<<<A as NthT<P>>::T as Node>::Output, P>,
+    A::Outs: AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>,
     SrcSlots<A, P>: RgCl,
     SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
 {
@@ -375,10 +419,10 @@ pub trait RunIfAt<Ph, const P: usize>: Layout {
 impl<A: Layout, const P: usize> RunIfAt<PushPh<A>, P> for A
 where
     A: NthT<P>,
+    <<A as NthT<P>>::T as Comp>::Mode: UpdVia<A, P>,
     <A as NthT<P>>::T: Comp,
-    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P> + Ready<A>,
-    A::States: AtPos<<A as NthT<P>>::T, P>,
-    A::Outs: AtPos<<<A as NthT<P>>::T as Node>::Output, P>,
+    <<A as NthT<P>>::T as ComponentSubscription>::Deps: Ready<A>,
+    A::Outs: AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>,
     SrcSlots<A, P>: RgCl,
     SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
 {
@@ -633,7 +677,7 @@ where
 /// The entry `I` of component position `P`: its node and selector chain.
 #[doc(hidden)]
 pub trait EntryOf<Ph, const P: usize, const I: usize>: Layout {
-    type E: Node;
+    type E: Vertex;
     type Ch;
 }
 impl<A: Layout, const P: usize, const I: usize> EntryOf<PushPh<A>, P, I> for A
@@ -660,7 +704,7 @@ pub trait SwitchKey<A: Layout, Ph> {
 }
 #[doc(hidden)]
 pub trait SwInfo<A: Layout, Ph> {
-    type E: Node;
+    type E: Vertex;
     type Ch;
 }
 impl<A: Layout, Ph, const N: usize> SwInfo<A, Ph> for Pn<A, N>
@@ -674,12 +718,12 @@ impl<A: Layout, Ph, const N: usize> SwitchKey<A, Ph> for Pn<A, N>
 where
     Pn<A, N>: SwInfo<A, Ph>,
     <Pn<A, N> as SwInfo<A, Ph>>::E: Source<A>,
-    <Pn<A, N> as SwInfo<A, Ph>>::Ch: ChainKey<<<Pn<A, N> as SwInfo<A, Ph>>::E as Node>::Output, { PnC::<A, N>::SJ }>,
+    <Pn<A, N> as SwInfo<A, Ph>>::Ch: ChainKey<<<Pn<A, N> as SwInfo<A, Ph>>::E as Vertex>::Stored, { PnC::<A, N>::SJ }>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
     fn key(root: &A::Root, outs: &A::Outs) -> u32 {
-        <<Pn<A, N> as SwInfo<A, Ph>>::Ch as ChainKey<<<Pn<A, N> as SwInfo<A, Ph>>::E as Node>::Output, { PnC::<A, N>::SJ }>>::key(
+        <<Pn<A, N> as SwInfo<A, Ph>>::Ch as ChainKey<<<Pn<A, N> as SwInfo<A, Ph>>::E as Vertex>::Stored, { PnC::<A, N>::SJ }>>::key(
             <<Pn<A, N> as SwInfo<A, Ph>>::E as Source<A>>::fetch(root, outs),
         )
     }
@@ -823,10 +867,10 @@ pub trait RunSwAt<Ph, const P: usize>: Layout {
 impl<A: Layout, const P: usize> RunSwAt<PushPh<A>, P> for A
 where
     A: NthT<P>,
+    <<A as NthT<P>>::T as Comp>::Mode: UpdVia<A, P>,
     <A as NthT<P>>::T: Comp,
-    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P>,
-    A::States: AtPos<<A as NthT<P>>::T, P>,
-    A::Outs: AtPos<<<A as NthT<P>>::T as Node>::Output, P>,
+    A::Outs: AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>,
+    <A as NthT<P>>::T: Component + Vertex<Stored = <<A as NthT<P>>::T as Component>::Output>,
     A::Outs: AtPos<<<A as NthT<P>>::T as Component>::Output, P>,
     SrcSlots<A, P>: RgCl,
     SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
@@ -922,25 +966,25 @@ impl<E, C, A, const P: usize> SlotStep<A, P> for SlotNode<E, C>
 where
     A: Layout,
     E: Source<A>,
-    C: SelectChain<<E as Node>::Output> + ChainInitial<<E as Node>::Output>,
-    <C as SelectChain<<E as Node>::Output>>::Out: Keep,
-    A::Outs: AtPos<<C as SelectChain<<E as Node>::Output>>::Out, P>,
+    C: SelectChain<<E as Vertex>::Stored> + ChainInitial<<E as Vertex>::Stored>,
+    <C as SelectChain<<E as Vertex>::Stored>>::Out: Keep,
+    A::Outs: AtPos<<C as SelectChain<<E as Vertex>::Stored>>::Out, P>,
     A::StatesOpt: AtPos<Option<SlotNode<E, C>>, P>,
-    A::OutsOpt: AtPos<Option<<C as SelectChain<<E as Node>::Output>>::Out>, P>,
+    A::OutsOpt: AtPos<Option<<C as SelectChain<<E as Vertex>::Stored>>::Out>, P>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
     fn write(ctx: &mut PushCtx<'_, A>) {
         let x = <E as Source<A>>::fetch(ctx.root, &*ctx.outs);
-        if <C as SelectChain<<E as Node>::Output>>::matches(x) {
-            let v = <C as SelectChain<<E as Node>::Output>>::get(x).clone();
-            *<A::Outs as AtPos<<C as SelectChain<<E as Node>::Output>>::Out, P>>::at_mut(&mut *ctx.outs) = v;
+        if <C as SelectChain<<E as Vertex>::Stored>>::matches(x) {
+            let v = <C as SelectChain<<E as Vertex>::Stored>>::get(x).clone();
+            *<A::Outs as AtPos<<C as SelectChain<<E as Vertex>::Stored>>::Out, P>>::at_mut(&mut *ctx.outs) = v;
         }
     }
     fn init(ctx: &mut ConstructCtx<'_, A>) {
         *<A::StatesOpt as AtPos<Option<SlotNode<E, C>>, P>>::at_mut(&mut *ctx.states) = Some(SlotNode(PhantomData));
-        *<A::OutsOpt as AtPos<Option<<C as SelectChain<<E as Node>::Output>>::Out>, P>>::at_mut(&mut *ctx.outs) =
-            Some(<C as ChainInitial<<E as Node>::Output>>::initial());
+        *<A::OutsOpt as AtPos<Option<<C as SelectChain<<E as Vertex>::Stored>>::Out>, P>>::at_mut(&mut *ctx.outs) =
+            Some(<C as ChainInitial<<E as Vertex>::Stored>>::initial());
     }
 }
 impl<A: Layout, const P: usize> StepAt<SlotWriteBy<A>, P> for A

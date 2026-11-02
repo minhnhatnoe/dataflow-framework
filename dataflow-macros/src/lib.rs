@@ -193,6 +193,26 @@ pub fn get_tuples(input: TokenStream) -> TokenStream {
     out.into()
 }
 
+/// `split_tuples!(cb)`: `cb!((A0 .. An-1) [A0 .. Ak-1] k Ak);` for each tuple size `n` in
+/// `1..=ARITY` and each element `k < n`: the generics of the tuple, those before element `k`,
+/// the literal index and the element's generic (the `Split` of a tuple: `&mut` to element `k`
+/// and shared references to those before it).
+#[proc_macro]
+pub fn split_tuples(input: TokenStream) -> TokenStream {
+    let cb = callback(input);
+    let mut out = TokenStream2::new();
+    for n in 1..=ARITY {
+        let a = idents("A", n);
+        for k in 0..n {
+            let ak = &a[k];
+            let before = &a[..k];
+            let ki = syn::Index::from(k);
+            out.extend(quote!(#cb!((#(#a)*) [#(#before)*] #ki #ak);));
+        }
+    }
+    out.into()
+}
+
 /// `leaf_idx!(cb)`: `cb!(n; 0 1 .. n-1);` for n in 0..=ARITY. The flat storage
 /// and the drivers over it use nodes of up to `ARITY` elements, with literal
 /// element indices.
@@ -721,7 +741,7 @@ fn chain_ty(chain: &[Type]) -> TokenStream2 {
 /// a selected handled entry the derive generates a marker type
 /// `<struct_snake>_edges::<Name>` (the innermost selector's name) that keys the
 /// `UpdateHandler` impl.
-#[proc_macro_derive(ComponentSubscription, attributes(subscribe, listener))]
+#[proc_macro_derive(ComponentSubscription, attributes(subscribe, listener, handle))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let loc = input.ident.span();
@@ -838,12 +858,15 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
             } else {
                 chain_ty(&s.chain)
             };
-            wc.predicates.push(parse_quote!(#ty: #krate::Node));
+            wc.predicates.push(parse_quote!(#ty: #krate::Vertex));
             // A plain subscription needs no predicate (and an extra obligation per
             // subscription measurably slows type checking).
             if !s.chain.is_empty() || s.handled {
+                // Selectors and handled entries need a node whose subscribers read `&Output`
+                // (not a `#[handle]` component yet): `Node` carries the error message.
+                wc.predicates.push(parse_quote!(#ty: #krate::Node));
                 wc.predicates
-                    .push(parse_quote!(#chain: #krate::SelectChain<<#ty as #krate::Node>::Output>));
+                    .push(parse_quote!(#chain: #krate::SelectChain<<#ty as #krate::Vertex>::Stored>));
             }
         }
     }
@@ -884,9 +907,9 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
             let (s, c) = (&subs[i], &field_chains[i]);
             let t = &s.ty;
             if s.chain.is_empty() {
-                quote!(<#t as #krate::Node>::Output)
+                quote!(<#t as #krate::Edge>::Read<#lt>)
             } else {
-                quote!(<#c as #krate::SelectChain<<#t as #krate::Node>::Output>>::Out)
+                quote!(<#c as #krate::SelectChain<<#t as #krate::Vertex>::Stored>>::Read<#lt, #t>)
             }
         })
         .collect();
@@ -898,7 +921,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
             if s.chain.is_empty() {
                 quote!(#krate::InitOf<#lt, #t>)
             } else {
-                quote!(<#c as #krate::SelectChain<<#t as #krate::Node>::Output>>::Init<#lt, #t>)
+                quote!(<#c as #krate::SelectChain<<#t as #krate::Vertex>::Stored>>::Init<#lt, #t>)
             }
         })
         .collect();
@@ -1080,7 +1103,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
             let input = s.name.as_ref().expect("a plain subscription is named").to_string();
             quote!({
                 use #krate::probe::{ViaInitial as _, ViaNothing as _};
-                (&#krate::probe::Probe::<#c, <#t as #krate::Node>::Output>::new()).fill::<#t>(&#v, #comp, #input)
+                (&#krate::probe::Probe::<#c, <#t as #krate::Vertex>::Stored>::new()).fill::<#t>(&#v, #comp, #input)
             })
         })
         .collect();
@@ -1143,21 +1166,98 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         (quote!(), quote!(), quote!())
     };
 
+    let handle = input.attrs.iter().any(|a| a.path().is_ident("handle"));
+    if handle && (listener || handler) {
+        return Err(syn::Error::new_spanned(
+            name,
+            "`#[handle]` cannot be combined with `#[listener]`, handled entries or `for` entries yet",
+        ));
+    }
     let (nimpl_generics, nty_generics, _) = generics.split_for_impl();
     let mut node_generics = generics.clone();
-    node_generics.make_where_clause().predicates.push(parse_quote!(#name #ty_generics: #krate::Component));
+    let node_trait = if handle { quote!(#krate::HandleComponent) } else { quote!(#krate::Component) };
+    node_generics.make_where_clause().predicates.push(parse_quote!(#name #ty_generics: #node_trait));
     let (_, _, node_where) = node_generics.split_for_impl();
+    // `Sealed` and `Edge` need only the component's own trait: the long where clause of the
+    // subscriptions is checked once per impl, and on thousands of components that is measurable.
+    let mut light_generics = input.generics.clone();
+    {
+        let wc = light_generics.make_where_clause();
+        for p in &type_params {
+            wc.predicates.push(parse_quote!(#p: 'static));
+        }
+        wc.predicates.push(parse_quote!(#name #ty_generics: #node_trait));
+    }
+    let (_, _, light_where) = light_generics.split_for_impl();
 
-    let node_impls = quote! {
-        impl #nimpl_generics #krate::__private::Sealed for #name #nty_generics #node_where {}
+    let node_impls = if handle {
+        quote! {
+            impl #nimpl_generics #krate::__private::Sealed for #name #nty_generics #light_where {}
 
-        impl #nimpl_generics #krate::Node for #name #nty_generics #node_where {
-            type Output = <#name #nty_generics as #krate::Component>::Output;
-            type Subs = <#name #nty_generics as #krate::ComponentSubscription>::Deps;
-            type Kind = #krate::CompKind;
-            type Requests = #requests_ty;
-            const KIND: u8 = #krate::KIND_COMPONENT;
-            #node_items
+            impl #nimpl_generics #krate::Edge for #name #nty_generics #light_where {
+                type Read<'a> = <#name #nty_generics as #krate::HandleComponent>::Output<'a> where Self: 'a;
+            }
+            impl #nimpl_generics #krate::Vertex for #name #nty_generics #node_where {
+                type Stored = <#name #nty_generics as #krate::HandleComponent>::Handle;
+                type Subs = <#name #nty_generics as #krate::ComponentSubscription>::Deps;
+                type Kind = #krate::HandleKind;
+                type Requests = #requests_ty;
+                const KIND: u8 = #krate::KIND_COMPONENT;
+            }
+            impl #nimpl_generics #krate::HandleView for #name #nty_generics #node_where {
+                #[cfg_attr(not(debug_assertions), inline(always))]
+                #[cfg_attr(debug_assertions, inline)]
+                fn __view<'a>(&'a self, handle: &'a Self::Stored) -> <Self as #krate::Edge>::Read<'a> {
+                    <#name #nty_generics as #krate::HandleComponent>::output(self, handle)
+                }
+            }
+            impl #nimpl_generics #krate::Comp for #name #nty_generics #node_where {
+                type Cfg = <#name #nty_generics as #krate::HandleComponent>::Config;
+                type Mode = <<#name #nty_generics as #krate::ComponentSubscription>::Deps as #krate::DepList>::Mode;
+                #[cfg_attr(not(debug_assertions), inline(always))]
+                #[cfg_attr(debug_assertions, inline)]
+                fn __new(config: Self::Cfg, init: <Self as #krate::ComponentSubscription>::Init<'_>) -> (Self, Self::Stored) {
+                    <#name #nty_generics as #krate::HandleComponent>::new(config, init)
+                }
+                #[cfg_attr(not(debug_assertions), inline(always))]
+                #[cfg_attr(debug_assertions, inline)]
+                fn __update(&mut self, input: <Self as #krate::ComponentSubscription>::Input<'_>) -> Self::Stored {
+                    <#name #nty_generics as #krate::HandleComponent>::update(self, input)
+                }
+            }
+        }
+    } else {
+        quote! {
+            impl #nimpl_generics #krate::__private::Sealed for #name #nty_generics #light_where {}
+
+            impl #nimpl_generics #krate::Edge for #name #nty_generics #light_where {
+                type Read<'a> = &'a <#name #nty_generics as #krate::Component>::Output where Self: 'a;
+            }
+            impl #nimpl_generics #krate::Node for #name #nty_generics #node_where {
+                type Output = <#name #nty_generics as #krate::Component>::Output;
+            }
+            impl #nimpl_generics #krate::Vertex for #name #nty_generics #node_where {
+                type Stored = <#name #nty_generics as #krate::Component>::Output;
+                type Subs = <#name #nty_generics as #krate::ComponentSubscription>::Deps;
+                type Kind = #krate::CompKind;
+                type Requests = #requests_ty;
+                const KIND: u8 = #krate::KIND_COMPONENT;
+                #node_items
+            }
+            impl #nimpl_generics #krate::Comp for #name #nty_generics #node_where {
+                type Cfg = <#name #nty_generics as #krate::Component>::Config;
+                type Mode = <<#name #nty_generics as #krate::ComponentSubscription>::Deps as #krate::DepList>::Mode;
+                #[cfg_attr(not(debug_assertions), inline(always))]
+                #[cfg_attr(debug_assertions, inline)]
+                fn __new(config: Self::Cfg, init: <Self as #krate::ComponentSubscription>::Init<'_>) -> (Self, Self::Stored) {
+                    <#name #nty_generics as #krate::Component>::new(config, init)
+                }
+                #[cfg_attr(not(debug_assertions), inline(always))]
+                #[cfg_attr(debug_assertions, inline)]
+                fn __update(&mut self, input: <Self as #krate::ComponentSubscription>::Input<'_>) -> Self::Stored {
+                    <#name #nty_generics as #krate::Component>::update(self, input)
+                }
+            }
         }
     };
 
@@ -1192,7 +1292,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         });
         marker_items.push(quote! {
             impl #impl_generics #krate::HandledEdge for #full #where_clause {
-                type Value = <#chain as #krate::SelectChain<<#ty as #krate::Node>::Output>>::Out;
+                type Value = <#chain as #krate::SelectChain<<#ty as #krate::Vertex>::Stored>>::Out;
             }
         });
     }
@@ -1241,7 +1341,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         #[doc(hidden)]
         #[allow(non_camel_case_types)]
         pub struct #input_name #input_decl_generics #input_where {
-            #( pub #field_names: &#lt #input_types, )*
+            #( pub #field_names: #input_types, )*
             #[doc(hidden)]
             pub __marker: #marker_ty,
         }
@@ -1311,8 +1411,14 @@ fn expand_root(input: DeriveInput) -> syn::Result<TokenStream2> {
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     Ok(quote! {
         impl #impl_generics #krate::__private::Sealed for #name #ty_generics #where_clause {}
+        impl #impl_generics #krate::Edge for #name #ty_generics #where_clause {
+            type Read<'a> = &'a Self where Self: 'a;
+        }
         impl #impl_generics #krate::Node for #name #ty_generics #where_clause {
             type Output = Self;
+        }
+        impl #impl_generics #krate::Vertex for #name #ty_generics #where_clause {
+            type Stored = Self;
             type Subs = ();
             type Kind = #krate::RootKind;
             type Requests = #krate::request::NoRequests;

@@ -14,9 +14,10 @@ use std::marker::PhantomData;
 use crate::component::{DepList, Sub};
 use crate::drive::{FiredOf, FiredOps};
 use crate::identity::At;
-use crate::node::{CompKind, Is, Node, NodeKind, RootKind};
+use crate::node::{CompKind, Edge, HandleKind, Is, NodeKind, RootKind, Vertex};
 use crate::plan::{Planned, NO_FLAG};
 use crate::select::{SelInit, Select, SelectChain};
+use crate::split::{SplitAt, StateAt};
 use crate::store::AtPos;
 
 /// The storage types of one pipeline (implemented for its `Anchor`).
@@ -39,7 +40,7 @@ pub trait Layout: Planned {
 /// Component position of node `N` in the plan of `A`.
 #[doc(hidden)]
 pub struct PosOf<A, N>(PhantomData<(A, N)>);
-impl<A: Planned, N: Node> PosOf<A, N> {
+impl<A: Planned, N: Vertex> PosOf<A, N> {
     /// Execution position 0 is the root, so component position = post - 1 (saturating: an invalid plan, e.g. an orphan first, is reported by the plan's check, not by an underflow here).
     pub const P: usize = {
         A::CHECK;
@@ -49,27 +50,27 @@ impl<A: Planned, N: Node> PosOf<A, N> {
 
 /// How a node of kind `Self` is read.
 #[doc(hidden)]
-pub trait SourceKind<N: Node, A: Layout>: NodeKind {
-    /// What `update` reads.
-    fn fetch<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a N::Output;
+pub trait SourceKind<N: Vertex, A: Layout>: NodeKind {
+    /// The stored value (the output of a by-value node, the handle of a handle component).
+    fn fetch<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a N::Stored;
     /// What `new` is given while the pipeline is built.
-    fn seed<'a>(outs: &'a A::OutsOpt) -> <Self as NodeKind>::Init<'a, N>;
+    fn seed<'a>(states: &'a A::StatesOpt, outs: &'a A::OutsOpt) -> <Self as NodeKind>::Init<'a, N>;
     /// Did the node fire in this step?
     fn fires(fired: &FiredOf<A>) -> bool;
 }
 
-impl<N: Node<Kind = RootKind>, A: Layout> SourceKind<N, A> for RootKind
+impl<N: Vertex<Kind = RootKind>, A: Layout> SourceKind<N, A> for RootKind
 where
-    A::Root: Is<N::Output>,
+    A::Root: Is<N::Stored>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn fetch<'a>(root: &'a A::Root, _: &'a A::Outs) -> &'a N::Output {
+    fn fetch<'a>(root: &'a A::Root, _: &'a A::Outs) -> &'a N::Stored {
         root.conv()
     }
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn seed<'a>(_: &'a A::OutsOpt) {}
+    fn seed<'a>(_: &'a A::StatesOpt, _: &'a A::OutsOpt) {}
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
     fn fires(_: &FiredOf<A>) -> bool {
@@ -77,20 +78,20 @@ where
     }
 }
 
-impl<N: Node<Kind = CompKind>, A: Layout> SourceKind<N, A> for CompKind
+impl<N: Vertex<Kind = CompKind>, A: Layout> SourceKind<N, A> for CompKind
 where
-    A::Outs: AtPos<N::Output, { PosOf::<A, N>::P }>,
-    A::OutsOpt: AtPos<Option<N::Output>, { PosOf::<A, N>::P }>,
+    A::Outs: AtPos<N::Stored, { PosOf::<A, N>::P }>,
+    A::OutsOpt: AtPos<Option<N::Stored>, { PosOf::<A, N>::P }>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn fetch<'a>(_: &'a A::Root, outs: &'a A::Outs) -> &'a N::Output {
-        <A::Outs as AtPos<N::Output, { PosOf::<A, N>::P }>>::at(outs)
+    fn fetch<'a>(_: &'a A::Root, outs: &'a A::Outs) -> &'a N::Stored {
+        <A::Outs as AtPos<N::Stored, { PosOf::<A, N>::P }>>::at(outs)
     }
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn seed<'a>(outs: &'a A::OutsOpt) -> &'a N::Output {
-        <A::OutsOpt as AtPos<Option<N::Output>, { PosOf::<A, N>::P }>>::at(outs)
+    fn seed<'a>(_: &'a A::StatesOpt, outs: &'a A::OutsOpt) -> &'a N::Stored {
+        <A::OutsOpt as AtPos<Option<N::Stored>, { PosOf::<A, N>::P }>>::at(outs)
             .as_ref()
             .expect("a subscription is constructed before its subscriber")
     }
@@ -108,26 +109,61 @@ where
     }
 }
 
+impl<N: crate::node::HandleView, A: Layout> SourceKind<N, A> for HandleKind
+where
+    A::Outs: AtPos<N::Stored, { PosOf::<A, N>::P }>,
+    A::OutsOpt: AtPos<Option<N::Stored>, { PosOf::<A, N>::P }>,
+    A::StatesOpt: AtPos<Option<N>, { PosOf::<A, N>::P }>,
+{
+    /// The stored handle (the view needs the state too: see [`SourceCx`]).
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn fetch<'a>(_: &'a A::Root, outs: &'a A::Outs) -> &'a N::Stored {
+        <A::Outs as AtPos<N::Stored, { PosOf::<A, N>::P }>>::at(outs)
+    }
+    /// The view of the constructed parent and its first handle.
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn seed<'a>(states: &'a A::StatesOpt, outs: &'a A::OutsOpt) -> <N as Edge>::Read<'a> {
+        let state = <A::StatesOpt as AtPos<Option<N>, { PosOf::<A, N>::P }>>::at(states)
+            .as_ref()
+            .expect("a subscription is constructed before its subscriber");
+        let handle = <A::OutsOpt as AtPos<Option<N::Stored>, { PosOf::<A, N>::P }>>::at(outs)
+            .as_ref()
+            .expect("a subscription is constructed before its subscriber");
+        N::__view(state, handle)
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn fires(fired: &FiredOf<A>) -> bool {
+        if FlagOf::<A, N>::ALWAYS || FlagOf::<A, N>::FLAG == NO_FLAG {
+            true
+        } else {
+            fired.get(FlagOf::<A, N>::FLAG)
+        }
+    }
+}
+
 /// A node that can be read in the pipeline `A`.
 #[doc(hidden)]
-pub trait Source<A: Layout>: Node {
-    fn fetch<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a Self::Output;
-    fn seed<'a>(outs: &'a A::OutsOpt) -> crate::node::InitOf<'a, Self>;
+pub trait Source<A: Layout>: Vertex {
+    fn fetch<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a Self::Stored;
+    fn seed<'a>(states: &'a A::StatesOpt, outs: &'a A::OutsOpt) -> crate::node::InitOf<'a, Self>;
     fn fires(fired: &FiredOf<A>) -> bool;
 }
-impl<A: Layout, N: Node> Source<A> for N
+impl<A: Layout, N: Vertex> Source<A> for N
 where
     N::Kind: SourceKind<N, A>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn fetch<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a N::Output {
+    fn fetch<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a N::Stored {
         <N::Kind as SourceKind<N, A>>::fetch(root, outs)
     }
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn seed<'a>(outs: &'a A::OutsOpt) -> crate::node::InitOf<'a, N> {
-        <N::Kind as SourceKind<N, A>>::seed(outs)
+    fn seed<'a>(states: &'a A::StatesOpt, outs: &'a A::OutsOpt) -> crate::node::InitOf<'a, N> {
+        <N::Kind as SourceKind<N, A>>::seed(states, outs)
     }
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
@@ -171,7 +207,7 @@ dataflow_macros::inner_shape!(gather_in_inner);
 /// What one component's `new` is given, read from the outputs built so far.
 #[doc(hidden)]
 pub trait GatherInit<A: Layout, const P: usize>: DepList {
-    fn gather<'a>(outs: &'a A::OutsOpt) -> Self::Inits<'a>;
+    fn gather<'a>(states: &'a A::StatesOpt, outs: &'a A::OutsOpt) -> Self::Inits<'a>;
 }
 macro_rules! gather_init_leaf {
     ([$($E:ident $C:ident $I:ident)*]) => {
@@ -179,8 +215,8 @@ macro_rules! gather_init_leaf {
             #[cfg_attr(not(debug_assertions), inline(always))]
             #[cfg_attr(debug_assertions, inline)]
             #[allow(unused_variables)]
-            fn gather<'a>(outs: &'a A::OutsOpt) -> Self::Inits<'a> {
-                ($(<$C as ChainSeed<$E, A, P, $I>>::seed(outs),)*)
+            fn gather<'a>(states: &'a A::StatesOpt, outs: &'a A::OutsOpt) -> Self::Inits<'a> {
+                ($(<$C as ChainSeed<$E, A, P, $I>>::seed(states, outs),)*)
             }
         }
     };
@@ -191,8 +227,8 @@ macro_rules! gather_init_inner {
         impl<A: Layout, const P: usize, $($K: GatherInit<A, P>,)*> GatherInit<A, P> for ($($K,)*) {
             #[cfg_attr(not(debug_assertions), inline(always))]
             #[cfg_attr(debug_assertions, inline)]
-            fn gather<'a>(outs: &'a A::OutsOpt) -> Self::Inits<'a> {
-                ($(<$K as GatherInit<A, P>>::gather(outs),)*)
+            fn gather<'a>(states: &'a A::StatesOpt, outs: &'a A::OutsOpt) -> Self::Inits<'a> {
+                ($(<$K as GatherInit<A, P>>::gather(states, outs),)*)
             }
         }
     };
@@ -204,24 +240,24 @@ dataflow_macros::inner_shape!(gather_init_inner);
 /// selected one the initial value of its slot, if it has a slot (it is read in
 /// steps where the selectors do not match), else nothing ([`SelInit`]).
 #[doc(hidden)]
-pub trait ChainSeed<N: Node, A: Layout, const P: usize, const I: usize>: SelectChain<N::Output> {
-    fn seed<'a>(outs: &'a A::OutsOpt) -> <Self as SelectChain<N::Output>>::Init<'a, N>;
+pub trait ChainSeed<N: Vertex, A: Layout, const P: usize, const I: usize>: SelectChain<N::Stored> {
+    fn seed<'a>(states: &'a A::StatesOpt, outs: &'a A::OutsOpt) -> <Self as SelectChain<N::Stored>>::Init<'a, N>;
 }
 impl<N: Source<A>, A: Layout, const P: usize, const I: usize> ChainSeed<N, A, P, I> for () {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn seed<'a>(outs: &'a A::OutsOpt) -> crate::node::InitOf<'a, N> {
-        <N as Source<A>>::seed(outs)
+    fn seed<'a>(states: &'a A::StatesOpt, outs: &'a A::OutsOpt) -> crate::node::InitOf<'a, N> {
+        <N as Source<A>>::seed(states, outs)
     }
 }
-impl<N: Node, A: Layout, S: Select<N::Output>, T: SelectChain<S::Out>, const P: usize, const I: usize> ChainSeed<N, A, P, I> for (S, T)
+impl<N: Vertex, A: Layout, S: Select<N::Stored>, T: SelectChain<S::Out>, const P: usize, const I: usize> ChainSeed<N, A, P, I> for (S, T)
 where
     SlotAt<A, P, I>: ModeTy,
     (S, T): SeedVia<N, A, <SlotAt<A, P, I> as ModeTy>::Mode, { SlotAt::<A, P, I>::POS }>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn seed<'a>(outs: &'a A::OutsOpt) -> <Self as SelectChain<N::Output>>::Init<'a, N> {
+    fn seed<'a>(_: &'a A::StatesOpt, outs: &'a A::OutsOpt) -> <Self as SelectChain<N::Stored>>::Init<'a, N> {
         <(S, T) as SeedVia<N, A, <SlotAt<A, P, I> as ModeTy>::Mode, { SlotAt::<A, P, I>::POS }>>::seed_via(outs)
     }
 }
@@ -262,17 +298,17 @@ impl ModeOf<1> for () {
 
 /// `new`'s value for a selected entry, by mode.
 #[doc(hidden)]
-pub trait SeedVia<N: Node, A: Layout, Mode, const POS: usize>: SelectChain<N::Output> {
-    fn seed_via<'a>(outs: &'a A::OutsOpt) -> <Self as SelectChain<N::Output>>::Init<'a, N>;
+pub trait SeedVia<N: Vertex, A: Layout, Mode, const POS: usize>: SelectChain<N::Stored> {
+    fn seed_via<'a>(outs: &'a A::OutsOpt) -> <Self as SelectChain<N::Stored>>::Init<'a, N>;
 }
-impl<N: Node, A: Layout, S: Select<N::Output>, T: SelectChain<S::Out>, const POS: usize> SeedVia<N, A, Direct, POS> for (S, T) {
+impl<N: Vertex, A: Layout, S: Select<N::Stored>, T: SelectChain<S::Out>, const POS: usize> SeedVia<N, A, Direct, POS> for (S, T) {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
     fn seed_via<'a>(_: &'a A::OutsOpt) -> SelInit<'a, T::Out> {
         SelInit::empty()
     }
 }
-impl<N: Node, A: Layout, S: Select<N::Output>, T: SelectChain<S::Out>, const POS: usize> SeedVia<N, A, Stored, POS> for (S, T)
+impl<N: Vertex, A: Layout, S: Select<N::Stored>, T: SelectChain<S::Out>, const POS: usize> SeedVia<N, A, Stored, POS> for (S, T)
 where
     A::OutsOpt: AtPos<Option<T::Out>, POS>,
 {
@@ -291,48 +327,206 @@ where
 /// selector chain applied to the source's output, or, if the entry is stored,
 /// the slot.
 #[doc(hidden)]
-pub trait ChainRead<E: Source<A>, A: Layout, const P: usize, const I: usize>: SelectChain<E::Output> {
-    fn read<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a Self::Out;
+pub trait ChainRead<E: Source<A>, A: Layout, const P: usize, const I: usize>: SelectChain<E::Stored> {
+    fn read<'a>(root: &'a A::Root, outs: &'a A::Outs) -> <Self as SelectChain<E::Stored>>::Read<'a, E>;
 }
-impl<E: Source<A>, A: Layout, const P: usize, const I: usize> ChainRead<E, A, P, I> for () {
+impl<E: Source<A> + crate::node::Node, A: Layout, const P: usize, const I: usize> ChainRead<E, A, P, I> for () {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn read<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a E::Output {
+    fn read<'a>(root: &'a A::Root, outs: &'a A::Outs) -> crate::node::ReadOf<'a, E> {
         <E as Source<A>>::fetch(root, outs)
     }
 }
-impl<E: Source<A>, A: Layout, S: Select<E::Output>, T: SelectChain<S::Out>, const P: usize, const I: usize> ChainRead<E, A, P, I> for (S, T)
+impl<E: Source<A>, A: Layout, S: Select<E::Stored>, T: SelectChain<S::Out>, const P: usize, const I: usize> ChainRead<E, A, P, I> for (S, T)
 where
     SlotAt<A, P, I>: ModeTy,
     (S, T): ReadVia<E, A, <SlotAt<A, P, I> as ModeTy>::Mode, { SlotAt::<A, P, I>::POS }>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn read<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a <Self as SelectChain<E::Output>>::Out {
+    fn read<'a>(root: &'a A::Root, outs: &'a A::Outs) -> <(S, T) as SelectChain<E::Stored>>::Read<'a, E> {
         <(S, T) as ReadVia<E, A, <SlotAt<A, P, I> as ModeTy>::Mode, { SlotAt::<A, P, I>::POS }>>::read_via(root, outs)
     }
 }
 #[doc(hidden)]
-pub trait ReadVia<E: Source<A>, A: Layout, Mode, const POS: usize>: SelectChain<E::Output> {
-    fn read_via<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a Self::Out;
+pub trait ReadVia<E: Source<A>, A: Layout, Mode, const POS: usize>: SelectChain<E::Stored> {
+    fn read_via<'a>(root: &'a A::Root, outs: &'a A::Outs) -> <Self as SelectChain<E::Stored>>::Read<'a, E>;
 }
-impl<E: Source<A>, A: Layout, C: SelectChain<E::Output>, const POS: usize> ReadVia<E, A, Direct, POS> for C {
+impl<E: Source<A>, A: Layout, S: Select<E::Stored>, T: SelectChain<S::Out>, const POS: usize> ReadVia<E, A, Direct, POS> for (S, T) {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn read_via<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a C::Out {
-        C::get(<E as Source<A>>::fetch(root, outs))
+    fn read_via<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a T::Out {
+        <(S, T)>::get(<E as Source<A>>::fetch(root, outs))
     }
 }
-impl<E: Source<A>, A: Layout, C: SelectChain<E::Output>, const POS: usize> ReadVia<E, A, Stored, POS> for C
+impl<E: Source<A>, A: Layout, S: Select<E::Stored>, T: SelectChain<S::Out>, const POS: usize> ReadVia<E, A, Stored, POS> for (S, T)
 where
-    A::Outs: AtPos<C::Out, POS>,
+    A::Outs: AtPos<T::Out, POS>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn read_via<'a>(_: &'a A::Root, outs: &'a A::Outs) -> &'a C::Out {
-        <A::Outs as AtPos<C::Out, POS>>::at(outs)
+    fn read_via<'a>(_: &'a A::Root, outs: &'a A::Outs) -> &'a T::Out {
+        <A::Outs as AtPos<T::Out, POS>>::at(outs)
     }
 }
+
+// ---------------------------------------------------------------------------
+// Reading in a component that has a handle parent
+// ---------------------------------------------------------------------------
+//
+// Such a component is updated through the split of the states (`split::SplitAt`): `&mut` to its
+// own state and, in the context, shared references to everything before it. A handle parent's
+// field is its view, computed from its state (picked from the context) and its stored handle. The
+// other entries are read as in `GatherIn`.
+
+/// The context of the split of the states at position `P`.
+#[doc(hidden)]
+pub type CtxOf<'x, A, const P: usize> = <<A as Layout>::States as SplitAt<P>>::Ctx<'x>;
+
+/// How a node is read from the context of the split at position `P`.
+#[doc(hidden)]
+pub trait SourceKindCx<N: Vertex, A: Layout, const P: usize>: NodeKind {
+    fn read_cx<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, cx: &'c CtxOf<'x, A, P>) -> <N as Edge>::Read<'c>
+    where
+        A::States: SplitAt<P>;
+}
+impl<N: crate::node::Node<Kind = RootKind>, A: Layout, const P: usize> SourceKindCx<N, A, P> for RootKind
+where
+    A::Root: Is<N::Output>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn read_cx<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, _: &'c CtxOf<'x, A, P>) -> <N as Edge>::Read<'c>
+    where
+        A::States: SplitAt<P>,
+    {
+        <RootKind as SourceKind<N, A>>::fetch(root, outs)
+    }
+}
+impl<N: crate::node::Node<Kind = CompKind>, A: Layout, const P: usize> SourceKindCx<N, A, P> for CompKind
+where
+    A::Outs: AtPos<N::Output, { PosOf::<A, N>::P }>,
+    A::OutsOpt: AtPos<Option<N::Output>, { PosOf::<A, N>::P }>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn read_cx<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, _: &'c CtxOf<'x, A, P>) -> <N as Edge>::Read<'c>
+    where
+        A::States: SplitAt<P>,
+    {
+        <CompKind as SourceKind<N, A>>::fetch(root, outs)
+    }
+}
+impl<N: crate::node::HandleView, A: Layout, const P: usize> SourceKindCx<N, A, P> for HandleKind
+where
+    A::Outs: AtPos<N::Stored, { PosOf::<A, N>::P }>,
+    A::OutsOpt: AtPos<Option<N::Stored>, { PosOf::<A, N>::P }>,
+    A::States: StateAt<P, { PosOf::<A, N>::P }, N>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn read_cx<'c, 'x>(_: &'c A::Root, outs: &'c A::Outs, cx: &'c CtxOf<'x, A, P>) -> <N as Edge>::Read<'c>
+    where
+        A::States: SplitAt<P>,
+    {
+        let state = <A::States as StateAt<P, { PosOf::<A, N>::P }, N>>::state(cx);
+        let handle = <A::Outs as AtPos<N::Stored, { PosOf::<A, N>::P }>>::at(outs);
+        N::__view(state, handle)
+    }
+}
+
+/// A node readable from the context of the split at `P`, whatever its kind.
+#[doc(hidden)]
+pub trait SourceCx<A: Layout, const P: usize>: Vertex {
+    fn read_cx<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, cx: &'c CtxOf<'x, A, P>) -> <Self as Edge>::Read<'c>
+    where
+        A::States: SplitAt<P>;
+}
+impl<A: Layout, N: Vertex, const P: usize> SourceCx<A, P> for N
+where
+    N::Kind: SourceKindCx<N, A, P>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn read_cx<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, cx: &'c CtxOf<'x, A, P>) -> <N as Edge>::Read<'c>
+    where
+        A::States: SplitAt<P>,
+    {
+        <N::Kind as SourceKindCx<N, A, P>>::read_cx(root, outs, cx)
+    }
+}
+
+/// Entry `I` of the component at `P`, read from the context: a plain entry through its source, a
+/// selected one as in [`ChainRead`] (selectors on a handle component are not supported yet).
+#[doc(hidden)]
+pub trait ChainReadCx<E: Source<A>, A: Layout, const P: usize, const I: usize>: SelectChain<E::Stored> {
+    fn read_cx<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, cx: &'c CtxOf<'x, A, P>) -> <Self as SelectChain<E::Stored>>::Read<'c, E>
+    where
+        A::States: SplitAt<P>;
+}
+impl<E: Source<A> + SourceCx<A, P>, A: Layout, const P: usize, const I: usize> ChainReadCx<E, A, P, I> for () {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn read_cx<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, cx: &'c CtxOf<'x, A, P>) -> crate::node::ReadOf<'c, E>
+    where
+        A::States: SplitAt<P>,
+    {
+        <E as SourceCx<A, P>>::read_cx(root, outs, cx)
+    }
+}
+impl<E: Source<A>, A: Layout, S: Select<E::Stored>, T: SelectChain<S::Out>, const P: usize, const I: usize> ChainReadCx<E, A, P, I> for (S, T)
+where
+    (S, T): ChainRead<E, A, P, I>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn read_cx<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, _: &'c CtxOf<'x, A, P>) -> <(S, T) as SelectChain<E::Stored>>::Read<'c, E>
+    where
+        A::States: SplitAt<P>,
+    {
+        <(S, T) as ChainRead<E, A, P, I>>::read(root, outs)
+    }
+}
+
+/// The inputs of a component with a handle parent, read from the pushed root, the stored outputs
+/// and the context of the split of the states.
+#[doc(hidden)]
+pub trait GatherCx<A: Layout, const P: usize>: DepList {
+    fn gather<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, cx: &'c CtxOf<'x, A, P>) -> Self::Inputs<'c>
+    where
+        A::States: SplitAt<P>;
+}
+macro_rules! gather_cx_leaf {
+    ([$($E:ident $C:ident $I:ident)*]) => {
+        impl<A: Layout, const P: usize, $($E: Source<A>, $C: ChainReadCx<$E, A, P, $I>, const $I: usize,)*> GatherCx<A, P> for ($(Sub<$E, $C, $I>,)*) {
+            #[cfg_attr(not(debug_assertions), inline(always))]
+            #[cfg_attr(debug_assertions, inline)]
+            #[allow(unused_variables)]
+            fn gather<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, cx: &'c CtxOf<'x, A, P>) -> Self::Inputs<'c>
+            where
+                A::States: SplitAt<P>,
+            {
+                ($(<$C as ChainReadCx<$E, A, P, $I>>::read_cx(root, outs, cx),)*)
+            }
+        }
+    };
+}
+dataflow_macros::leaf_shapes!(gather_cx_leaf);
+macro_rules! gather_cx_inner {
+    ([$($K:ident)*]) => {
+        impl<A: Layout, const P: usize, $($K: GatherCx<A, P>,)*> GatherCx<A, P> for ($($K,)*) {
+            #[cfg_attr(not(debug_assertions), inline(always))]
+            #[cfg_attr(debug_assertions, inline)]
+            fn gather<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, cx: &'c CtxOf<'x, A, P>) -> Self::Inputs<'c>
+            where
+                A::States: SplitAt<P>,
+            {
+                ($(<$K as GatherCx<A, P>>::gather(root, outs, cx),)*)
+            }
+        }
+    };
+}
+dataflow_macros::inner_shape!(gather_cx_inner);
 
 // ---------------------------------------------------------------------------
 // Firing
@@ -341,7 +535,7 @@ where
 /// The plan's facts about node `N` in pipeline `A`, as constants.
 #[doc(hidden)]
 pub struct FlagOf<A, N>(PhantomData<(A, N)>);
-impl<A: Planned, N: Node> FlagOf<A, N> {
+impl<A: Planned, N: Vertex> FlagOf<A, N> {
     /// Does `N` run in every step?
     pub const ALWAYS: bool = A::PLAN.always_idx(At::<A, N>::INDEX);
     /// Its `fired` flag.
@@ -357,14 +551,14 @@ pub trait Ready<A: Layout>: DepList {
 }
 macro_rules! ready_leaf {
     ([$($E:ident $C:ident $I:ident)*]) => {
-        impl<A: Layout, $($E: Source<A>, $C: SelectChain<<$E as Node>::Output>, const $I: usize,)*> Ready<A> for ($(Sub<$E, $C, $I>,)*) {
+        impl<A: Layout, $($E: Source<A>, $C: SelectChain<<$E as Vertex>::Stored>, const $I: usize,)*> Ready<A> for ($(Sub<$E, $C, $I>,)*) {
             #[cfg_attr(not(debug_assertions), inline(always))]
             #[cfg_attr(debug_assertions, inline)]
             #[allow(unused_variables)]
             fn ready(root: &A::Root, outs: &A::Outs, fired: &FiredOf<A>) -> bool {
                 false $(|| (<$E as Source<A>>::fires(fired)
-                    && (<$C as SelectChain<<$E as Node>::Output>>::PLAIN
-                        || <$C as SelectChain<<$E as Node>::Output>>::matches(<$E as Source<A>>::fetch(root, outs)))))*
+                    && (<$C as SelectChain<<$E as Vertex>::Stored>>::PLAIN
+                        || <$C as SelectChain<<$E as Vertex>::Stored>>::matches(<$E as Source<A>>::fetch(root, outs)))))*
             }
         }
     };

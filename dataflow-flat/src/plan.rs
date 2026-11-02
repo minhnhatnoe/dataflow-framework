@@ -40,7 +40,7 @@ use std::any::{type_name, TypeId};
 
 use crate::component::Sub;
 use crate::identity::{Hashed, BLANK};
-use crate::node::{Node, KIND_ANCHOR, KIND_COMPONENT, KIND_ROOT};
+use crate::node::{Vertex, KIND_ANCHOR, KIND_COMPONENT, KIND_ROOT};
 use crate::select::ChainWalk;
 use crate::table::Table;
 
@@ -161,7 +161,7 @@ const fn message(parts: &[&[u8]]) -> ([u8; MSG], usize) {
 /// recursion into `N::Subs`, which keeps constant evaluation at one stack frame
 /// per graph layer. The trait solver's proof is unaffected: the only bound is
 /// `N::Subs: [const] Upstream`, a trait on the tree rather than on the node.
-const fn enter<N: Node, C: [const] ChainWalk<N::Output>>(plan: &mut Plan, parent: u32, pos: u32) -> (u32, bool) {
+const fn enter<N: Vertex, C: [const] ChainWalk<N::Stored>>(plan: &mut Plan, parent: u32, pos: u32) -> (u32, bool) {
     let id = TypeId::of::<N>();
     let slot = plan.table.slot(&plan.ids, <N as Hashed>::HASH, id);
     let (i, new) = if let Some(at) = plan.table.at(slot) {
@@ -227,7 +227,7 @@ const fn enter<N: Node, C: [const] ChainWalk<N::Output>>(plan: &mut Plan, parent
 /// A node's walk is over: record its subtree end and execution position, check
 /// that it is reachable from the root (some node it subscribes to is), and
 /// compute its condition.
-const fn leave<N: Node>(plan: &mut Plan, i: u32) {
+const fn leave<N: Vertex>(plan: &mut Plan, i: u32) {
     let i = i as usize;
     plan.end[i] = plan.len as u32;
     plan.post_of[i] = plan.done as u32;
@@ -253,7 +253,7 @@ const fn leave<N: Node>(plan: &mut Plan, i: u32) {
 
 /// `enter`, the walk of the subscriptions, `leave`: used for the anchor only
 /// (the `Upstream` impls spell this out inline for their entries).
-const fn visit<N: Node>(plan: &mut Plan, parent: u32, pos: u32)
+const fn visit<N: Vertex>(plan: &mut Plan, parent: u32, pos: u32)
 where
     N::Subs: [const] Upstream,
 {
@@ -281,7 +281,7 @@ pub const trait Upstream {
 macro_rules! upstream_leaf {
     ([$($h:ident $c:ident $i:ident)*]) => {
         #[allow(unused_variables)]
-        const impl<$($h: Node, $c: [const] ChainWalk<<$h as Node>::Output>, const $i: usize),*> Upstream for ($(Sub<$h, $c, $i>,)*)
+        const impl<$($h: Vertex, $c: [const] ChainWalk<<$h as Vertex>::Stored>, const $i: usize),*> Upstream for ($(Sub<$h, $c, $i>,)*)
         where $($h::Subs: [const] Upstream,)*
         {
             fn visit_all(plan: &mut Plan, parent: u32) {
@@ -525,7 +525,7 @@ pub struct Plan {
 impl Plan {
     /// The plan for anchor `A` of a pipeline whose root type has `root_id`:
     /// the depth-first walk from it.
-    pub(crate) const fn of<A: Node>(root_id: TypeId) -> Plan
+    pub(crate) const fn of<A: Vertex>(root_id: TypeId) -> Plan
     where
         A::Subs: [const] Upstream,
     {
@@ -2444,7 +2444,7 @@ impl Plan {
 
 /// An anchor whose plan has been computed, evaluated once per pipeline type.
 #[doc(hidden)]
-pub trait Planned: Node {
+pub trait Planned: Vertex {
     const PLAN: &'static Plan;
     /// Evaluating this reports the plan's error, if any (a const panic naming
     /// the component). Evaluated once, by `Pipeline::build`.

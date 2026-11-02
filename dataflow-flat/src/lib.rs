@@ -135,13 +135,16 @@ mod plan;
 mod select;
 mod sinks;
 mod store;
+mod split;
 mod table;
 
 pub use build::{BuildError, Configs};
 #[doc(hidden)]
 pub use build::ConstructPass;
-pub use component::{Component, ComponentSubscription, DepList, Sub};
-pub use node::{InitOf, Node, Root};
+pub use component::{Component, ComponentSubscription, DepList, HandleComponent, Sub};
+pub use node::{Edge, InitOf, Node, Root};
+#[doc(hidden)]
+pub use node::{Comp, HandleKind, HandleView, Vertex};
 pub use pipeline::Pipeline;
 pub use plan::{MAX_COMPONENTS, MAX_DECISIONS, MAX_EDGES, MAX_TERMS};
 pub use request::{Listener, Request};

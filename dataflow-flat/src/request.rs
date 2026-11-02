@@ -27,7 +27,7 @@ use crate::component::{DepList, Sub};
 use crate::drive::{Phase, StepAt};
 use crate::flat::NthT;
 use crate::gather::Layout;
-use crate::node::{Comp, Node};
+use crate::node::{Comp, Vertex};
 use crate::select::{Select, SelectChain};
 
 /// A component that is told, at build, which selectors its subscribers read.
@@ -129,11 +129,11 @@ pub trait ReqList: DepList {
 }
 macro_rules! req_leaf {
     ([$($E:ident $C:ident $I:ident)*]) => {
-        impl<$($E: Node, $C: ChainReq<<$E as Node>::Output, <$E as Node>::Requests>, const $I: usize,)*> ReqList for ($(Sub<$E, $C, $I>,)*) {
+        impl<$($E: Vertex, $C: ChainReq<<$E as Vertex>::Stored, <$E as Vertex>::Requests>, const $I: usize,)*> ReqList for ($(Sub<$E, $C, $I>,)*) {
             #[allow(unused_variables)]
             fn collect(pass: &mut ConstructPass) {
-                $(if <$E as Node>::LISTENS {
-                    <$C as ChainReq<<$E as Node>::Output, <$E as Node>::Requests>>::collect(pass, TypeId::of::<$E>());
+                $(if <$E as Vertex>::LISTENS {
+                    <$C as ChainReq<<$E as Vertex>::Stored, <$E as Vertex>::Requests>>::collect(pass, TypeId::of::<$E>());
                 })*
             }
         }

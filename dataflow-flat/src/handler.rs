@@ -46,7 +46,7 @@ use crate::component::{Component, ComponentSubscription};
 use crate::drive::{CondAt, Ch, Drive, EntryOf, ExecK, FiredOps, HRunK, Pn, PnC, PushCtx, PushPh, Rg, RgCl, SlotWriteBy, SrcSlots};
 use crate::flat::{Inner, Leaf, NthT};
 use crate::gather::{ChainRead, ChainSeed, GatherIn, Layout, Ready, Source};
-use crate::node::{Comp, Node};
+use crate::node::{Comp, Vertex};
 use crate::plan::{Planned, NO_FLAG};
 use crate::select::{ChainKey, ChainWalk, SelectChain};
 use crate::store::AtPos;
@@ -57,8 +57,8 @@ use crate::store::AtPos;
 pub trait HandledEdge: 'static {
     type Value: 'static;
 }
-impl<N: Node> HandledEdge for N {
-    type Value = N::Output;
+impl<N: Vertex> HandledEdge for N {
+    type Value = N::Stored;
 }
 
 /// `on_update` of the handled edge `E`. A missing impl for a listed edge is a
@@ -81,7 +81,8 @@ pub struct Hd<Em, C>(PhantomData<fn() -> (Em, C)>);
 
 impl<In: 'static, Em: 'static, C: SelectChain<In>> SelectChain<In> for Hd<Em, C> {
     type Out = ();
-    type Init<'a, N: Node<Output = In>> = C::Init<'a, N>;
+    type Init<'a, N: Vertex<Stored = In>> = C::Init<'a, N>;
+    type Read<'a, N: Vertex> = &'a ();
     const PLAIN: bool = C::PLAIN;
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
@@ -128,15 +129,15 @@ impl<In: 'static, Em: 'static, C: ChainKey<In, J>, const J: usize> ChainKey<In, 
     }
 }
 
-impl<N: Node, A: Layout, Em: 'static, C: ChainSeed<N, A, P, I>, const P: usize, const I: usize> ChainSeed<N, A, P, I> for Hd<Em, C> {
+impl<N: Vertex, A: Layout, Em: 'static, C: ChainSeed<N, A, P, I>, const P: usize, const I: usize> ChainSeed<N, A, P, I> for Hd<Em, C> {
     #[inline]
-    fn seed<'a>(outs: &'a A::OutsOpt) -> <Self as SelectChain<N::Output>>::Init<'a, N> {
-        C::seed(outs)
+    fn seed<'a>(states: &'a A::StatesOpt, outs: &'a A::OutsOpt) -> <Self as SelectChain<N::Stored>>::Init<'a, N> {
+        C::seed(states, outs)
     }
 }
 
 /// A handled edge reads nothing in `update` (the value goes to `on_update`).
-impl<E: Source<A>, A: Layout, Em: 'static, C: SelectChain<E::Output>, const P: usize, const I: usize> ChainRead<E, A, P, I> for Hd<Em, C> {
+impl<E: Source<A>, A: Layout, Em: 'static, C: SelectChain<E::Stored>, const P: usize, const I: usize> ChainRead<E, A, P, I> for Hd<Em, C> {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
     fn read<'a>(_: &'a A::Root, _: &'a A::Outs) -> &'a () {
@@ -176,10 +177,10 @@ where
     A: EntryOf<PushPh<A>, P, I>,
     <A as EntryOf<PushPh<A>, P, I>>::E: Source<A>,
     <A as EntryOf<PushPh<A>, P, I>>::Ch:
-        HdChain<<<A as EntryOf<PushPh<A>, P, I>>::E as Node>::Output>,
+        HdChain<<<A as EntryOf<PushPh<A>, P, I>>::E as Vertex>::Stored>,
     H: UpdateHandler<
         <<A as EntryOf<PushPh<A>, P, I>>::Ch as HdChain<
-            <<A as EntryOf<PushPh<A>, P, I>>::E as Node>::Output,
+            <<A as EntryOf<PushPh<A>, P, I>>::E as Vertex>::Stored,
         >>::Em,
     >,
     A::States: AtPos<H, P>,
@@ -192,11 +193,11 @@ where
         let x = <E<A, P, I> as Source<A>>::fetch(ctx.root, &*ctx.outs);
         let mode = M;
         if (mode & 1 == 0 || <E<A, P, I> as Source<A>>::fires(&ctx.fired))
-            && (mode & 2 == 0 || <C<A, P, I> as HdChain<<E<A, P, I> as Node>::Output>>::matches_inner(x))
+            && (mode & 2 == 0 || <C<A, P, I> as HdChain<<E<A, P, I> as Vertex>::Stored>>::matches_inner(x))
         {
-            <H as UpdateHandler<<C<A, P, I> as HdChain<<E<A, P, I> as Node>::Output>>::Em>>::on_update(
+            <H as UpdateHandler<<C<A, P, I> as HdChain<<E<A, P, I> as Vertex>::Stored>>::Em>>::on_update(
                 <A::States as AtPos<H, P>>::at_mut(&mut *ctx.states),
-                <C<A, P, I> as HdChain<<E<A, P, I> as Node>::Output>>::value(x),
+                <C<A, P, I> as HdChain<<E<A, P, I> as Vertex>::Stored>>::value(x),
             );
         }
     }
@@ -260,7 +261,7 @@ where
     A: NthT<P, T = H>,
     <H as ComponentSubscription>::Deps: GatherIn<A, P> + Ready<A>,
     A::States: AtPos<H, P>,
-    A::Outs: AtPos<<H as Node>::Output, P>,
+    A::Outs: AtPos<<H as Vertex>::Stored, P>,
     HItems<A, N>: RgCl,
     HItems<A, N>: HDrive<A, PushPh<A>, H, P, <HItems<A, N> as RgCl>::Cl>,
     SrcSlots<A, P>: RgCl,
@@ -274,9 +275,9 @@ where
     <HItems<A, N> as HDrive<A, PushPh<A>, H, P, <HItems<A, N> as RgCl>::Cl>>::items(ctx);
     let out = {
         let inputs = <<H as ComponentSubscription>::Deps as GatherIn<A, P>>::gather(ctx.root, &*ctx.outs);
-        <A::States as AtPos<H, P>>::at_mut(&mut *ctx.states).update(<H as ComponentSubscription>::input(inputs))
+        <A::States as AtPos<H, P>>::at_mut(&mut *ctx.states).__update(<H as ComponentSubscription>::input(inputs))
     };
-    *<A::Outs as AtPos<<H as Node>::Output, P>>::at_mut(&mut *ctx.outs) = out;
+    *<A::Outs as AtPos<<H as Vertex>::Stored, P>>::at_mut(&mut *ctx.outs) = out;
     <SrcSlots<A, P> as Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>>::drive(ctx);
     if CondAt::<A, P>::FLAG != NO_FLAG {
         ctx.fired.set(CondAt::<A, P>::FLAG);
@@ -289,7 +290,7 @@ where
     <A as NthT<P>>::T: Component + Comp,
     <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P> + Ready<A>,
     A::States: AtPos<<A as NthT<P>>::T, P>,
-    A::Outs: AtPos<<<A as NthT<P>>::T as Node>::Output, P>,
+    A::Outs: AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>,
     HItems<A, N>: RgCl,
     HItems<A, N>: HDrive<A, PushPh<A>, <A as NthT<P>>::T, P, <HItems<A, N> as RgCl>::Cl>,
     SrcSlots<A, P>: RgCl,

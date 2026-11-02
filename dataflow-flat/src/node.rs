@@ -29,60 +29,124 @@ pub const KIND_COMPONENT: u8 = 1;
 #[doc(hidden)]
 pub const KIND_ANCHOR: u8 = 3;
 
-/// A thing that can be subscribed to. Sealed: use `#[derive(Root)]` or
-/// `#[derive(ComponentSubscription)]`.
-pub trait Node: __private::Sealed + Sized + 'static {
-    /// What subscribers read in `update`.
-    type Output: 'static;
+/// What a subscriber's field is when it reads this node: `&Output` for a node that stores a
+/// value, a view (`HandleComponent::Output<'a>`) for a handle component.
+pub trait Edge {
+    type Read<'a>
+    where
+        Self: 'a;
+}
+
+/// Everything the plan, the storage and the drivers need to know about a node (root, component,
+/// handle component, anchor). Sealed. `Stored` is what its slot in the pipeline holds: the output
+/// for a by-value component, the handle for a handle component.
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a Node of the graph (the root, a component or a handle component)",
+    label = "`{Self}` can't be subscribed to",
+    note = "derive `Root` or `ComponentSubscription` (and implement `Component`, or `HandleComponent` with `#[handle]`) for it"
+)]
+pub trait Vertex: __private::Sealed + Edge + Sized + 'static {
+    /// What the pipeline stores for this node.
+    type Stored: 'static;
     /// The node's subscriptions, as a [`DepList`].
-    #[doc(hidden)]
     type Subs: DepList;
     /// Root, component or anchor.
-    #[doc(hidden)]
     type Kind: NodeKind;
-    #[doc(hidden)]
     const KIND: u8;
     /// Is this a handler component (a `#[subscribe]` with handled entries)? The plan treats its
     /// handled edges differently (see `handler`).
-    #[doc(hidden)]
     const HANDLER: bool = false;
     /// Is this a [`Listener`](crate::Listener) (`#[listener]`)?
-    #[doc(hidden)]
     const LISTENS: bool = false;
     /// The listener's `Requests` (`NoRequests` for other nodes).
-    #[doc(hidden)]
     type Requests: 'static;
+}
+
+/// A thing that can be subscribed to and whose subscribers read `&Output`: the root and
+/// by-value components. Sealed: use `#[derive(Root)]` or `#[derive(ComponentSubscription)]`.
+/// A handle component (`#[handle]`) is not a `Node`: its subscribers read a view, not `&Output`.
+/// Generic code written as `X: Node<Output = T>` sees `&T` as the field type.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a by-value Node: its subscribers read a view, not `&Output`",
+    label = "`{Self}` is a `#[handle]` component (or not a node)",
+    note = "selectors, handled entries and `Node<Output = ..>` bounds don't support `#[handle]` components yet"
+)]
+pub trait Node: Vertex
+where
+    for<'a> Self: Edge<Read<'a> = &'a <Self as Node>::Output>,
+    Self: Vertex<Stored = <Self as Node>::Output>,
+{
+    /// What subscribers read in `update`.
+    type Output: 'static;
 }
 
 /// What the kind of a node decides at the type level: what its subscribers
 /// are given in `new`.
 #[doc(hidden)]
 pub trait NodeKind: 'static {
-    type Init<'a, N: Node>;
+    type Init<'a, N: Vertex>;
+    /// [`ByView`] if reading a node of this kind needs the state of the node (a handle
+    /// component), else [`ByVal`]. A component whose subscriptions are all [`ByVal`] is updated
+    /// the way it always was (`drive::Upd`).
+    type Mode: ModeT;
 }
+
+/// Reading only stored outputs and the root.
+#[doc(hidden)]
+pub struct ByVal;
+/// Reading a view of a handle component's state: the reader's state is split off from the
+/// states before it.
+#[doc(hidden)]
+pub struct ByView;
+/// A mode, and the mode of a pair of readings (a component is `ByView` if any of its
+/// subscriptions is).
+#[doc(hidden)]
+pub trait ModeT {
+    type Or<B: ModeT>: ModeT;
+}
+impl ModeT for ByVal {
+    type Or<B: ModeT> = B;
+}
+impl ModeT for ByView {
+    type Or<B: ModeT> = ByView;
+}
+#[doc(hidden)]
+pub type ReadOf<'a, N> = <N as Edge>::Read<'a>;
 
 /// The root: nothing is known about it before the first push.
 #[doc(hidden)]
 pub struct RootKind;
 impl NodeKind for RootKind {
-    type Init<'a, N: Node> = ();
+    type Mode = ByVal;
+    type Init<'a, N: Vertex> = ();
 }
 /// A component: its first output exists when later components are constructed.
 #[doc(hidden)]
 pub struct CompKind;
 impl NodeKind for CompKind {
-    type Init<'a, N: Node> = &'a N::Output;
+    type Mode = ByVal;
+    type Init<'a, N: Vertex> = &'a N::Stored;
+}
+/// A handle component: `new` of a subscriber gets the view computed from the constructed
+/// component and its first handle.
+#[doc(hidden)]
+pub struct HandleKind;
+impl NodeKind for HandleKind {
+    type Mode = ByView;
+    type Init<'a, N: Vertex> = <N as Edge>::Read<'a>;
 }
 /// The anchor. Never subscribed to.
 #[doc(hidden)]
 pub struct AnchorKind;
 impl NodeKind for AnchorKind {
-    type Init<'a, N: Node> = ();
+    type Mode = ByVal;
+    type Init<'a, N: Vertex> = ();
 }
 
-/// `Node::Init<'a>` of the design: what `new` of a subscriber is given for
+/// `Vertex::Init<'a>` of the design: what `new` of a subscriber is given for
 /// the subscription `N`.
-pub type InitOf<'a, N> = <<N as Node>::Kind as NodeKind>::Init<'a, N>;
+pub type InitOf<'a, N: Vertex> = <<N as Vertex>::Kind as NodeKind>::Init<'a, N>;
 
 /// The root of a pipeline: the type passed to `Pipeline::push`. Derive it:
 ///
@@ -109,12 +173,23 @@ impl<T> Is<T> for T {
     }
 }
 
-/// A node that is a component, with its output seen as a `Node`.
+/// A handle component's view of its state and stored handle (`HandleComponent::output`).
 #[doc(hidden)]
-pub trait Comp: crate::component::Component + Node<Output = <Self as crate::component::Component>::Output, Kind = CompKind> {}
-impl<C> Comp for C where
-    C: crate::component::Component + Node<Output = <C as crate::component::Component>::Output, Kind = CompKind>
-{
+pub trait HandleView: Vertex<Kind = HandleKind> {
+    fn __view<'a>(&'a self, handle: &'a Self::Stored) -> <Self as Edge>::Read<'a>;
+}
+
+/// A component, by value or handle: what the drivers call to construct it and to run it. Derived
+/// (`#[derive(ComponentSubscription)]` forwards to `Component` or, with `#[handle]`, to
+/// `HandleComponent`).
+#[doc(hidden)]
+pub trait Comp: crate::component::ComponentSubscription + Vertex {
+    /// `Component::Config` or `HandleComponent::Config`.
+    type Cfg: Default + 'static;
+    /// [`ByView`] if a subscription is a handle component, else [`ByVal`] (`DepList::Mode`).
+    type Mode: ModeT;
+    fn __new(config: Self::Cfg, init: Self::Init<'_>) -> (Self, Self::Stored);
+    fn __update(&mut self, input: Self::Input<'_>) -> Self::Stored;
 }
 
 // ---------------------------------------------------------------------------
@@ -129,7 +204,8 @@ pub const KIND_SLOT: u8 = 4;
 #[doc(hidden)]
 pub struct SlotKind;
 impl NodeKind for SlotKind {
-    type Init<'a, N: Node> = ();
+    type Mode = ByVal;
+    type Init<'a, N: Vertex> = ();
 }
 
 /// A stored selected value: the last value the selector chain `C` matched on
@@ -140,9 +216,12 @@ impl NodeKind for SlotKind {
 /// output.
 #[doc(hidden)]
 pub struct SlotNode<E, C>(pub core::marker::PhantomData<fn() -> (E, C)>);
-impl<E: Node, C: crate::select::SelectChain<E::Output>> __private::Sealed for SlotNode<E, C> {}
-impl<E: Node, C: crate::select::SelectChain<E::Output>> Node for SlotNode<E, C> {
-    type Output = C::Out;
+impl<E: Vertex, C: crate::select::SelectChain<E::Stored>> __private::Sealed for SlotNode<E, C> {}
+impl<E: Vertex, C: crate::select::SelectChain<E::Stored>> Edge for SlotNode<E, C> {
+    type Read<'a> = &'a C::Out;
+}
+impl<E: Vertex, C: crate::select::SelectChain<E::Stored>> Vertex for SlotNode<E, C> {
+    type Stored = C::Out;
     type Subs = ();
     type Kind = SlotKind;
     type Requests = crate::request::NoRequests;

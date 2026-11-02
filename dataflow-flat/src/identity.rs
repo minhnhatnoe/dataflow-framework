@@ -26,7 +26,7 @@
 use std::any::{type_name, TypeId};
 use std::marker::PhantomData;
 
-use crate::node::Node;
+use crate::node::Vertex;
 use crate::plan::Planned;
 
 /// Fills the unused part of the plan's `TypeId` arrays (a `[TypeId; N]` needs
@@ -53,13 +53,13 @@ const fn name_hash(s: &str) -> u64 {
 pub trait Hashed {
     const HASH: u64;
 }
-impl<N: Node> Hashed for N {
+impl<N: Vertex> Hashed for N {
     const HASH: u64 = name_hash(type_name::<N>());
 }
 
 /// The index of node `N` in the plan of anchor `A`, as a constant.
 #[doc(hidden)]
 pub struct At<A, N>(PhantomData<(A, N)>);
-impl<A: Planned, N: Node> At<A, N> {
+impl<A: Planned, N: Vertex> At<A, N> {
     pub const INDEX: usize = A::PLAN.index_of(<N as Hashed>::HASH, TypeId::of::<N>());
 }

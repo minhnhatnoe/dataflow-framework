@@ -12,7 +12,7 @@ use crate::drive::{
 use crate::flat::{FlatTop, Whole};
 use crate::gather::Layout;
 use crate::request::{ReqCtx, ReqPh};
-use crate::node::{AnchorKind, Comp, Node, Root, KIND_ANCHOR};
+use crate::node::{AnchorKind, Comp, Vertex, Root, KIND_ANCHOR};
 use crate::plan::{Plan, Planned, Upstream};
 use crate::store::{Empty, Finish, OutM, OutOptM, StateM, StateOptM};
 
@@ -42,8 +42,11 @@ dataflow_macros::sink_tuples!(sink_list_impl);
 #[doc(hidden)]
 pub struct Anchor<R, S>(PhantomData<fn() -> (R, S)>);
 impl<R: 'static, S: SinkList> crate::node::__private::Sealed for Anchor<R, S> {}
-impl<R: 'static, S: SinkList> Node for Anchor<R, S> {
-    type Output = ();
+impl<R: 'static, S: SinkList> crate::node::Edge for Anchor<R, S> {
+    type Read<'a> = &'a ();
+}
+impl<R: 'static, S: SinkList> Vertex for Anchor<R, S> {
+    type Stored = ();
     type Subs = S::Subs;
     type Kind = AnchorKind;
     type Requests = crate::request::NoRequests;

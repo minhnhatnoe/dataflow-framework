@@ -93,7 +93,7 @@ fn main() {}'
 CMD[cycle]=check
 # The trait solver cannot prove that a component of a cyclic graph is a node (its `Node` impl needs its
 # subscriptions to be nodes, which needs itself); it names a component of the cycle.
-PATTERN[cycle]='E0275.*overflow evaluating the requirement .*(Upstream|Node|DepList)'
+PATTERN[cycle]='E0275.*overflow evaluating the requirement .*(Upstream|Node|Vertex|DepList)'
 BODY[cycle]='
 #[derive(ComponentSubscription)]
 #[subscribe(b: B)]
@@ -117,7 +117,7 @@ fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }'
 
 # A component that subscribes to itself.
 CMD[self_cycle]=check
-PATTERN[self_cycle]='E0275.*overflow evaluating the requirement .*(Upstream|Node|DepList)'
+PATTERN[self_cycle]='E0275.*overflow evaluating the requirement .*(Upstream|Node|Vertex|DepList)'
 BODY[self_cycle]='
 #[derive(ComponentSubscription)]
 #[subscribe(me: A)]
@@ -839,6 +839,114 @@ impl Component for R {
 fn main() { let _ = Pipeline::<Poll, (R,)>::build(Configs::new()); }
 EOF2
 
+
+# --- handle components -----------------------------------------------------------------------------------------
+
+HANDLE_H='
+use dataflow_flat::HandleComponent;
+#[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
+#[handle]
+pub struct H(u64);
+impl HandleComponent for H {
+    type Config = ();
+    type Handle = ();
+    type Output<'"'"'a> = u64;
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, ()) { (H(0), ()) }
+    fn update(&mut self, _: Self::Input<'"'"'_>) {}
+    fn output<'"'"'a>(&'"'"'a self, (): &'"'"'a ()) -> u64 { self.0 }
+}
+'
+
+# A handle component read by value and by a handle parent builds and runs.
+CMD[handle_ok]=build
+PATTERN[handle_ok]='NOERROR'
+BODY[handle_ok]="$HANDLE_H
+#[derive(ComponentSubscription)]
+#[subscribe(h: H, s: Src)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), i: Self::Init<'_>) -> (Self, u64) { let h: u64 = i.h; (A, h) }
+    fn update(&mut self, input: Self::Input<'_>) -> u64 { let h: u64 = input.h; h + *input.s }
+}
+fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }"
+
+# `#[handle]` without an `impl HandleComponent`.
+CMD[handle_missing_impl]=check
+PATTERN[handle_missing_impl]='E0277.*HandleComponent'
+BODY[handle_missing_impl]='
+#[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
+#[handle]
+pub struct H;
+impl Component for H {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (H, 0) }
+    fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 0 }
+}
+fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }'
+
+# `#[handle]` on a listener (or a handler) is rejected for now.
+CMD[handle_with_listener]=check
+PATTERN[handle_with_listener]='`#\[handle\]` cannot be combined with `#\[listener\]`'
+BODY[handle_with_listener]="$HANDLE_H
+#[derive(ComponentSubscription)]
+#[subscribe(p: Poll)]
+#[handle]
+#[listener]
+pub struct L;
+fn main() {}"
+
+# A selector on a handle component is not supported yet: the message says why.
+CMD[handle_selector_rejected]=check
+PATTERN[handle_selector_rejected]='is not a by-value Node'
+BODY[handle_selector_rejected]="$HANDLE_H
+#[derive(Clone, Copy, dataflow_flat::Demux)]
+pub enum E { X(u8), Y }
+#[derive(ComponentSubscription)]
+#[subscribe(E::X(v): H)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (A, 0) }
+    fn update(&mut self, _: Self::Input<'_>) -> u64 { 0 }
+}
+fn main() {}"
+
+# Generic code written for `Node<Output = u64>` does not accept a handle component.
+CMD[handle_generic_node_bound]=check
+PATTERN[handle_generic_node_bound]='is not a by-value Node'
+BODY[handle_generic_node_bound]="$HANDLE_H
+#[derive(ComponentSubscription)]
+#[subscribe(x: X)]
+pub struct G<X: dataflow_flat::Node<Output = u64>>(std::marker::PhantomData<X>);
+impl<X: dataflow_flat::Node<Output = u64>> Component for G<X> {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (G(std::marker::PhantomData), 0) }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 { *i.x }
+}
+fn main() { let _: Option<G<H>> = None; }"
+
+# A handle component has no `Output` stored: asking a subscriber for `&Output` is a type error.
+CMD[handle_field_is_the_view]=check
+PATTERN[handle_field_is_the_view]='E0614|E0308|mismatched types'
+BODY[handle_field_is_the_view]="$HANDLE_H
+#[derive(ComponentSubscription)]
+#[subscribe(h: H)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (A, 0) }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 { *i.h }
+}
+fn main() {}"
+
 ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        self_cycle
        too_many_components root_not_a_root sink_is_the_root
@@ -852,7 +960,8 @@ ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        for_ok for_missing_update for_not_a_catalog for_zip_shapes for_body_named for_body_selected for_pattern_triple for_missing_bound
        pattern_struct pattern_multi_field pattern_range pattern_range_literal pattern_guard pattern_or pattern_literal
        pattern_reference pattern_arrow unit_selector_unknown unit_selector_data_variant pattern_ok
-       listener_missing_request listener_request_ok)
+       listener_missing_request listener_request_ok
+       handle_ok handle_missing_impl handle_with_listener handle_selector_rejected handle_generic_node_bound handle_field_is_the_view)
 
 run_case() {
     local name=$1 dir="$CASES_DIR/$1"

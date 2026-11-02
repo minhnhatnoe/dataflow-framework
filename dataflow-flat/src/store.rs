@@ -15,7 +15,7 @@
 //! [`Finish`] turns them into the final tuples (this is the only place that
 //! unwraps; it is part of `Pipeline::build`, not of a step).
 
-use crate::node::Node;
+use crate::node::Vertex;
 
 // ---------------------------------------------------------------------------
 // What is stored
@@ -24,31 +24,31 @@ use crate::node::Node;
 /// What a storage tuple holds for a node.
 #[doc(hidden)]
 pub trait Mapper: 'static {
-    type Of<N: Node>: 'static;
+    type Of<N: Vertex>: 'static;
 }
 /// The component itself.
 #[doc(hidden)]
 pub struct StateM;
 impl Mapper for StateM {
-    type Of<N: Node> = N;
+    type Of<N: Vertex> = N;
 }
 /// The component's last output.
 #[doc(hidden)]
 pub struct OutM;
 impl Mapper for OutM {
-    type Of<N: Node> = N::Output;
+    type Of<N: Vertex> = N::Stored;
 }
 /// The component, while it is not constructed yet.
 #[doc(hidden)]
 pub struct StateOptM;
 impl Mapper for StateOptM {
-    type Of<N: Node> = Option<N>;
+    type Of<N: Vertex> = Option<N>;
 }
 /// The output, while it is not produced yet.
 #[doc(hidden)]
 pub struct OutOptM;
 impl Mapper for OutOptM {
-    type Of<N: Node> = Option<N::Output>;
+    type Of<N: Vertex> = Option<N::Stored>;
 }
 
 // ---------------------------------------------------------------------------
