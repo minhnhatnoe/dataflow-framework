@@ -103,6 +103,7 @@
 extern crate self as dataflow_flat;
 
 mod build;
+mod catalog;
 mod component;
 mod drive;
 mod flat;
@@ -135,6 +136,9 @@ pub use select::ChainKey;
 pub use select::SelectChain;
 pub use sinks::{SinkList, Sinks};
 pub use handler::{HandledEdge, UpdateHandler};
+pub use catalog::{Catalog, Concat, Product, Zip, M};
+#[doc(hidden)]
+pub use catalog::{Map, MapDeps, Row};
 #[doc(hidden)]
 pub use handler::{Hd, HdChain};
 
@@ -143,4 +147,4 @@ pub use handler::{Hd, HdChain};
 pub use node::{CompKind, RootKind, __private, KIND_COMPONENT, KIND_ROOT};
 
 // The derive macros share their names with the traits, in the macro namespace.
-pub use dataflow_macros::{ComponentSubscription, Demux, Root};
+pub use dataflow_macros::{catalog, ComponentSubscription, Demux, Root};

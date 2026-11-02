@@ -19,6 +19,10 @@
 //! value's type depends on the parent and the orphan rules forbid an impl of
 //! [`HandledEdge`] for the selector itself.
 //!
+//! `for S in Catalog { Quoter<S> }` expands to one bare handled entry per element
+//! of a catalog (see the `catalog` module); the mapped entries are ordinary
+//! `Hd<Node, ()>` edges of the plan.
+//!
 //! The component is an ordinary one with a stored output (`update`'s result);
 //! it runs iff one of its edges (handled or named) fired. When it runs, each
 //! handled edge that fired in this push gets `on_update` (in the execution

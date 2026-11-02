@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Generator for the handler-component benchmark: an OMS-style graph.
 
-usage: bench/gen_handler.py N OUTDIR
+usage: bench/gen_handler.py N OUTDIR [for]
+
+With `for`, the handler lists its quoters as one `for S in catalog![S0, ..] { Quoter<S> }` entry instead of
+N written-out entries (same plan, same code).
 
 One root `Msg { key, v }` -> `Feed` (Option<Frame>, keyed) -> `Quoter<Sn>` for N symbols
 (`Some(On::<Sn>(u)): Feed`, exclusive keys) -> one joining node, in three flavours selected by cargo
@@ -27,7 +30,10 @@ os.makedirs(os.path.join(out, "src"), exist_ok=True)
 syms = "\n".join(
     f"pub struct S{i}; impl Symbol for S{i} {{ const KEY: u32 = {i}; const NAME: &'static str = \"S{i}\"; }}" for i in range(n)
 )
-handles = ", ".join(f"Quoter<S{i}>" for i in range(n))
+if len(sys.argv) > 3 and sys.argv[3] == "for":
+    handles = "for S: Symbol in catalog![" + ", ".join(f"S{i}" for i in range(n)) + "] { Quoter<S> }"
+else:
+    handles = ", ".join(f"Quoter<S{i}>" for i in range(n))
 fields = ", ".join(f"q{i}: Quoter<S{i}>" for i in range(n))
 hand_fields = " ".join(f"q{i}: (u64, u64)," for i in range(n))
 hand_init = " ".join(f"q{i}: (0, 0)," for i in range(n))
@@ -60,7 +66,7 @@ main = f"""#![allow(dead_code, unused_imports)]
 use std::sync::atomic::{{AtomicU64, Ordering}};
 use std::time::Instant;
 
-use dataflow_flat::{{Component, ComponentSubscription, Configs, Keyed, On, Pipeline, Root, Symbol, UpdateHandler}};
+use dataflow_flat::{{catalog, Component, ComponentSubscription, Configs, Keyed, On, Pipeline, Root, Symbol, UpdateHandler}};
 
 pub const N: usize = {n};
 

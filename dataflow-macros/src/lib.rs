@@ -42,6 +42,12 @@ fn respan(ts: TokenStream2, loc: Span) -> TokenStream2 {
         .collect()
 }
 
+/// Tokens `respan` leaves at the span they were built with (an invisible group).
+fn keep_span(ts: TokenStream2) -> TokenStream2 {
+    let g = proc_macro2::Group::new(proc_macro2::Delimiter::None, ts);
+    TokenStream2::from(proc_macro2::TokenTree::Group(g))
+}
+
 fn finish(r: syn::Result<TokenStream2>, loc: Span) -> TokenStream {
     match r {
         Ok(ts) => respan(ts, loc).into(),
@@ -49,7 +55,8 @@ fn finish(r: syn::Result<TokenStream2>, loc: Span) -> TokenStream {
     }
 }
 use proc_macro2::{Span, TokenStream as TokenStream2};
-use quote::{format_ident, quote, quote_spanned};
+use quote::{format_ident, quote, quote_spanned, ToTokens};
+use syn::spanned::Spanned;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{
@@ -179,6 +186,57 @@ pub fn inner_idx(input: TokenStream) -> TokenStream {
     let cb = callback(input);
     let ks = (0..ARITY).map(syn::Index::from);
     quote!(#cb!(#(#ks)*);).into()
+}
+
+/// `cat_leaf!(cb)`: `cb!([A0 B0 0 A1 B1 1 ..] [() ()..]);` for each leaf size 0..=LEAF: the
+/// elements (two idents each, for `Zip`) with their literal index, and one `()` of
+/// padding per child an inner node built from the leaf lacks.
+#[proc_macro]
+pub fn cat_leaf(input: TokenStream) -> TokenStream {
+    let cb = callback(input);
+    let items = (0..=LEAF).map(|n| {
+        let rows = (0..n).flat_map(|i| {
+            let ix = syn::Index::from(i);
+            [format_ident!("A{}", i), format_ident!("B{}", i)].into_iter().map(|id| quote!(#id)).chain([quote!(#ix)])
+        });
+        let pad = (n..ARITY).map(|_| quote!(()));
+        quote!(#cb!([#(#rows)*] [#(#pad)*]);)
+    });
+    quote!(#(#items)*).into()
+}
+
+/// `cat_inner!(cb)`: `cb!([K0 L0 (0usize) K1 L1 (<K0 as Catalog>::LEN) ..]);`: the
+/// children of an inner node (two idents each, for `Zip`) with the number of
+/// entries before each, as a parenthesized expression.
+#[proc_macro]
+pub fn cat_inner(input: TokenStream) -> TokenStream {
+    let cb = callback(input);
+    let rows = (0..ARITY).flat_map(|i| {
+        let (k, l) = (format_ident!("K{}", i), format_ident!("L{}", i));
+        let pre: Vec<TokenStream2> = (0..i)
+            .map(|j| {
+                let kj = format_ident!("K{}", j);
+                quote!(<#kj as Catalog>::LEN)
+            })
+            .collect();
+        let pre = if pre.is_empty() { quote!(0usize) } else { quote!(#(#pre)+*) };
+        [quote!(#k), quote!(#l), quote!((#pre))]
+    });
+    quote!(#cb!([#(#rows)*]);).into()
+}
+
+/// `catalog![A, B, C, ..]`: the catalog type (a tuple tree of the subscription
+/// shape) listing the given types in order.
+#[proc_macro]
+pub fn catalog(input: TokenStream) -> TokenStream {
+    let tys = parse_macro_input!(input with Punctuated::<Type, Token![,]>::parse_terminated);
+    let tys: Vec<&Type> = tys.iter().collect();
+    let ids: Vec<usize> = (0..tys.len()).collect();
+    Shape::build(&ids).render(&|i| {
+        let t = tys[i];
+        quote!(#t)
+    })
+    .into()
 }
 
 /// `sink_tuples!(cb)`: `cb!(A0 0 A1 1 ..);` for n in 1..=LEAF: the tuples
@@ -326,6 +384,102 @@ impl Parse for Subscription {
             ));
         }
         Ok(Subscription { name: Some(name), ty, chain, handled, unit, span })
+    }
+}
+
+/// `for PAT in CATALOG { BODY }`: one handled entry per element of the catalog.
+struct ForGroup {
+    span: Span,
+    pat: ForPat,
+    catalog: Type,
+    body: Type,
+    /// How many plain entries precede it.
+    at: usize,
+}
+
+/// The variable(s) the elements are bound to: `S`, `S: Bound`, `(X, S)`.
+enum ForPat {
+    Var(Ident, Vec<syn::TypeParamBound>),
+    Pair(Box<ForPat>, Box<ForPat>),
+}
+
+impl ForPat {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.peek(syn::token::Paren) {
+            let content;
+            let paren = syn::parenthesized!(content in input);
+            let a = ForPat::parse(&content)?;
+            if !content.peek(Token![,]) {
+                return Err(syn::Error::new(paren.span.open(), "a `for` pattern destructures a pair: `(X, S)` (nest pairs for more: `((X, S), Y)`)"));
+            }
+            content.parse::<Token![,]>()?;
+            let b = ForPat::parse(&content)?;
+            if content.peek(Token![,]) {
+                content.parse::<Token![,]>()?;
+            }
+            if !content.is_empty() {
+                return Err(syn::Error::new(paren.span.open(), "a `for` pattern destructures a pair: `(X, S)` (nest pairs for more: `((X, S), Y)`)"));
+            }
+            return Ok(ForPat::Pair(Box::new(a), Box::new(b)));
+        }
+        let id: Ident = input.parse()?;
+        let mut bounds = Vec::new();
+        if input.peek(Token![:]) {
+            input.parse::<Token![:]>()?;
+            bounds = Punctuated::<syn::TypeParamBound, Token![+]>::parse_separated_nonempty(input)?.into_iter().collect();
+        }
+        Ok(ForPat::Var(id, bounds))
+    }
+    fn vars<'a>(&'a self, out: &mut Vec<(&'a Ident, &'a [syn::TypeParamBound])>) {
+        match self {
+            ForPat::Var(i, b) => out.push((i, b)),
+            ForPat::Pair(a, b) => {
+                a.vars(out);
+                b.vars(out);
+            }
+        }
+    }
+    /// The element type the mapper is implemented for.
+    fn elem(&self) -> TokenStream2 {
+        match self {
+            ForPat::Var(i, _) => quote!(#i),
+            ForPat::Pair(a, b) => {
+                let (a, b) = (a.elem(), b.elem());
+                quote!(::dataflow_flat::M<#a, #b>)
+            }
+        }
+    }
+}
+
+/// One entry of `#[subscribe(..)]`.
+enum Entry {
+    Sub(Subscription),
+    For(ForGroup),
+}
+
+impl Parse for Entry {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if !input.peek(Token![for]) {
+            return Ok(Entry::Sub(input.parse()?));
+        }
+        let span = input.span();
+        input.parse::<Token![for]>()?;
+        let pat = ForPat::parse(input)?;
+        input.parse::<Token![in]>()?;
+        let catalog: Type = input.parse()?;
+        if !input.peek(syn::token::Brace) {
+            return Err(syn::Error::new(input.span(), "expected `{ Node<S> }`: the entry each element of the catalog stands for"));
+        }
+        let content;
+        syn::braced!(content in input);
+        let body: Type = content.parse()?;
+        if !content.is_empty() {
+            return Err(syn::Error::new(
+                content.span(),
+                "a `for` body is one node type, `for S in Catalog { Quoter<S> }`: named entries and selector patterns are not supported in it yet",
+            ));
+        }
+        Ok(Entry::For(ForGroup { span, pat, catalog, body, at: 0 }))
     }
 }
 
@@ -564,10 +718,19 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
 
     // Collect every #[subscribe(...)] (several are allowed; they concatenate).
     let mut subs: Vec<Subscription> = Vec::new();
+    let mut fors: Vec<ForGroup> = Vec::new();
     for attr in input.attrs.iter() {
         if attr.path().is_ident("subscribe") {
-            let list = attr.parse_args_with(Punctuated::<Subscription, Token![,]>::parse_terminated)?;
-            subs.extend(list);
+            let list = attr.parse_args_with(Punctuated::<Entry, Token![,]>::parse_terminated)?;
+            for e in list {
+                match e {
+                    Entry::Sub(s) => subs.push(s),
+                    Entry::For(mut f) => {
+                        f.at = subs.len();
+                        fors.push(f);
+                    }
+                }
+            }
         }
     }
     for (i, s) in subs.iter_mut().enumerate() {
@@ -733,21 +896,135 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     let vars: Vec<Ident> = (0..unique.len()).map(|i| format_ident!("__dep{}", i)).collect();
     // The subscriptions as a tree of tuples (see `DepList`): at most `LEAF`
     // entries in a leaf, exactly `ARITY` children in an inner node.
-    let all: Vec<usize> = (0..unique.len()).collect();
-    let tree = Shape::build(&all);
     let types: Vec<&Type> = unique.iter().map(|(_, t, _)| *t).collect();
     let chains: Vec<&TokenStream2> = unique.iter().map(|(_, _, c)| *c).collect();
-    // Each entry is tagged with its position in the unique list: two entries
-    // naming one type through different spellings stay two entries of the plan.
-    let deps_ty = tree.render(&|i| {
-        let t = types[i];
-        let c = chains[i];
-        quote!(#krate::Sub<#t, #c, #i>)
-    });
-    let deps_pat = tree.render(&|i| {
-        let v = &vars[i];
-        quote!(#v)
-    });
+    let (deps_ty, deps_pat, mappers) = if fors.is_empty() {
+        let all: Vec<usize> = (0..unique.len()).collect();
+        let tree = Shape::build(&all);
+        // Each entry is tagged with its position in the unique list: two entries
+        // naming one type through different spellings stay two entries of the plan.
+        let deps_ty = tree.render(&|i| {
+            let t = types[i];
+            let c = chains[i];
+            quote!(#krate::Sub<#t, #c, #i>)
+        });
+        let deps_pat = tree.render(&|i| {
+            let v = &vars[i];
+            quote!(#v)
+        });
+        (deps_ty, deps_pat, quote!())
+    } else {
+        // With `for` entries the tree is one inner node whose children are the
+        // segments in listing order: a run of plain entries (a subtree built as
+        // above), or a catalog mapped by the `for` body (a type computed by
+        // `MapDeps`); unused children are the empty leaf. Positions are
+        // `segment << 20` plus the index inside the segment, so segments are
+        // disjoint and ordered.
+        enum Seg {
+            Run(Vec<usize>),
+            For(usize),
+        }
+        let mut segs: Vec<Seg> = Vec::new();
+        let mut seen = vec![false; unique.len()];
+        let mut j = 0;
+        let mut run_to = |upto: usize, segs: &mut Vec<Seg>, j: &mut usize| {
+            let mut run = Vec::new();
+            for k in *j..upto {
+                let u = slot_of[k];
+                if !seen[u] {
+                    seen[u] = true;
+                    run.push(u);
+                }
+            }
+            *j = upto;
+            if !run.is_empty() {
+                segs.push(Seg::Run(run));
+            }
+        };
+        for (k, f) in fors.iter().enumerate() {
+            run_to(f.at, &mut segs, &mut j);
+            segs.push(Seg::For(k));
+        }
+        run_to(subs.len(), &mut segs, &mut j);
+        if segs.len() > ARITY {
+            return Err(syn::Error::new(
+                fors[0].span,
+                format!("too many segments in `#[subscribe]`: at most {ARITY} runs of plain entries and `for` entries (merge plain entries that are next to each other, or group the `for`s into one catalog with `Concat`)"),
+            ));
+        }
+        let mut tys = Vec::new();
+        let mut pats = Vec::new();
+        let mut mappers = Vec::new();
+        for (si, seg) in segs.iter().enumerate() {
+            let base = si << 20;
+            match seg {
+                Seg::Run(ids) => {
+                    let tree = Shape::build(ids);
+                    tys.push(tree.render(&|i| {
+                        let t = types[i];
+                        let c = chains[i];
+                        let pos = base + ids.iter().position(|&x| x == i).unwrap();
+                        quote!(#krate::Sub<#t, #c, #pos>)
+                    }));
+                    pats.push(tree.render(&|i| {
+                        let v = &vars[i];
+                        quote!(#v)
+                    }));
+                }
+                Seg::For(k) => {
+                    let f = &fors[*k];
+                    let mapper = format_ident!("__{}For{}", name, k);
+                    let cat = &f.catalog;
+                    tys.push(quote!(<#cat as #krate::MapDeps<#mapper<#(#ty_args0),*>, #base>>::Out));
+                    pats.push(quote!(_));
+                    // The mapper: a zero-sized type that makes the entry of an element.
+                    let mut vars_of = Vec::new();
+                    f.pat.vars(&mut vars_of);
+                    let decl_params: Vec<TokenStream2> = input
+                        .generics
+                        .params
+                        .iter()
+                        .filter_map(|p| match p {
+                            GenericParam::Type(t) => {
+                                let id = &t.ident;
+                                Some(quote!(#id))
+                            }
+                            GenericParam::Const(c) => {
+                                let (id, ty) = (&c.ident, &c.ty);
+                                Some(quote!(const #id: #ty))
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    let mut mg = generics.clone();
+                    for (v, bounds) in &vars_of {
+                        mg.params.push(parse_quote!(#v: 'static #(+ #bounds)*));
+                    }
+                    {
+                        let body = keep_span(f.body.to_token_stream());
+                        let wc = mg.make_where_clause();
+                        wc.predicates.push(parse_quote!(#body: #krate::Node));
+                        wc.predicates.push(parse_quote!(#name #ty_generics: #krate::UpdateHandler<#body>));
+                    }
+                    let (mimpl, _, mwhere) = mg.split_for_impl();
+                    let (elem, body) = (f.pat.elem(), keep_span(f.body.to_token_stream()));
+                    mappers.push(quote! {
+                        #[doc(hidden)]
+                        #[allow(non_camel_case_types)]
+                        pub struct #mapper<#(#decl_params),*>(::core::marker::PhantomData<fn() -> (#(#type_params,)*)>);
+                        impl #mimpl #krate::Map<#elem> for #mapper<#(#ty_args0),*> #mwhere {
+                            type Out = #body;
+                        }
+                    });
+                }
+            }
+        }
+        while tys.len() < ARITY {
+            tys.push(quote!(()));
+            pats.push(quote!(_));
+        }
+        (quote!((#(#tys,)*)), quote!((#(#pats,)*)), quote!(#(#mappers)*))
+    };
     let field_vars: Vec<&Ident> = keep.iter().map(|&i| &vars[slot_of[i]]).collect();
 
     // Type parameters may not appear in any field; a marker keeps them used.
@@ -778,7 +1055,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
 
 
     // `Node` for a component. Its bounds are the component's own.
-    let handler = subs.iter().any(|s| s.handled);
+    let handler = !fors.is_empty() || subs.iter().any(|s| s.handled);
     let key_listener = input.attrs.iter().any(|a| a.path().is_ident("key_listener"));
     let listener = input.attrs.iter().any(|a| a.path().is_ident("listener"));
     let mut node_items = if key_listener {
@@ -888,10 +1165,14 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         .map(|s| {
             let m = marker_of(s);
             let sp = s.span;
-            let call = quote_spanned!(sp=> __need::<#m, #name #ty_generics>());
-            call
+            keep_span(quote_spanned!(sp=> __need::<#m, #name #ty_generics>()))
         })
         .collect();
+    let mut checks = checks;
+    for f in &fors {
+        let (cat, sp) = (&f.catalog, f.catalog.span());
+        checks.push(keep_span(quote_spanned!(sp=> __cat::<#cat>())));
+    }
     let handler_check = if checks.is_empty() {
         quote!()
     } else {
@@ -899,6 +1180,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
             #[allow(dead_code, non_snake_case)]
             const _: () = {
                 fn __need<E: #krate::HandledEdge, T: #krate::UpdateHandler<E>>() {}
+                fn __cat<C: #krate::Catalog>() {}
                 fn __check #impl_generics () #where_clause {
                     #(#checks;)*
                 }
@@ -928,6 +1210,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
 
         #markers
         #handler_check
+        #mappers
 
         impl #impl_generics #krate::ComponentSubscription for #name #ty_generics #where_clause {
             type Deps = #deps_ty;
