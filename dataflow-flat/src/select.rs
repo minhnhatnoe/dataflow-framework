@@ -9,8 +9,10 @@
 //!
 //! A selector is a zero-sized type implementing [`Select<In>`]: it tests a
 //! pattern on a value of type `In` and, when it matches, gives a reference to
-//! the matched part. Selectors are not nodes: they have no state, nothing is
-//! stored, and they appear only in subscriptions. Library selectors:
+//! the matched part. Selectors are not nodes: they have no state and appear only
+//! in subscriptions. (A subscriber that reads a selected input in steps where
+//! it does not match gets the last matched value, kept by the plan in a slot,
+//! or the selector's [`Initial`] value.) Library selectors:
 //! `option::Some` and `option::None` (the derive maps a bare `Some` / `None`
 //! in a chain to them); `#[derive(Demux)]` on an enum generates one selector
 //! per variant in a module named after the enum in snake_case; a guard is a
@@ -206,6 +208,7 @@ where
     label = "the last matching value is cloned into the pipeline's storage"
 )]
 pub trait Keep: Clone + 'static {}
+#[diagnostic::do_not_recommend]
 impl<T: Clone + 'static> Keep for T {}
 
 /// Identity, for a conditional impl on a concrete type (a `where` that does

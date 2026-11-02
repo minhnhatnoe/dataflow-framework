@@ -312,7 +312,8 @@ impl PosKindOf<1> for () {
 #[doc(hidden)]
 pub struct IsSlot<R, const P: usize>(std::marker::PhantomData<R>);
 impl<R: Planned, const P: usize> IsSlot<R, P> {
-    pub const K: u8 = if P >= R::PLAN.n_components() { 1 } else { 0 };
+    /// (`len - 2` components as in `Whole::N`: also right for a plan that failed.)
+    pub const K: u8 = if P >= R::PLAN.len() - 2 { 1 } else { 0 };
 }
 #[doc(hidden)]
 pub trait PosClass {
@@ -583,16 +584,6 @@ impl<R: Planned> Whole<R> {
     /// Storage positions: the components, then the stored selected values.
     pub const T: usize = Self::N + R::PLAN.n_slots();
     pub const CT: usize = class(0, Self::T);
-}
-#[doc(hidden)]
-pub trait WholeTy {
-    type Cl;
-}
-impl<R: Planned> WholeTy for Whole<R>
-where
-    (): ClassOf<{ Whole::<R>::C }>,
-{
-    type Cl = <() as ClassOf<{ Whole::<R>::C }>>::Ty;
 }
 #[doc(hidden)]
 pub trait TotalTy {

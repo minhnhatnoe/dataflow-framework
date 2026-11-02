@@ -24,12 +24,27 @@
 //! read. The plan computes each component's *condition* (a set of terms, each a
 //! set of selector decisions) and checks, at compile time, that after absorption
 //! the terms are pairwise exclusive (otherwise "<C> joins branches that can fire
-//! in the same step"), that a component reads a selected edge only when its own
-//! condition implies the edge fires ("<C> reads <N> through selectors in steps
-//! where they do not match; subscribe to a component that stores it"), and that
-//! every component is reachable from the root. A component whose condition is
-//! "always" has no check in the push; the others test their edges' flags, which
-//! LLVM keeps in registers. See `plan` for the data model.
+//! in the same step"), and that every component is reachable from the root. A
+//! component whose condition is "always" has no check in the push; the others
+//! test their edges' flags, which LLVM keeps in registers. See `plan` for the
+//! data model.
+//!
+//! # Stored selected values
+//!
+//! A component may read a selected input in a step where its selectors do not
+//! match, because it runs for another input: `#[subscribe(Btc(a): Ws, Eth(b):
+//! Ws)]` runs on both and reads both. The input then gives the last value its
+//! selectors matched, or, before the first match, the selector's [`Initial`]
+//! value (`Default::default()` of the payload for `#[derive(Demux)]`, `Some`,
+//! `Ok`, `Err` and `On`; a hand-written selector implements `Initial`), and
+//! `new` is given that value too (a [`SelInit`], which dereferences to the part).
+//! The plan stores a value only for an input that needs it, namely one some of
+//! whose subscriber's terms do not imply it: one slot per (source, selector
+//! chain), shared by all such subscribers, written right after the source runs
+//! (at the start of the push for the root) when the chain matches, and cloned
+//! out of the source's output (so the payload is `Clone`). An input that is
+//! always matched when its subscriber runs is read through the source as
+//! before, with no slot. Handled entries are never read and never stored.
 //!
 //! # How it works
 //!
