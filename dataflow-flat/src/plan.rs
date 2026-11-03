@@ -77,6 +77,8 @@ const MAX_LST: usize = 1 << 18;
 const KPOOL: usize = 1 << 16;
 /// `lst_t` value: the entry's candidates are all terms of its component.
 const ALLT: u32 = u32::MAX - 1;
+/// `live_dec_at`: the term conflicts with the context.
+const CONFL: u32 = u32::MAX - 2;
 const MAX_CTX: usize = 32;
 
 /// Program node kinds.
@@ -534,9 +536,8 @@ pub struct Plan {
     ctx_old: [u32; MAX_CTX],
     ctx_len: usize,
     /// Per entry of `lst`: the candidate terms of the component in the current context (a list
-    /// in `cp_t`/`cp_next`, `ALLT` = all its terms), their number, and the list's tail.
+    /// in `cp_t`/`cp_next`, `ALLT` = all its terms), and the list's tail.
     lst_t: [u32; MAX_LST],
-    lst_n: [u32; MAX_LST],
     lst_tail: [u32; MAX_LST],
     cp_t: [u32; MAX_LST],
     cp_next: [u32; MAX_LST],
@@ -666,7 +667,6 @@ impl Plan {
             ctx_old: [0; MAX_CTX],
             ctx_len: 0,
             lst_t: [0; MAX_LST],
-            lst_n: [0; MAX_LST],
             lst_tail: [0; MAX_LST],
             cp_t: [0; MAX_LST],
             cp_next: [0; MAX_LST],
@@ -1390,26 +1390,67 @@ impl Plan {
     }
     /// Does a decision of term `t` exclude a decision of the context?
     const fn conflicts(&self, t: u32) -> bool {
-        let n = self.term_len(t);
-        let mut i = 0;
-        while i < n {
-            if self.dec_conflicts(self.term_item(t, i) as usize) {
-                return true;
-            }
-            i += 1;
-        }
-        false
+        self.term_status(t) == 0
     }
     const fn term_held(&self, t: u32) -> bool {
-        let n = self.term_len(t);
-        let mut i = 0;
-        while i < n {
-            if !self.held(self.term_item(t, i)) {
-                return false;
+        self.term_status(t) == 2
+    }
+    /// One pass over term `t` against the context: 0 if a decision of it excludes the context's
+    /// decision at its place, 2 if every decision of it is held, else 1. (The constant
+    /// interpreter charges per call, so the helpers `term_len`, `term_item`, `held` and
+    /// `dec_conflicts` are written out here.)
+    const fn term_status(&self, t: u32) -> u8 {
+        let tu = t as usize;
+        let end = tu + 1 + self.tpool[tu] as usize;
+        let mut all_held = true;
+        let mut i = tu + 1;
+        while i < end {
+            let x = self.tpool[i] as usize;
+            let key = self.dn_key[x];
+            if key == crate::select::GUARD {
+                all_held = false;
+            } else {
+                let c = self.cur[self.dn_place[x] as usize];
+                if c == 0 {
+                    all_held = false;
+                } else if c as usize - 1 != x && self.dn_key[c as usize - 1] != key {
+                    return 0;
+                }
             }
             i += 1;
         }
-        true
+        if all_held {
+            2
+        } else {
+            1
+        }
+    }
+    /// The unheld keyed decision at place `(x, prev)` in term `t`; `NONE` if there is none;
+    /// `CONFL` if the term conflicts with the context (one pass).
+    const fn live_dec_at(&self, t: u32, x: u32, prev: u32) -> u32 {
+        let tu = t as usize;
+        let end = tu + 1 + self.tpool[tu] as usize;
+        let mut found = NONE;
+        let mut i = tu + 1;
+        while i < end {
+            let d = self.tpool[i];
+            let du = d as usize;
+            let key = self.dn_key[du];
+            if key != crate::select::GUARD {
+                let c = self.cur[self.dn_place[du] as usize];
+                if c != 0 {
+                    // a decision of the context at its place: this one is held, or it conflicts
+                    let cu = c as usize - 1;
+                    if cu != du && self.dn_key[cu] != key {
+                        return CONFL;
+                    }
+                } else if found == NONE && self.dn_node[du] == x && self.dn_prev[du] == prev {
+                    found = d;
+                }
+            }
+            i += 1;
+        }
+        found
     }
     // Candidate terms of entry `q` of `lst`: a cursor `c` over them.
     const fn c_start(&self, q: usize) -> u32 {
@@ -1472,16 +1513,34 @@ impl Plan {
     /// (some term of entry `q` is consistent with the context, some such term holds in it)
     const fn consistent_static(&self, q: usize) -> (bool, bool) {
         let mut cons = false;
-        let mut c = self.c_start(q);
-        while !self.c_end(q, c) {
-            let t = self.c_term(q, c);
-            if !self.conflicts(t) {
-                cons = true;
-                if self.term_held(t) {
-                    return (true, true);
+        let tq = self.lst_t[q];
+        if tq == ALLT {
+            let i = self.lst[q] as usize;
+            let ob = self.co[i] as usize;
+            let end = ob + self.cn[i] as usize;
+            let mut c = ob;
+            while c < end {
+                let st = self.term_status(self.olist[c]);
+                if st != 0 {
+                    cons = true;
+                    if st == 2 {
+                        return (true, true);
+                    }
                 }
+                c += 1;
             }
-            c = self.c_next(q, c);
+        } else {
+            let mut c = tq;
+            while c != NONE {
+                let st = self.term_status(self.cp_t[c as usize]);
+                if st != 0 {
+                    cons = true;
+                    if st == 2 {
+                        return (true, true);
+                    }
+                }
+                c = self.cp_next[c as usize];
+            }
         }
         (cons, false)
     }
@@ -1493,8 +1552,7 @@ impl Plan {
         let mut k = 0;
         let cn = self.cn[x] as usize;
         while k < cn {
-            let t = self.olist[self.co[x] as usize + k];
-            if !self.conflicts(t) && self.term_held(t) {
+            if self.term_status(self.olist[self.co[x] as usize + k]) == 2 {
                 return true;
             }
             k += 1;
@@ -1519,19 +1577,65 @@ impl Plan {
         }
         NONE
     }
+    /// Does entry `j` end the segment of entries that wait for a keyed decision at `(x, prev)`?
+    /// It does iff it has a term consistent with the context that does not wait for one (it is
+    /// `consistent_static(j).0 && (consistent_static(j).1 || !can_pend_at(j, x, prev))`).
+    const fn seg_ends(&self, j: usize, x: u32, prev: u32) -> bool {
+        let tq = self.lst_t[j];
+        if tq == ALLT {
+            let i = self.lst[j] as usize;
+            let ob = self.co[i] as usize;
+            let end = ob + self.cn[i] as usize;
+            let mut c = ob;
+            while c < end {
+                if self.live_dec_at(self.olist[c], x, prev) == NONE {
+                    return true;
+                }
+                c += 1;
+            }
+        } else {
+            let mut c = tq;
+            while c != NONE {
+                if self.live_dec_at(self.cp_t[c as usize], x, prev) == NONE {
+                    return true;
+                }
+                c = self.cp_next[c as usize];
+            }
+        }
+        false
+    }
     /// Does entry `q` wait, in every consistent term, for a keyed decision at `(x, prev)`?
     const fn can_pend_at(&self, q: usize, x: u32, prev: u32) -> bool {
         let mut any = false;
-        let mut c = self.c_start(q);
-        while !self.c_end(q, c) {
-            let t = self.c_term(q, c);
-            if !self.conflicts(t) {
-                if self.term_held(t) || self.dec_at(t, x, prev) == NONE {
-                    return false;
+        let tq = self.lst_t[q];
+        if tq == ALLT {
+            let i = self.lst[q] as usize;
+            let ob = self.co[i] as usize;
+            let end = ob + self.cn[i] as usize;
+            let mut c = ob;
+            while c < end {
+                // a live term must wait for an unheld keyed decision at the place
+                let d = self.live_dec_at(self.olist[c], x, prev);
+                if d != CONFL {
+                    if d == NONE {
+                        return false;
+                    }
+                    any = true;
                 }
-                any = true;
+                c += 1;
             }
-            c = self.c_next(q, c);
+        } else {
+            let mut c = tq;
+            while c != NONE {
+                let d = self.live_dec_at(self.cp_t[c as usize], x, prev);
+                if d != CONFL {
+                    if d == NONE {
+                        return false;
+                    }
+                    any = true;
+                }
+                c = self.cp_next[c as usize];
+            }
         }
         any
     }
@@ -1812,8 +1916,7 @@ impl Plan {
             }
             let mut j = k + 1;
             while j < hi {
-                let (c2, s2) = self.consistent_static(j);
-                if c2 && (s2 || !self.can_pend_at(j, x, prev)) {
+                if self.seg_ends(j, x, prev) {
                     break;
                 }
                 j += 1;
@@ -1956,16 +2059,33 @@ impl Plan {
     /// A switch for the segment `lst[lo..hi]` at the place `(x, prev)`.
     const fn emit_switch(&mut self, lo: usize, hi: usize, x: u32, prev: u32) -> u32 {
         let m = self.kp_len;
-        // 1. the keys, sorted
+        // 1. the keys, sorted. The key of every candidate term at this place goes to `ib[sb..]`
+        // (free until the branches are emitted), so that the two passes below don't redo
+        // `live_dec_at` for it; pass 0 turns it into the key's rank.
+        let sb = self.ib_len;
+        let mut si = 0;
         let mut nk = 0;
         let mut q = lo;
         while q < hi {
-            let mut cc = self.c_start(q);
-            while !self.c_end(q, cc) {
-                let t = self.c_term(q, cc);
-                if !self.conflicts(t) {
-                    let d = self.dec_at(t, x, prev);
-                    if d != NONE {
+            let tq = self.lst_t[q];
+            let all = tq == ALLT;
+            let (mut cc, cend) = if all {
+                let e = self.lst[q] as usize;
+                (self.co[e], self.co[e] + self.cn[e])
+            } else {
+                (tq, 0)
+            };
+            while if all { cc < cend } else { cc != NONE } {
+                let t = if all { self.olist[cc as usize] } else { self.cp_t[cc as usize] };
+                {
+                    if sb + si == MAX_LST {
+                        self.fail("the push program is too large: ", "raise dataflow_flat's list pool", "");
+                        return 0;
+                    }
+                    let d = self.live_dec_at(t, x, prev);
+                    self.ib[sb + si] = if d < CONFL { self.dn_key[d as usize] } else { NONE };
+                    si += 1;
+                    if d < CONFL {
                         let key = self.dn_key[d as usize];
                         let (found, at) = self.find_key(m, nk, key);
                         if !found {
@@ -1983,7 +2103,7 @@ impl Plan {
                         }
                     }
                 }
-                cc = self.c_next(q, cc);
+                cc = if all { cc + 1 } else { self.cp_next[cc as usize] };
             }
             q += 1;
         }
@@ -2035,17 +2155,32 @@ impl Plan {
                     return 0;
                 }
             }
+            let mut si = 0;
             let mut q = lo;
             while q < hi {
                 let i = self.lst[q] as usize;
                 let ord = (q - lo + 1) as u32;
-                let mut cc = self.c_start(q);
-                while !self.c_end(q, cc) {
-                    let t = self.c_term(q, cc);
-                    if !self.conflicts(t) {
-                        let d = self.dec_at(t, x, prev);
-                        if d != NONE {
-                            let (_, r) = self.find_key(m, nk, self.dn_key[d as usize]);
+                let tq = self.lst_t[q];
+                let all = tq == ALLT;
+                let (mut cc, cend) = if all {
+                    let e = self.lst[q] as usize;
+                    (self.co[e], self.co[e] + self.cn[e])
+                } else {
+                    (tq, 0)
+                };
+                while if all { cc < cend } else { cc != NONE } {
+                    let t = if all { self.olist[cc as usize] } else { self.cp_t[cc as usize] };
+                    {
+                        let sv = self.ib[sb + si];
+                        si += 1;
+                        if sv != NONE {
+                            let r = if pass == 0 {
+                                let (_, r) = self.find_key(m, nk, sv);
+                                self.ib[sb + si - 1] = r as u32;
+                                r
+                            } else {
+                                sv as usize
+                            };
                             if self.kpool[sm + r] != ord {
                                 self.kpool[sm + r] = ord;
                                 if pass == 0 {
@@ -2054,10 +2189,11 @@ impl Plan {
                                     let at = self.kpool[ch + r] as usize;
                                     self.lst[base + at] = i as u32;
                                     self.lst_t[base + at] = NONE;
-                                    self.lst_n[base + at] = 0;
                                     self.lst_tail[base + at] = NONE;
-                                    self.lst_h[base + at] = NONE;
-                                    self.lst_htail[base + at] = NONE;
+                                    if self.handler[i] {
+                                        self.lst_h[base + at] = NONE;
+                                        self.lst_htail[base + at] = NONE;
+                                    }
                                     self.kpool[en + r] = (base + at) as u32;
                                     self.kpool[ch + r] += 1;
                                 }
@@ -2078,12 +2214,11 @@ impl Plan {
                                     self.cp_next[self.lst_tail[e] as usize] = nd as u32;
                                 }
                                 self.lst_tail[e] = nd as u32;
-                                self.lst_n[e] += 1;
                                 self.cp_len = nd + 1;
                             }
                         }
                     }
-                    cc = self.c_next(q, cc);
+                    cc = if all { cc + 1 } else { self.cp_next[cc as usize] };
                 }
                 if pass == 1 && self.handler[i] {
                     // the handled edges of the entry go to the branches that do not exclude them
@@ -2133,9 +2268,9 @@ impl Plan {
                                 r = k2;
                             } else {
                                 let t = self.olist[self.co[u] as usize + k2];
-                                if !self.conflicts(t) {
-                                    let d = self.dec_at(t, x, prev);
-                                    if d != NONE {
+                                {
+                                    let d = self.live_dec_at(t, x, prev);
+                                    if d < CONFL {
                                         let (found, rr) = self.find_key(m, nk, self.dn_key[d as usize]);
                                         if found && self.kpool[hs + rr] != hstamp {
                                             self.kpool[hs + rr] = hstamp;
