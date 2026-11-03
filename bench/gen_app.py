@@ -583,7 +583,7 @@ def ALLOW(M):
     return "#![allow(long_running_const_eval)]\n" if M.components() > 1500 else ""
 
 
-def gen_app(out, M, MODE, big_inline=False):
+def gen_app(out, M, MODE, uinl):
     app = f"{out}/app"
     write(f"{app}/Cargo.toml", f"""[package]
 name = "app"
@@ -654,6 +654,7 @@ impl Component for Sender {{
     type Config = ();
     type Output = ();
     fn new((): (), _: Self::Init<'_>) -> (Self, ()) {{ (Sender {{ core: DigestCore::default() }}, ()) }}
+    {uinl["sender"]}
     fn update(&mut self, i: Self::Input<'_>) {{
         let tweak: u64 = 1000; // EDIT
         let digest = ({digest}).wrapping_mul(tweak);
@@ -681,6 +682,7 @@ impl Component for Risk {{
     type Config = ();
     type Output = ();
     fn new((): (), _: Self::Init<'_>) -> (Self, ()) {{ (Risk {{ core: DigestCore::default() }}, ()) }}
+    {uinl["risk"]}
     fn update(&mut self, i: Self::Input<'_>) {{
         let tweak: u64 = 1000; // EDIT
         let digest = ({rsum}).wrapping_mul(tweak);
@@ -692,7 +694,7 @@ impl Component for Risk {{
     bsubs = ",\n    ".join(f"f{j}: marketlib::Fair<marketlib::{EX[e][2]}, marketlib::catalog::{EX[e][0]}::M{k}>"
                            for j, (e, k) in enumerate(M.big_deps))
     body = "\n        ".join(big_math(M, lambda j: f"i.f{j}"))
-    big_attr = "#[inline(always)]" if big_inline else ""
+    big_attr = uinl["big"]
     write(f"{app}/src/big.rs", f"""//! The big component: wide, with a long body. Lives alone in its file.
 use dataflow_flat::{{Component, ComponentSubscription, UpdateHandler}};
 use marketlib::DigestCore;
@@ -720,7 +722,7 @@ impl Component for Big {{
 # ---------------------------------------------------------------------------------------------
 # baseline: hand-written nested match
 # ---------------------------------------------------------------------------------------------
-def gen_baseline(out, M, MODE, core_inline):
+def gen_baseline(out, M, MODE, core_inline, uinl):
     ENUM = MODE == "enum"
     b = f"{out}/baseline"
     write(f"{b}/Cargo.toml", """[package]
@@ -853,25 +855,25 @@ impl Hand {{
 }}
 impl Default for Hand {{ fn default() -> Self {{ Self::new() }} }}
 
-#[inline(always)]
+{uinl["sender"]}
 pub fn sender_digest(h: &Hand, e: usize) -> u64 {{
     match e {{
 {chr(10).join(f"        {e} => {sample(e)}," for e in range(3))}
         _ => 0,
     }}
 }}
-#[inline(always)]
+{uinl["risk"]}
 pub fn risk_digest(h: &Hand) -> u64 {{ {risk_sum(M, accx, accq)} }}
-#[inline(always)]
+{uinl["big"]}
 pub fn big_digest(h: &Hand) -> u64 {{
     {(chr(10) + "    ").join(big_lines)}
     acc
 }}
-#[inline(always)]
+{uinl["sender"]}
 pub fn step_sender(h: &mut Hand, e: usize) {{ let d = sender_digest(h, e).wrapping_mul(1000); h.send[e].step(d, &SENT[e]) }}
-#[inline(always)]
+{uinl["risk"]}
 pub fn step_risk(h: &mut Hand) {{ let d = risk_digest(h).wrapping_mul(1000); h.risk.step(d, &RISK) }}
-#[inline(always)]
+{uinl["big"]}
 pub fn step_big(h: &mut Hand) {{ let d = big_digest(h); h.big.step(d, &BIG) }}
 """)
     if SOA:
@@ -1115,7 +1117,10 @@ def main():
     ap.add_argument("--markets", help="L,B,H overrides the size")
     ap.add_argument("--sink-scan", default="8", help="how many of its inputs each order sender / risk samples (or 'all')")
     ap.add_argument("--big-width", type=int, default=42)
-    ap.add_argument("--big-inline", action="store_true", help="mark the framework Big::update #[inline(always)] (user-side hint)")
+    ap.add_argument("--user-inline", default="always", choices=["always", "none"],
+                    help="inlining attribute of the user-level Sender/Risk/Big update fns, the same on the framework side and on the hand-written side "
+                         "(the hand-written digest/step fns): always = #[inline(always)] on both (default, fair), none = no attribute on either")
+    ap.add_argument("--big-inline", action="store_true", help="with --user-inline none: #[inline(always)] on Big only (framework Big::update and big_digest/step_big)")
     ap.add_argument("--core-inline", default="hint", choices=["none", "hint"])
     a = ap.parse_args()
     if a.markets:
@@ -1145,8 +1150,10 @@ members = ["marketlib", "app", "baseline", "runner"]
     if os.path.exists(f"{LIB}/Cargo.lock") and not os.path.exists(f"{out}/Cargo.lock"):
         shutil.copy(f"{LIB}/Cargo.lock", f"{out}/Cargo.lock")
     gen_lib(out, M, a.mode, a.core_inline)
-    gen_app(out, M, a.mode, a.big_inline)
-    gen_baseline(out, M, a.mode, a.core_inline)
+    A = "#[inline(always)]"
+    uinl = {k: (A if a.user_inline == "always" or (k == "big" and a.big_inline) else "") for k in ("sender", "risk", "big")}
+    gen_app(out, M, a.mode, uinl)
+    gen_baseline(out, M, a.mode, a.core_inline, uinl)
     gen_runner(out, M, a.mode)
     print(f"{out}: mode={a.mode} markets L/B/H={M.n} components={M.components()} crosses={len(M.cross)} edges~{M.edges()}")
 
