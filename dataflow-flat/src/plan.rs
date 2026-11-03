@@ -118,6 +118,8 @@ pub(crate) const PG_IF: u8 = 9;
 pub(crate) const PG_GATE: u8 = 10;
 /// The fewest runs worth a shared tail (0 disables sharing).
 const TAIL_MIN: usize = 2;
+/// The top bit of the length word of a term in `tpool`: the term holds a keyed decision.
+const TERM_KEYED: u32 = 1 << 31;
 /// Items (handled edges that may fire) of all handler runs in the program.
 const HPOOL: usize = 1 << 17;
 /// Guards (the conditions the program tests again at run time): guards, their terms and the
@@ -839,8 +841,14 @@ impl Plan {
         d as u32
     }
 
+    /// The number of decisions of term `t` (the top bit of the word is `TERM_KEYED`).
     const fn term_len(&self, t: u32) -> usize {
-        self.tpool[t as usize] as usize
+        (self.tpool[t as usize] & !TERM_KEYED) as usize
+    }
+    /// Does term `t` hold a keyed decision (one that a context can exclude)? A term of guard
+    /// decisions only (a chain of guards) never conflicts with a context.
+    const fn term_keyed(&self, t: u32) -> bool {
+        self.tpool[t as usize] & TERM_KEYED != 0
     }
     const fn term_item(&self, t: u32, k: usize) -> u32 {
         self.tpool[t as usize + 1 + k]
@@ -903,15 +911,19 @@ impl Plan {
             k += 1;
         }
         let mut count = n;
+        let mut keyed = self.term_keyed(t);
         let mut x = d;
         while x != NONE {
             if !self.term_has(t, x) {
                 self.tpool[base + 1 + count] = x;
                 count += 1;
+                if self.dn_key[x as usize] != crate::select::GUARD {
+                    keyed = true;
+                }
             }
             x = self.dn_prev[x as usize];
         }
-        self.tpool[base] = count as u32;
+        self.tpool[base] = count as u32 | if keyed { TERM_KEYED } else { 0 };
         self.tp_len = base + 1 + count;
         base as u32
     }
@@ -1450,7 +1462,7 @@ impl Plan {
     }
     /// Does a decision of term `t` exclude a decision of the context?
     const fn conflicts(&self, t: u32) -> bool {
-        self.term_status(t) == 0
+        self.term_keyed(t) && self.term_status(t) == 0
     }
     const fn term_held(&self, t: u32) -> bool {
         self.term_status(t) == 2
@@ -1461,18 +1473,23 @@ impl Plan {
     /// `dec_conflicts` are written out here.)
     const fn term_status(&self, t: u32) -> u8 {
         let tu = t as usize;
-        let end = tu + 1 + self.tpool[tu] as usize;
+        let end = tu + 1 + (self.tpool[tu] & !TERM_KEYED) as usize;
         let mut all_held = true;
         let mut i = tu + 1;
         while i < end {
             let x = self.tpool[i] as usize;
             let key = self.dn_key[x];
             if key == crate::select::GUARD {
-                all_held = false;
+                // held by a guard block around the code (the block holds its whole chain)
+                if self.hc[x] == 0 {
+                    all_held = false;
+                }
             } else {
                 let c = self.cur[self.dn_place[x] as usize];
                 if c == 0 {
-                    all_held = false;
+                    if self.hc[x] == 0 {
+                        all_held = false;
+                    }
                 } else if c as usize - 1 != x && self.dn_key[c as usize - 1] != key {
                     return 0;
                 }
@@ -1489,7 +1506,7 @@ impl Plan {
     /// `CONFL` if the term conflicts with the context (one pass).
     const fn live_dec_at(&self, t: u32, x: u32, prev: u32) -> u32 {
         let tu = t as usize;
-        let end = tu + 1 + self.tpool[tu] as usize;
+        let end = tu + 1 + (self.tpool[tu] & !TERM_KEYED) as usize;
         let mut found = NONE;
         let mut i = tu + 1;
         while i < end {
@@ -1504,7 +1521,7 @@ impl Plan {
                     if cu != du && self.dn_key[cu] != key {
                         return CONFL;
                     }
-                } else if found == NONE && self.dn_node[du] == x && self.dn_prev[du] == prev {
+                } else if found == NONE && self.dn_node[du] == x && self.dn_prev[du] == prev && self.hc[du] == 0 {
                     found = d;
                 }
             }
@@ -2104,6 +2121,22 @@ impl Plan {
         }
         any
     }
+    /// (some term of entry `q` is consistent with the context, every such term has decision `d`)
+    const fn wait_all(&self, q: usize, d: u32) -> (bool, bool) {
+        let mut cons = false;
+        let mut c = self.c_start(q);
+        while !self.c_end(q, c) {
+            let t = self.c_term(q, c);
+            if !self.conflicts(t) {
+                cons = true;
+                if !self.term_has(t, d) {
+                    return (true, false);
+                }
+            }
+            c = self.c_next(q, c);
+        }
+        (cons, true)
+    }
     /// A block for entry `k` of `lst[..hi]`: a guard decision `d` that every consistent term of
     /// the entry waits for and whose source has run, and the end `j` of the run of entries that all
     /// wait for it (an entry that runs regardless ends the block: order is kept, the ones after it
@@ -2128,9 +2161,11 @@ impl Plan {
                         let mut j = k + 1;
                         let mut cnt = 1;
                         while j < hi {
-                            let (c2, s2) = self.consistent_static(j);
+                            // `d` is not held, so a term that has it does not hold in the context:
+                            // the entry waits for `d` iff every consistent term has it
+                            let (c2, w2) = self.wait_all(j, d);
                             if c2 {
-                                if s2 || !self.all_terms_have(j, d) {
+                                if !w2 {
                                     break;
                                 }
                                 cnt += 1;

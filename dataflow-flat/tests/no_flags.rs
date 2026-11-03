@@ -552,3 +552,117 @@ fn a_long_chain_with_an_order_split() {
         assert_eq!(take(), want, "a = {a}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// `share_tail` with gates. The three branches of a switch on `key` end in the same items
+// (`Y1`, `Y2`, `Y3`, joins of the branch components); two of the branches have a gate before
+// them (`Ca`: key 1 and `v` a multiple of 3, `Cb`: key 2 and `v` a multiple of 5), the third has
+// none (`Cc`: key 3). Sharing the items after a gate would run `Y1..Y3` in a push where the gate
+// is closed, so the log is compared with a model over many pushes.
+// ---------------------------------------------------------------------------
+
+#[derive(Root)]
+pub struct Sw {
+    key: u32,
+    v: u32,
+}
+pub struct Key<const N: u32>;
+impl<const N: u32> Select<Sw> for Key<N> {
+    type Out = u32;
+    const KEY: u32 = N;
+    fn select(x: &Sw) -> Option<&u32> {
+        (x.key == N).then_some(&x.v)
+    }
+    fn key_of(x: &Sw) -> u32 {
+        x.key
+    }
+}
+pub struct Mul<const N: u32>;
+impl<const N: u32> Select<u32> for Mul<N> {
+    type Out = u32;
+    const KEY: u32 = GUARD;
+    fn select(x: &u32) -> Option<&u32> {
+        (*x % N == 0).then_some(x)
+    }
+    fn key_of(_: &u32) -> u32 {
+        GUARD
+    }
+}
+comp!(Ca, [Key::<1>(Mul::<3>(x)): Sw], |i| *i.x + 100);
+comp!(Cb, [Key::<2>(Mul::<5>(x)): Sw], |i| *i.x + 200);
+comp!(Cc, [Key::<3>(x): Sw], |i| *i.x + 300);
+
+macro_rules! ycomp {
+    ($name:ident, $log:literal, [$($sub:tt)*], |$i:ident| $body:expr) => {
+        #[derive(ComponentSubscription, UpdateHandler)]
+        #[subscribe($($sub)*)]
+        pub struct $name;
+        impl Component for $name {
+            type Config = ();
+            type Output = u32;
+            fn new((): (), _: Self::Init<'_>) -> (Self, u32) {
+                ($name, 0)
+            }
+            fn update(&mut self, $i: Self::Input<'_>) -> u32 {
+                let r: u32 = $body;
+                log(format!($log, r));
+                r
+            }
+        }
+    };
+}
+ycomp!(Y1, "Y1 {}", [a: Ca, b: Cb, c: Cc], |i| *i.a + *i.b * 7 + *i.c * 13);
+ycomp!(Y2, "Y2 {}", [y: Y1], |i| *i.y + 1);
+ycomp!(Y3, "Y3 {}", [y: Y2, z: Y1], |i| *i.y + *i.z);
+
+/// The model: the outputs persist, `Y1` runs iff some branch component ran.
+struct Model {
+    out: [u32; 3],
+    y1: u32,
+    y2: u32,
+}
+impl Model {
+    fn push(&mut self, key: u32, v: u32) -> Vec<String> {
+        let mut want = Vec::new();
+        let ran = match key {
+            1 if v % 3 == 0 => Some((0, "Ca", v + 100)),
+            2 if v % 5 == 0 => Some((1, "Cb", v + 200)),
+            3 => Some((2, "Cc", v + 300)),
+            _ => None,
+        };
+        if let Some((k, name, o)) = ran {
+            self.out[k] = o;
+            want.push(name.to_string());
+            self.y1 = self.out[0] + self.out[1] * 7 + self.out[2] * 13;
+            want.push(format!("Y1 {}", self.y1));
+            self.y2 = self.y1 + 1;
+            want.push(format!("Y2 {}", self.y2));
+            want.push(format!("Y3 {}", self.y2 + self.y1));
+        }
+        want
+    }
+}
+
+#[test]
+fn items_after_a_gate_are_not_shared() {
+    let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut p = Pipeline::<Sw, (Y3,)>::build(Configs::new()).unwrap();
+    take();
+    let mut m = Model { out: [0; 3], y1: 0, y2: 0 };
+    // every (key, v) with a closed gate and an open one, then a scrambled sequence
+    let mut seq: Vec<(u32, u32)> = Vec::new();
+    for key in 0..5 {
+        for v in [1, 2, 3, 4, 5, 6, 10, 15] {
+            seq.push((key, v));
+        }
+    }
+    for k in 0..400u32 {
+        let h = k.wrapping_mul(2654435761) >> 9;
+        seq.push((h % 5, (h >> 3) % 31));
+    }
+    for (key, v) in seq {
+        let want = m.push(key, v);
+        p.push(Sw { key, v });
+        assert_eq!(take(), want, "key = {key}, v = {v}");
+    }
+}
