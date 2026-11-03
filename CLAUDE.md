@@ -13,7 +13,7 @@ Always run cargo under a timeout and a memory cap (see "Rules for agents"). Larg
 ```sh
 CARGO_BUILD_JOBS=1 timeout 600 cargo test -p dataflow-flat        # tests are heavy: build one test with --test name
 CARGO_BUILD_JOBS=1 timeout 300 cargo test --doc -p dataflow-flat  # doc tests (pipeline.rs, sinks.rs, node.rs)
-timeout 900 scripts/check_errors.sh                # all 77 cases; or pass case names to run a subset
+timeout 900 scripts/check_errors.sh                # all 82 cases; or pass case names to run a subset
 timeout 120 cargo run -p dataflow-flat --example exchanges   # also basic, diamond, selbench
 python3 bench/gen_app.py --size typical --mode enum --out DIR # --mode is required: 1a | enum | req
 python3 scripts/measure.py --mode enum --sizes tiny,small --out DIR   # default --out is target/harness
@@ -82,7 +82,7 @@ Changed since the earlier model: `run` returning the root's output (replaced by 
 | `bench/gen_handler.py`, `gen_enum_keys.py`, `enum_keys_build.sh`, `enum_keys_run.sh` | Handler graph (`for` option), enum-key comparison and its build/run drivers |
 | `bench/gen_bench.py`, `bench/src/main.rs`, `bench/Cargo.toml` | The old layered flat-graph benchmark; `main.rs` is generated (`full 20`) |
 | `bench/sfb/sfb.rs` | Standalone store-forwarding repro (no framework dependency) |
-| `scripts/check_errors.sh` | 77 error cases, each a tiny crate under `target/error-cases/` |
+| `scripts/check_errors.sh` | 82 error cases, each a tiny crate under `target/error-cases/` |
 | `scripts/pgo.sh` | Profile-guided release build of a generated app (instrument, train on another seed, `-Cprofile-use`) |
 | `scripts/measure.py`, `scripts/bench.sh`, `scripts/gen_selbench.py` | Measurement harness for generated apps; pinned flat-graph benchmark; selector benchmark generator |
 | `handoff/tools/` | `memset-shim/` (`LD_PRELOAD` shim that found the incremental page-fault cost; hard-coded paths of a removed worktree), `profile-reader/` (self-profile aggregators), `excl-group-differential.py` and `excl-group-counters.diff` (old-vs-new differential for `excl_group`), `probes-scratch.diff`, `pv.sh` (hard-coded old path) |
