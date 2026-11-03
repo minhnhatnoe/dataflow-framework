@@ -740,7 +740,7 @@ fn chain_ty(chain: &[Type]) -> TokenStream2 {
 
 /// The chain of an entry as the library sees it: `()` for a plain entry; for a selected one, the
 /// selectors wrapped by the kind of the source (`ChainWrap`): the chain itself for a by-value
-/// source, a `ViewC` (the chain selects from the view) for a `#[handle]` component.
+/// source, a `ViewC` (the chain selects from the view) for a handle component.
 fn wrapped_chain(krate: &TokenStream2, s: &Subscription) -> TokenStream2 {
     let raw = chain_ty(&s.chain);
     if s.chain.is_empty() {
@@ -757,7 +757,7 @@ fn wrapped_chain(krate: &TokenStream2, s: &Subscription) -> TokenStream2 {
 /// only its handler sees its value. The key of an impl is the node type for a plain entry; for a
 /// selected entry the derive generates a marker type `<struct_snake>_edges::<Name>` (the
 /// binding's name in camel case, or the innermost selector's name for `_` and unit selectors).
-#[proc_macro_derive(ComponentSubscription, attributes(subscribe, listener, handle))]
+#[proc_macro_derive(ComponentSubscription, attributes(subscribe))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let loc = input.ident.span();
@@ -1180,57 +1180,12 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     let doc = format!("Inputs of [`{name}`], one reference per subscription, valid during `update`.");
     let init_doc = format!("What [`{name}`]'s `new` receives, one entry per subscription.");
 
-
-    // `Node` for a component. Its bounds are the component's own.
-    let listener = input.attrs.iter().any(|a| a.path().is_ident("listener"));
-    let mut node_items = quote!();
-    let requests_ty = if listener {
-        quote!(<#name #ty_generics as #krate::Listener>::Requests)
-    } else {
-        quote!(#krate::request::NoRequests)
-    };
-    if listener {
-        node_items = quote!(#node_items const LISTENS: bool = true;);
-    }
-    // A `#[listener]`'s `new` also gets `init.requests`.
-    let (init_requests_field, init_requests_default, fill_requests) = if listener {
-        (
-            quote!(pub requests: <#name #ty_generics as #krate::Listener>::Requests,),
-            quote!(requests: ::core::default::Default::default(),),
-            quote! {
-                #[doc(hidden)]
-                fn __fill_requests(init: &mut Self::Init<'_>, pass: &mut #krate::ConstructPass) {
-                    init.requests = pass.take_requests::<Self, <#name #ty_generics as #krate::Listener>::Requests>();
-                }
-            },
-        )
-    } else {
-        (quote!(), quote!(), quote!())
-    };
-
-    let handle = input.attrs.iter().any(|a| a.path().is_ident("handle"));
-    if handle && listener {
-        return Err(syn::Error::new_spanned(
-            name,
-            "`#[handle]` cannot be combined with `#[listener]` yet",
-        ));
-    }
-    let (nimpl_generics, nty_generics, _) = generics.split_for_impl();
-    let mut node_generics = generics.clone();
-    let node_trait = if handle { quote!(#krate::HandleComponent) } else { quote!(#krate::Component) };
-    node_generics.make_where_clause().predicates.push(parse_quote!(#name #ty_generics: #node_trait));
-    let (_, _, node_where) = node_generics.split_for_impl();
-    // `Sealed` and `Edge` need only the component's own trait: the long where clause of the
-    // subscriptions is checked once per impl, and on thousands of components that is measurable.
-    let mut light_generics = input.generics.clone();
-    {
-        let wc = light_generics.make_where_clause();
-        for p in &type_params {
-            wc.predicates.push(parse_quote!(#p: 'static));
-        }
-        wc.predicates.push(parse_quote!(#name #ty_generics: #node_trait));
-    }
-    let (_, _, light_where) = light_generics.split_for_impl();
+    // The node impls (`Sealed`, `Edge`, `Vertex`, `Node`, ...) of a component are blanket impls
+    // over `Component` in the library: the derive emits only `ComponentSubscription`. `new` also
+    // gets `init.requests` (`()` unless the component sets `type Requests`).
+    let requests_ty = quote!(<#name #ty_generics as #krate::Component>::Requests);
+    let init_requests_field = quote!(pub requests: #requests_ty,);
+    let init_requests_default = quote!(requests: ::core::default::Default::default(),);
 
     // The names of the inputs (per unique entry), for the plan's error about a selected input that
     // would have to be stored; only a component with a selected entry can have one.
@@ -1241,68 +1196,9 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
             names[slot_of[k]].push(n);
         }
         let joined = names.iter().map(|v| v.join("/")).collect::<Vec<_>>().join(",");
-        quote!(const INPUTS: &'static str = #joined;)
+        quote!(const __INPUTS: &'static str = #joined;)
     } else {
         quote!()
-    };
-    let node_impls = if handle {
-        quote! {
-            impl #nimpl_generics #krate::__private::Sealed for #name #nty_generics #light_where {}
-
-            impl #nimpl_generics #krate::Edge for #name #nty_generics #light_where {
-                type Read<'a> = <#name #nty_generics as #krate::HandleComponent>::View<'a> where Self: 'a;
-            }
-            impl #nimpl_generics #krate::Vertex for #name #nty_generics #node_where {
-                type Stored = <#name #nty_generics as #krate::HandleComponent>::Handle;
-                type Subs = <#name #nty_generics as #krate::ComponentSubscription>::Deps;
-                type Kind = #krate::HandleKind;
-                type Requests = #requests_ty;
-                const KIND: u8 = #krate::KIND_COMPONENT;
-                const VIEW: bool = true;
-                #inputs_const
-            }
-            impl #nimpl_generics #krate::HandleView for #name #nty_generics #node_where {
-                #[cfg_attr(not(debug_assertions), inline(always))]
-                #[cfg_attr(debug_assertions, inline)]
-                fn __view<'a>(&'a self, handle: &'a Self::Stored) -> <Self as #krate::Edge>::Read<'a> {
-                    <#name #nty_generics as #krate::HandleComponent>::view(self, handle)
-                }
-            }
-            impl #nimpl_generics #krate::Component for #name #nty_generics #node_where {
-                type Config = <#name #nty_generics as #krate::HandleComponent>::Config;
-                type Output = <#name #nty_generics as #krate::HandleComponent>::Handle;
-                #[cfg_attr(not(debug_assertions), inline(always))]
-                #[cfg_attr(debug_assertions, inline)]
-                fn new(config: Self::Config, init: <Self as #krate::ComponentSubscription>::Init<'_>) -> (Self, Self::Output) {
-                    <#name #nty_generics as #krate::HandleComponent>::new(config, init)
-                }
-                #[cfg_attr(not(debug_assertions), inline(always))]
-                #[cfg_attr(debug_assertions, inline)]
-                fn update(&mut self, input: <Self as #krate::ComponentSubscription>::Input<'_>) -> Self::Output {
-                    <#name #nty_generics as #krate::HandleComponent>::update(self, input)
-                }
-            }
-        }
-    } else {
-        quote! {
-            impl #nimpl_generics #krate::__private::Sealed for #name #nty_generics #light_where {}
-
-            impl #nimpl_generics #krate::Edge for #name #nty_generics #light_where {
-                type Read<'a> = &'a <#name #nty_generics as #krate::Component>::Output where Self: 'a;
-            }
-            impl #nimpl_generics #krate::Node for #name #nty_generics #node_where {
-                type Output = <#name #nty_generics as #krate::Component>::Output;
-            }
-            impl #nimpl_generics #krate::Vertex for #name #nty_generics #node_where {
-                type Stored = <#name #nty_generics as #krate::Component>::Output;
-                type Subs = <#name #nty_generics as #krate::ComponentSubscription>::Deps;
-                type Kind = #krate::CompKind;
-                type Requests = #requests_ty;
-                const KIND: u8 = #krate::KIND_COMPONENT;
-                #node_items
-                #inputs_const
-            }
-        }
     };
 
     // Markers of the selected handled edges, and the check that every handled
@@ -1405,6 +1301,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
 
         impl #impl_generics #krate::ComponentSubscription for #name #ty_generics #where_clause {
             type Deps = #deps_ty;
+            #inputs_const
             type Input<'a> = #input_name<'a, #(#ty_args),*>;
             type Init<'a> = #init_name<'a, #(#ty_args),*>;
 
@@ -1421,10 +1318,15 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
                 let #deps_pat = raw;
                 #init_name { #( #field_names: #init_fields, )* #init_requests_default __marker: ::core::marker::PhantomData }
             }
-            #fill_requests
-        }
 
-        #node_impls
+            #[doc(hidden)]
+            #[inline]
+            fn __fill_requests(init: &mut Self::Init<'_>, pass: &mut #krate::ConstructPass) {
+                if <#name #ty_generics as #krate::Component>::LISTENS {
+                    init.requests = pass.take_requests::<Self, #requests_ty>();
+                }
+            }
+        }
     })
 }
 
@@ -1684,7 +1586,7 @@ fn expand_demux(input: DeriveInput) -> syn::Result<TokenStream2> {
     };
     // An enum with lifetime parameters only (`enum FrameView<'a> { Book(&'a Book), .. }`) is a view:
     // its selectors implement `SelectView<FrameView<'a>>` (they take the view by value and return
-    // the variant's field, which may borrow from `'a`), for a `#[handle]` component whose
+    // the variant's field, which may borrow from `'a`), for a handle component whose
     // `View<'a>` it is. Any other generic parameter is not supported.
     if input.generics.params.iter().any(|p| !matches!(p, GenericParam::Lifetime(_))) {
         return Err(syn::Error::new_spanned(&input.generics, "Demux does not support generic enums (only lifetime parameters, for a view)"));
@@ -1768,6 +1670,7 @@ fn expand_demux(input: DeriveInput) -> syn::Result<TokenStream2> {
                 impl #view_impl_generics #krate::SelectView<#name #view_ty_generics> for #marker {
                     type Out = #out_ty;
                     const KEY: u32 = #key;
+                    const REQUEST: bool = true;
                     #[cfg_attr(not(debug_assertions), inline(always))]
                     #[cfg_attr(debug_assertions, inline)]
                     fn select(__x: #name #view_ty_generics) -> ::core::option::Option<#out_ty> {

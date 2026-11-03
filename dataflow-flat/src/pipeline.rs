@@ -59,7 +59,7 @@ impl<R, S: Sinks<R>> Pipeline<R, S> {
     /// subscriptions. Components without a config entry get
     /// `Config::default()`; a config supplied for a component outside the
     /// graph is a [`BuildError`].
-    /// A `#[listener]` gets, in `new`, the requests its subscribers' selectors make.
+    /// A listener (`type Requests`) gets, in `new`, the requests its subscribers' selectors make.
     pub fn build(configs: Configs) -> Result<Self, BuildError> {
         // Configs for components outside the graph are reported before any
         // constructor runs: the plan says which `TypeId`s are in it.

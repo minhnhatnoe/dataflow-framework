@@ -22,7 +22,7 @@
 //! key)`: two decisions at the same place with different keys are mutually
 //! exclusive (the variants of one enum), unless one is a guard.
 //!
-//! A `#[handle]` component has no stored output to select from: its subscribers read a *view*.
+//! A handle component has no stored output to select from: its subscribers read a *view*.
 //! A selector on it implements [`SelectView<In>`] instead, where `In` is the view (with its
 //! lifetime) and the selected part is a view too (`#[derive(Demux)]` on an enum with a lifetime
 //! parameter writes them; `option::Some` and the other library selectors have both impls). The
@@ -48,7 +48,7 @@ pub trait Select<In>: 'static {
     /// different keys at the same place are mutually exclusive; [`GUARD`]
     /// means "a condition that may hold together with anything".
     const KEY: u32;
-    /// Is this selector *requested* of a [`Listener`](crate::Listener)? True for
+    /// Is this selector *requested* of a listener? True for
     /// the selectors of `#[derive(Demux)]`: reading one downstream of a
     /// listener calls `Request<Self>::add` on its requests, and that impl must
     /// exist. `Some`, `Ok`, guards and hand-written selectors are not requests.
@@ -423,11 +423,11 @@ const impl<In: 'static, S: Select<In>, T: [const] ChainWalk<S::Out>> ChainWalk<I
 }
 
 // ---------------------------------------------------------------------------
-// Selectors on views (the source is a `#[handle]` component)
+// Selectors on views (the source is a handle component)
 // ---------------------------------------------------------------------------
 
 /// A pattern test on a *view*: a value of type `In` (a handle component's
-/// [`View<'a>`](crate::HandleComponent::View), or the part a selector before this one in the
+/// [`View<'a>`](crate::Component::View), or the part a selector before this one in the
 /// chain matched), taken by value. `In` includes its lifetime, so the selected part can borrow
 /// from the same place: `impl<'a> SelectView<FrameView<'a>> for frame_view::Book { type Out = &'a Book; .. }`.
 /// `#[derive(Demux)]` on an enum with a lifetime parameter (`enum FrameView<'a> { Book(&'a Book), .. }`)
@@ -441,13 +441,15 @@ const impl<In: 'static, S: Select<In>, T: [const] ChainWalk<S::Out>> ChainWalk<I
 #[diagnostic::on_unimplemented(
     message = "the selector `{Self}` cannot be applied to the view `{In}`",
     label = "`{Self}` must implement `SelectView<{In}>` to select from this view",
-    note = "a selector on a `#[handle]` component selects from its `View<'a>`: put `#[derive(Demux)]` on the view's enum (`enum V<'a> {{ A(&'a X), .. }}`), or implement `SelectView<V<'a>>` by hand; a by-value selector (`Select<T>`) cannot be applied to a view"
+    note = "a selector on a handle component selects from its `View<'a>`: put `#[derive(Demux)]` on the view's enum (`enum V<'a> {{ A(&'a X), .. }}`), or implement `SelectView<V<'a>>` by hand; a by-value selector (`Select<T>`) cannot be applied to a view"
 )]
 pub trait SelectView<In>: 'static {
     /// The matched part (may borrow: it has the lifetime of `In`).
     type Out;
     /// As [`Select::KEY`].
     const KEY: u32;
+    /// As [`Select::REQUEST`]: is this selector *requested* of a listener? `#[derive(Demux)]` sets it.
+    const REQUEST: bool = false;
     /// `Some(part)` if the pattern matches.
     fn select(x: In) -> Option<Self::Out>;
     /// As [`Select::key_of`].
@@ -459,7 +461,7 @@ pub trait SelectView<In>: 'static {
 #[diagnostic::on_unimplemented(
     message = "the selector chain `{Self}` cannot be applied to the view `{In}`",
     label = "each selector must implement `SelectView<_>` for the view (or the part) before it",
-    note = "a selector on a `#[handle]` component selects from its `View<'a>`: put `#[derive(Demux)]` on the view's enum (`enum V<'a> {{ A(&'a X), .. }}`), or implement `SelectView<V<'a>>` by hand; `Some`/`Ok`/.. work when the view is an `Option`/`Result`; a by-value selector (`Select<T>` for a stored output) cannot be applied to a view"
+    note = "a selector on a handle component selects from its `View<'a>`: put `#[derive(Demux)]` on the view's enum (`enum V<'a> {{ A(&'a X), .. }}`), or implement `SelectView<V<'a>>` by hand; `Some`/`Ok`/.. work when the view is an `Option`/`Result`; a by-value selector (`Select<T>` for a stored output) cannot be applied to a view"
 )]
 pub trait ViewChainOn<In>: 'static {
     /// The part at the end of the chain.
@@ -541,7 +543,7 @@ impl<In, S: SelectView<In>, T: ViewChainOn<S::Out>> ViewChainOn<In> for (S, T) {
 #[doc(hidden)]
 #[diagnostic::on_unimplemented(
     message = "the selector chain `{Self}` cannot be applied to the view of `{E}`",
-    label = "`{E}` is a `#[handle]` component: its selectors must implement `SelectView<{E}'s View>`",
+    label = "`{E}` is a handle component: its selectors must implement `SelectView<{E}'s View>`",
     note = "use selectors made for the view: `#[derive(Demux)]` on the view's enum (with a lifetime parameter), `Some`/`Ok`/.. when the view is an `Option`/`Result`, or a hand-written `SelectView`; a `Select<T>` for a stored output (a by-value selector) does not apply to a view"
 )]
 pub trait ViewChain<E: Vertex>: 'static {
@@ -579,7 +581,7 @@ where
     }
 }
 
-/// The selector chain `C` as the plan and the drivers see it when the source `E` is a `#[handle]`
+/// The selector chain `C` as the plan and the drivers see it when the source `E` is a handle component
 /// component (`NodeKind::Chain`). It is a `SelectChain<E::Stored>` so that everything that
 /// carries a chain (the subscription tree, the derive's types) is unchanged, but its `Read` is the
 /// selected view and its `Init` is `Option` of it; the operations that need the source's state

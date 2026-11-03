@@ -1,10 +1,10 @@
-//! Listener requests as types. A *listener* (`#[listener]` + `impl Listener`)
-//! is a component whose output is demuxed by its subscribers (`Some(Btc(t)):
+//! Listener requests as types. A *listener* (a component with
+//! `type Requests = R` in its `impl Component`) is a component whose output is demuxed by its subscribers (`Some(Btc(t)):
 //! BinanceWs`). Before anything is constructed, `Pipeline::build` runs a first
 //! pass over the component positions in execution order: for every
 //! subscription entry that reads a listener, each *requested* selector of its
 //! chain (the selectors `#[derive(Demux)]` generates; `Some` and friends are
-//! not) calls `Request<S>::add` on the listener's [`Listener::Requests`] value,
+//! not) calls `Request<S>::add` on the listener's `Component::Requests` value,
 //! once per distinct selector `S` per listener. The value is then handed to the
 //! listener's `new` as `init.requests`.
 //!
@@ -30,24 +30,6 @@ use crate::gather::Layout;
 use crate::node::{Comp, Vertex};
 use crate::select::{Select, SelectChain};
 
-/// A component that is told, at build, which selectors its subscribers read.
-/// Declared with `#[listener]` on the `ComponentSubscription` derive.
-///
-/// ```ignore
-/// #[derive(Default)]
-/// struct Streams(Vec<&'static str>);
-/// impl<S: BinanceStream> Request<S> for Streams {
-///     fn add(&mut self) { self.0.push(S::STREAM); }
-/// }
-/// impl Listener for BinanceWs { type Requests = Streams; }
-/// // in `new`: init.requests.0
-/// ```
-pub trait Listener {
-    /// Collects the requests. `Default` is the empty collection (what a
-    /// listener nobody reads gets).
-    type Requests: Default + 'static;
-}
-
 /// `Self` can take the request of selector `S` (a marker such as
 /// `markets::Btc`, or a generated `packet::Binance`). `add` is called once for
 /// each distinct selector read downstream of the listener.
@@ -60,10 +42,9 @@ pub trait Request<S>: 'static {
 }
 
 /// The requests of a node that is not a listener: accepts everything, keeps nothing.
-#[derive(Default)]
 #[doc(hidden)]
-pub struct NoRequests;
-impl<S> Request<S> for NoRequests {
+pub type NoRequests = ();
+impl<S> Request<S> for () {
     #[inline(always)]
     fn add(&mut self) {}
 }
@@ -115,10 +96,44 @@ impl<In: 'static, R: 'static, S: SelReq<In, R>, T: ChainReq<S::Out, R>> ChainReq
     }
 }
 
-/// A selected view of a handle component requests nothing (a handle component is not a listener's
-/// source of requests: `#[handle]` and `#[listener]` don't combine).
-impl<E: Vertex, R: 'static, C: crate::select::ViewChain<E>> ChainReq<E::Stored, R> for crate::select::ViewC<E, C> {
+/// One view selector's contribution: nothing unless it is a requested one (`SelectView::REQUEST`).
+#[doc(hidden)]
+pub trait ViewSelReq<In, R: 'static>: crate::select::SelectView<In> {
+    fn req(pass: &mut ConstructPass, listener: TypeId);
+}
+impl<In, R: 'static, S: crate::select::SelectView<In>> ViewSelReq<In, R> for S
+where
+    (): ReqIf<{ <S as crate::select::SelectView<In>>::REQUEST }, S, R>,
+{
+    fn req(pass: &mut ConstructPass, listener: TypeId) {
+        <() as ReqIf<{ <S as crate::select::SelectView<In>>::REQUEST }, S, R>>::add(pass, listener)
+    }
+}
+
+/// The requests of a whole chain of view selectors applied to a view of type `In`.
+#[doc(hidden)]
+pub trait ViewChainReq<In, R: 'static> {
+    fn collect(pass: &mut ConstructPass, listener: TypeId);
+}
+impl<In, R: 'static> ViewChainReq<In, R> for () {
+    #[inline(always)]
     fn collect(_: &mut ConstructPass, _: TypeId) {}
+}
+impl<In, R: 'static, S: ViewSelReq<In, R>, T: ViewChainReq<<S as crate::select::SelectView<In>>::Out, R>> ViewChainReq<In, R> for (S, T) {
+    fn collect(pass: &mut ConstructPass, listener: TypeId) {
+        <S as ViewSelReq<In, R>>::req(pass, listener);
+        <T as ViewChainReq<<S as crate::select::SelectView<In>>::Out, R>>::collect(pass, listener);
+    }
+}
+
+/// A chain of view selectors on a handle listener requests what its selectors request (the part
+/// requested does not depend on the lifetime of the view).
+impl<E: Vertex, R: 'static, C: crate::select::ViewChain<E> + ViewChainReq<<E as crate::node::Edge>::Read<'static>, R>> ChainReq<E::Stored, R>
+    for crate::select::ViewC<E, C>
+{
+    fn collect(pass: &mut ConstructPass, listener: TypeId) {
+        <C as ViewChainReq<<E as crate::node::Edge>::Read<'static>, R>>::collect(pass, listener)
+    }
 }
 
 /// A handled edge requests what its chain does.

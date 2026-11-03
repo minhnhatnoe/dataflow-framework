@@ -104,6 +104,7 @@
 // The plan's table starts probing at a hash of the component's type name (a
 // hint; the match is decided by `TypeId`).
 #![feature(const_type_name)]
+#![feature(associated_type_defaults)]
 // The plan runs the dependency walk in constant evaluation, which calls trait
 // methods from a `const fn`, and compares components by `TypeId` (`==` in a
 // `const fn`).
@@ -141,13 +142,13 @@ mod table;
 pub use build::{BuildError, Configs};
 #[doc(hidden)]
 pub use build::ConstructPass;
-pub use component::{Component, ComponentSubscription, DepList, HandleComponent, Sub};
+pub use component::{Component, ComponentSubscription, DepList, Sub};
 pub use node::{Edge, InitOf, Node, Root};
 #[doc(hidden)]
 pub use node::{ChainWrap, Comp, HandleKind, HandleView, NodeKind, ValueKind, Vertex};
 pub use pipeline::Pipeline;
 pub use plan::{MAX_COMPONENTS, MAX_DECISIONS, MAX_EDGES, MAX_TERMS};
-pub use request::{Listener, Request};
+pub use request::Request;
 pub use select::{option, result, Initial, SelInit, Select, SelectView, GUARD};
 #[doc(hidden)]
 pub use select::{probe, ChainInitial, Identity, Keep};

@@ -186,6 +186,11 @@ where
             <C<A, P> as ComponentSubscription>::__fill_requests(&mut init, &mut *ctx.pass);
             <C<A, P> as Component>::new(config, init)
         };
+        // A handle component that did not write `fn view` fails here (post-monomorphization) even
+        // if nobody reads it; the branch is a constant, so by-value components keep nothing of it.
+        if <C<A, P> as Vertex>::VIEW {
+            let _ = <C<A, P> as Component>::view(&state, &out);
+        }
         *<A::StatesOpt as AtPos<Option<C<A, P>>, P>>::at_mut(&mut *ctx.states) = Some(state);
         *<A::OutsOpt as AtPos<Option<<C<A, P> as Vertex>::Stored>, P>>::at_mut(&mut *ctx.outs) = Some(out);
         ctx.pass.order.push(type_name::<C<A, P>>());
@@ -947,11 +952,11 @@ where
     <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P>,
     A::States: AtPos<<A as NthT<P>>::T, P>,
     A::Outs: AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>,
-    A::Outs: AtPos<<<A as NthT<P>>::T as Component>::Output, P>,
+    A::Outs: AtPos<<<A as NthT<P>>::T as Component>::Handle, P>,
     SrcSlots<A, P>: RgCl,
     SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
 {
-    type Out = <<A as NthT<P>>::T as Component>::Output;
+    type Out = <<A as NthT<P>>::T as Component>::Handle;
     type Me = <A as NthT<P>>::T;
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]

@@ -337,6 +337,11 @@ where
 /// selector chain applied to the source's output, or, if the entry is stored,
 /// the slot.
 #[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "the component `{E}` cannot be read as `&Output` by a subscriber",
+    label = "`{E}` is not a by-value `Node`",
+    note = "either `{E}` has no `type Output` (a handle component: subscribers read its `View<'a>`; use a view selector or a plain subscription), or its `Output` is set together with a `Handle` or `View` of another type (a component that sets `Output` must leave `Handle` and `View` out)"
+)]
 pub trait ChainRead<E: Source<A>, A: Layout, const P: usize, const I: usize>: SelectChain<E::Stored> {
     fn read<'a>(root: &'a A::Root, outs: &'a A::Outs) -> <Self as SelectChain<E::Stored>>::Read<'a, E>;
 }

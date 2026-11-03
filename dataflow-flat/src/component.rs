@@ -13,6 +13,10 @@ pub trait ComponentSubscription: 'static {
     /// The subscriptions as a type-level tree of tuples (see [`DepList`]),
     /// walked by the plan. Listing order is the order of `#[subscribe(...)]`.
     type Deps: DepList;
+    /// The names of the inputs, comma-separated in the order of the unique entries (set by the
+    /// derive for a component with a selected entry; the plan names an input in an error message).
+    #[doc(hidden)]
+    const __INPUTS: &'static str = "";
     /// A struct with one named reference per subscription: what `update` gets.
     type Input<'a>;
     /// A struct with one named entry per subscription: what `new` gets. An
@@ -22,8 +26,8 @@ pub trait ComponentSubscription: 'static {
     fn input<'a>(raw: <Self::Deps as DepList>::Inputs<'a>) -> Self::Input<'a>;
     /// Name the construction pass's nested tuple.
     fn init<'a>(raw: <Self::Deps as DepList>::Inits<'a>) -> Self::Init<'a>;
-    /// For a `#[listener]`: put the requests collected by the first pass into
-    /// `init.requests`. Nothing for other components.
+    /// For a listener (`Component::Requests` is not `()`): put the requests collected by the first
+    /// pass into `init.requests`.
     #[doc(hidden)]
     fn __fill_requests(_: &mut Self::Init<'_>, _: &mut crate::build::ConstructPass) {}
 }
@@ -49,51 +53,66 @@ pub trait ComponentSubscription: 'static {
 /// subscribers read, in this step if it ran, and in later steps otherwise. The
 /// construction call `new` also produces an output, so there is a value to
 /// read before the component has run for the first time.
+///
+/// # By value, with a handle, as a listener
+///
+/// One trait covers all three; leave out what you do not use.
+///
+/// * **By value** (nearly every component): write `type Output = T`, `new` returns `(Self, T)`
+///   and `update` returns `T`. Subscribers read `&T`.
+/// * **Handle**: leave `Output` out and write `type Handle` (a slot index, a key, `()`),
+///   `type View<'a>` and `fn view`. The pipeline stores the handle `update` returns, and a
+///   subscriber's field is exactly `View<'a>`: `view(&self, &handle)`, evaluated by the
+///   framework each time a subscriber runs. `Handle` needs no `Copy`. Selectors on a handle
+///   component select from the view (`SelectView`, see `#[derive(Demux)]` on an enum with a
+///   lifetime); a selected value is never stored.
+/// * **Listener**: write `type Requests = R` (and `impl Request<S> for R`); `new` finds the
+///   collected requests in `init.requests`. It combines with either of the above.
 pub trait Component: ComponentSubscription + Sized {
     /// Owned configuration passed to `new`. Components without an entry in
     /// [`Configs`](crate::Configs) get `Default::default()`.
     type Config: Default + 'static;
-    /// What `update` produces; subscribers receive `&Output`.
-    type Output: 'static;
+    /// By-value components: what `update` produces; subscribers receive `&Output`. Leave it
+    /// out for a handle component (`Handle`, `View` and `fn view` instead).
+    type Output: 'static + ?Sized + crate::node::OutInfo = crate::node::HandleComponentHasNoOutputSoItIsNotAByValueNode;
+    /// What the pipeline stores between steps and what `new` and `update` return: `Output` for a
+    /// by-value component; a handle component sets it.
+    type Handle: 'static = <<Self as Component>::Output as crate::node::OutInfo>::Handle;
+    /// What subscribers read: `&Output` for a by-value component. A handle component sets it
+    /// (the field is the view as it is, owned or a reference) and writes `fn view`.
+    type View<'a>: 'a = &'a <Self as Component>::Handle
+    where
+        Self: 'a;
+    /// What a listener collects before `new` (`()`: not a listener). `impl Request<S>` for it takes
+    /// the selectors read downstream, once for each distinct selector.
+    type Requests: Default + 'static = ();
 
     /// Called once, when the pipeline is built, in execution order. `init`
     /// has the outputs the subscriptions had when they were constructed
-    /// (earlier in the order). Returns the component and its first output.
-    fn new(config: Self::Config, init: Self::Init<'_>) -> (Self, Self::Output);
+    /// (earlier in the order). Returns the component and its first output (its handle).
+    fn new(config: Self::Config, init: Self::Init<'_>) -> (Self, Self::Handle);
 
     /// Called when this component runs in a step, after everything it
-    /// subscribes to. The returned output replaces the stored one.
-    fn update(&mut self, input: Self::Input<'_>) -> Self::Output;
-}
-
-/// A component whose subscribers read a *view* computed from its state, not a stored value.
-///
-/// Select it with `#[handle]` next to `#[derive(ComponentSubscription)]`. The pipeline stores the
-/// [`Handle`](Self::Handle) `update` returns (a slot index, a key, `()`), and a subscriber's field
-/// is exactly [`View<'a>`](Self::View): `view(&self, &handle)`, evaluated by the framework
-/// each time a subscriber runs (or is constructed). Nothing is cached, so `view` should be
-/// cheap (an index, a reference into the state). The subscriber's field is the view as it is,
-/// owned or a reference: no `&` is added. A subscriber of a handle component reads the parent's
-/// state and handle as of this moment, also in steps where the parent did not run.
-///
-/// `Handle` needs no `Copy`: the framework only stores it and lends it to `view`.
-///
-/// Selectors on a handle component select from the view (`SelectView`, see `#[derive(Demux)]` on an enum with a lifetime); a selected value is never stored. Not supported: `#[listener]`.
-pub trait HandleComponent: ComponentSubscription + Sized {
-    /// Owned configuration passed to `new`, as for [`Component::Config`].
-    type Config: Default + 'static;
-    /// What the pipeline stores between steps.
-    type Handle: 'static;
-    /// What subscribers read.
-    type View<'a>
-    where
-        Self: 'a;
-    /// As [`Component::new`], but the first output is a handle.
-    fn new(config: Self::Config, init: Self::Init<'_>) -> (Self, Self::Handle);
-    /// As [`Component::update`]; the returned handle replaces the stored one.
+    /// subscribes to. The returned output (handle) replaces the stored one.
     fn update(&mut self, input: Self::Input<'_>) -> Self::Handle;
-    /// The view of the state and the stored handle that subscribers read.
-    fn view<'a>(&'a self, handle: &'a Self::Handle) -> Self::View<'a>;
+
+    /// Handle components only: the view of the state and the stored handle that subscribers read,
+    /// evaluated at each use (a subscriber runs or is constructed). Nothing is cached, so it
+    /// should be cheap (an index, a reference into the state). A subscriber of a handle component
+    /// reads the parent's state and handle as of this moment, also in steps where the parent did
+    /// not run. A by-value component does not write it.
+    fn view<'a>(&'a self, handle: &'a Self::Handle) -> Self::View<'a> {
+        let () = <Self as Component>::VIEW_DEFINED;
+        let _ = handle;
+        unreachable!("`view` of a by-value component is never called")
+    }
+
+    #[doc(hidden)]
+    const LISTENS: bool = crate::node::has_requests::<<Self as Component>::Requests>();
+    /// Evaluated by the default `view`: a handle component that did not write `fn view` fails
+    /// here, when the framework builds the code that reads it.
+    #[doc(hidden)]
+    const VIEW_DEFINED: () = crate::node::view_defined::<Self>();
 }
 
 /// One entry of a subscription tree: the node `N` listed at position `I`

@@ -1,9 +1,9 @@
 //! Nodes: everything a component can subscribe to.
 //!
-//! [`Node`] is sealed (the derives implement it). There are two
-//! kinds of node a user can name: the **root** (`#[derive(Root)]`, the value
-//! passed to `Pipeline::push`) and **components** (`#[derive(ComponentSubscription)]`
-//! + `impl Component`). The pipeline also has one internal node, the `Anchor`,
+//! [`Node`] is sealed. There are two kinds of node a user can name: the **root**
+//! (`#[derive(Root)]`, the value passed to `Pipeline::push`) and **components**
+//! (`#[derive(ComponentSubscription)]` + `impl Component`). Every impl of `Sealed`, `Edge`,
+//! `Vertex` and `Node` for a component is a blanket impl over `Component` in this file. The pipeline also has one internal node, the `Anchor`,
 //! that stands for the sinks.
 //!
 //! What a subscriber receives is decided by the *kind* of the node:
@@ -30,7 +30,7 @@ pub const KIND_COMPONENT: u8 = 1;
 pub const KIND_ANCHOR: u8 = 3;
 
 /// What a subscriber's field is when it reads this node: `&Output` for a node that stores a
-/// value, a view (`HandleComponent::View<'a>`) for a handle component.
+/// value, a view (`Component::View<'a>`) for a handle component.
 pub trait Edge {
     type Read<'a>
     where
@@ -44,7 +44,7 @@ pub trait Edge {
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a Node of the graph (the root, a component or a handle component)",
     label = "`{Self}` can't be subscribed to",
-    note = "derive `Root` or `ComponentSubscription` (and implement `Component`, or `HandleComponent` with `#[handle]`) for it"
+    note = "derive `Root`, or derive `ComponentSubscription` and implement `Component`, for it"
 )]
 pub trait Vertex: __private::Sealed + Edge + Sized + 'static {
     /// What the pipeline stores for this node.
@@ -60,20 +60,20 @@ pub trait Vertex: __private::Sealed + Edge + Sized + 'static {
     /// Is this a handle component? Its subscribers read a view of its state, so the plan gives
     /// them the `PG_RUN_VIEW` kinds (by-value components keep `PG_RUN`/`PG_RUN_IF`).
     const VIEW: bool = false;
-    /// Is this a [`Listener`](crate::Listener) (`#[listener]`)?
+    /// Is this a listener (`Component::Requests` is not `()`)?
     const LISTENS: bool = false;
-    /// The listener's `Requests` (`NoRequests` for other nodes).
+    /// The listener's `Requests` (`()` for other nodes).
     type Requests: 'static;
 }
 
 /// A thing that can be subscribed to and whose subscribers read `&Output`: the root and
-/// by-value components. Sealed: use `#[derive(Root)]` or `#[derive(ComponentSubscription)]`.
-/// A handle component (`#[handle]`) is not a `Node`: its subscribers read a view, not `&Output`.
+/// by-value components (a component with `type Output = ..`). Sealed.
+/// A handle component (one with no `Output`) is not a `Node`: its subscribers read a view, not `&Output`.
 /// Generic code written as `X: Node<Output = T>` sees `&T` as the field type.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a by-value Node: its subscribers read a view, not `&Output`",
-    label = "`{Self}` is a `#[handle]` component (or not a node)",
-    note = "a `Node<Output = ..>` bound means \"subscribers read `&Output`\", which a `#[handle]` component does not give (its subscribers read a view)"
+    label = "`{Self}` is a handle component (or not a node)",
+    note = "a `Node<Output = ..>` bound means \"subscribers read `&Output`\", which a handle component (one with no `type Output`) does not give (its subscribers read a view)"
 )]
 pub trait Node: Vertex<Kind: ValueKind>
 where
@@ -178,20 +178,143 @@ impl<T> Is<T> for T {
     }
 }
 
-/// A handle component's view of its state and stored handle (`HandleComponent::view`).
+/// `Component::Output` of a component that has none: a handle component. An unsized type, so
+/// that [`OutInfo`] can tell it from every by-value output (those are `Sized`) with no overlap.
+#[doc(hidden)]
+pub struct HandleComponentHasNoOutputSoItIsNotAByValueNode([()]);
+
+/// `Component::Handle` of a component that sets neither `Output` nor `Handle`. Never built: the
+/// component's `new` cannot return it.
+#[doc(hidden)]
+pub enum NeitherOutputNorHandleIsSet {}
+
+/// What `Component::Output` decides at the type level: the kind of the node and the default
+/// `Handle`. Implemented for every sized type (by value) and for [`HandleComponentHasNoOutputSoItIsNotAByValueNode`] (a handle
+/// component).
+#[doc(hidden)]
+pub trait OutInfo {
+    type Kind: NodeKind;
+    type Handle: 'static;
+}
+impl<T: 'static> OutInfo for T {
+    type Kind = CompKind;
+    type Handle = T;
+}
+impl OutInfo for HandleComponentHasNoOutputSoItIsNotAByValueNode {
+    type Kind = HandleKind;
+    type Handle = NeitherOutputNorHandleIsSet;
+}
+
+/// Does a component with this `Requests` listen?
+#[doc(hidden)]
+pub const fn has_requests<R: 'static>() -> bool {
+    ::core::any::TypeId::of::<R>() != ::core::any::TypeId::of::<()>()
+}
+
+/// Evaluated by the default `Component::view`: the component is a handle component (it set no
+/// `Output`) and did not write `fn view`.
+#[doc(hidden)]
+pub const fn view_defined<X: crate::component::Component>() {
+    assert!(
+        !<<<X as crate::component::Component>::Output as OutInfo>::Kind as NodeKind>::IS_HANDLE,
+        "a component with no `type Output` is a handle component and needs `fn view`: write it in the impl of `Component` (the component is named in the line above)"
+    );
+}
+
+// The node impls of every component are blanket impls over `Component`, so the derive emits none
+// of them.
+impl<X: crate::component::Component> __private::Sealed for X {}
+impl<X: crate::component::Component> Edge for X {
+    type Read<'a>
+        = <X as crate::component::Component>::View<'a>
+    where
+        Self: 'a;
+}
+impl<X: crate::component::Component> Vertex for X {
+    type Stored = <X as crate::component::Component>::Handle;
+    type Subs = <X as crate::component::ComponentSubscription>::Deps;
+    type Kind = <<X as crate::component::Component>::Output as OutInfo>::Kind;
+    type Requests = <X as crate::component::Component>::Requests;
+    const KIND: u8 = KIND_COMPONENT;
+    const INPUTS: &'static str = <X as crate::component::ComponentSubscription>::__INPUTS;
+    const VIEW: bool = <<<X as crate::component::Component>::Output as OutInfo>::Kind as NodeKind>::IS_HANDLE;
+    const LISTENS: bool = <X as crate::component::Component>::LISTENS;
+}
+
+/// The kind of a by-value component. A handle component's kind is `HandleKind`, which is not one:
+/// that is what makes it not a `Node`. (A trait of the kind, not of `Output`: a failing `Sized`
+/// bound would be reported after every other error and its message never shown.)
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "a handle component is not a by-value `Node`: its subscribers read a view, not `&Output`",
+    label = "this component has no `type Output` (the line \"required for `..` to implement `Node`\" below names it)",
+    note = "a `Node<Output = ..>` bound or a selector of a stored output needs a component with `type Output`; a handle component (`type Handle`, `type View<'a>`, `fn view`) is read through its view: use a `SelectView` selector, or take it as a plain subscription"
+)]
+pub trait ByValueKind: ValueKind {}
+impl ByValueKind for CompKind {}
+
+/// `Component::Handle` of a by-value component is its `Output`; a handle component may set any.
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "`type Handle = {Self}` conflicts with `type Output = {O}`",
+    label = "a component that sets `Output` stores its output: its `Handle` is the `Output`",
+    note = "write `type Output = ..` alone for a by-value component, or leave `Output` out and write `type Handle`, `type View<'a>` and `fn view` for a handle component"
+)]
+pub trait HandleFor<O: ?Sized> {}
+impl<T: 'static> HandleFor<T> for T {}
+impl<H: 'static> HandleFor<HandleComponentHasNoOutputSoItIsNotAByValueNode> for H {}
+
+/// `Component::View<'a>` of a by-value component is `&'a Output`; a handle component may set any.
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "`type View<'a> = {Self}` conflicts with `type Output = {O}`",
+    label = "a component that sets `Output` is read as `&Output`: its `View<'a>` is `&'a Output`",
+    note = "write `type Output = ..` alone for a by-value component, or leave `Output` out and write `type Handle`, `type View<'a>` and `fn view` for a handle component"
+)]
+pub trait ViewFor<'a, O: ?Sized> {}
+impl<'a, T: 'static> ViewFor<'a, T> for &'a T {}
+impl<'a, V> ViewFor<'a, HandleComponentHasNoOutputSoItIsNotAByValueNode> for V {}
+
+/// Every by-value component is a `Node`. The marker-trait bounds come first, so that a handle
+/// component or a conflicting `Handle`/`View` is reported with their messages, not as a type
+/// mismatch.
+impl<X> Node for X
+where
+    X: crate::component::Component,
+    <<X as crate::component::Component>::Output as OutInfo>::Kind: ByValueKind,
+    X: crate::component::Component<Handle = <X as crate::component::Component>::Output>,
+    <X as crate::component::Component>::Output: Sized,
+    <X as crate::component::Component>::Handle: HandleFor<<X as crate::component::Component>::Output>,
+    for<'a> <X as crate::component::Component>::View<'a>: ViewFor<'a, <X as crate::component::Component>::Output>,
+    for<'a> X: crate::component::Component<View<'a> = &'a <X as crate::component::Component>::Output>,
+{
+    type Output = <X as crate::component::Component>::Output;
+}
+
+/// A handle component's view of its state and stored handle (`Component::view`).
 #[doc(hidden)]
 pub trait HandleView: Vertex<Kind = HandleKind> {
     fn __view<'a>(&'a self, handle: &'a Self::Stored) -> <Self as Edge>::Read<'a>;
 }
+impl<X> HandleView for X
+where
+    X: crate::component::Component,
+    X: crate::component::Component<Output = HandleComponentHasNoOutputSoItIsNotAByValueNode>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn __view<'a>(&'a self, handle: &'a Self::Stored) -> <Self as Edge>::Read<'a> {
+        <X as crate::component::Component>::view(self, handle)
+    }
+}
 
-/// A node that is a component, with its stored value seen as its `Component::Output`. The drivers
+/// A node that is a component, with its stored value seen as its `Component::Handle`. The drivers
 /// call `Component::new` and `Component::update` through this bound, with no wrapper function in
 /// between (a wrapper per component is one more item for the compiler to collect and for LLVM to
-/// keep). A handle component gets its `Component` impl from the derive, with the handle as the
-/// `Output`.
+/// keep).
 #[doc(hidden)]
-pub trait Comp: crate::component::Component + Vertex<Stored = <Self as crate::component::Component>::Output> {}
-impl<C> Comp for C where C: crate::component::Component + Vertex<Stored = <C as crate::component::Component>::Output> {}
+pub trait Comp: crate::component::Component + Vertex<Stored = <Self as crate::component::Component>::Handle> {}
+impl<C> Comp for C where C: crate::component::Component + Vertex<Stored = <C as crate::component::Component>::Handle> {}
 
 // ---------------------------------------------------------------------------
 // Stored selected values
