@@ -1,6 +1,8 @@
 [build]
 # Without this, exported_generic_symbols re-runs on any edit that changes a line's length (dev rebuild on 823 components 4.9 s vs 0.8 s).
-rustflags = ["-Zshare-generics=n", "-Ctarget-cpu=native"]
+# +prefer-no-gather: on AVX-512 machines (Zen 4) LLVM turns the constant-offset loads of a wide component's update into vpgatherdq, which is microcoded
+# (about 46 ops each); it cost 40 cycles per packet at 4,079 components. rustc prints an "unknown and unstable feature" warning for it; that is expected.
+rustflags = ["-Zshare-generics=n", "-Ctarget-cpu=native", "-Ctarget-feature=+prefer-no-gather"]
 
 [env]
 # rustc's jemalloc reads MALLOC_CONF (not _RJEM_MALLOC_CONF): never return memory to the OS.

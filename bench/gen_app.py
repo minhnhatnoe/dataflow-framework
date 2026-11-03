@@ -72,7 +72,7 @@ def mname(e, b):
 
 CARGO_CONFIG = """[build]
 # Without this, exported_generic_symbols re-runs on any edit that changes a line's length (dev rebuild 4.9 s vs 0.8 s).
-rustflags = ["-Zshare-generics=n", "-Ctarget-cpu=native"]
+rustflags = ["-Zshare-generics=n", "-Ctarget-cpu=native", "-Ctarget-feature=+prefer-no-gather"]
 
 [env]
 # rustc's jemalloc reads MALLOC_CONF (not _RJEM_MALLOC_CONF): never return memory to the OS.
