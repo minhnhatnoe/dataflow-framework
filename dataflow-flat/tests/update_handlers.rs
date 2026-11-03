@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::Mutex;
 
 use dataflow_flat::{
-    catalog, Component, ComponentSubscription, Configs, Demux, HandleComponent, Pipeline, Root, Select, UpdateHandler,
+    catalog, Component, ComponentSubscription, Configs, Demux, Pipeline, Root, Select, UpdateHandler,
 };
 
 static LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -366,12 +366,11 @@ fn tv(m: &Tick) -> u64 {
 /// A ring; its view is a reference into the state. Runs on `A` only.
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Tick::A(v): Tick)]
-#[handle]
 pub struct Ring {
     arr: [u64; 4],
     n: usize,
 }
-impl HandleComponent for Ring {
+impl Component for Ring {
     type Config = ();
     type Handle = usize;
     type View<'a> = &'a u64;
@@ -393,11 +392,10 @@ impl HandleComponent for Ring {
 /// Owned view.
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(t: Tick)]
-#[handle]
 pub struct Level {
     v: u64,
 }
-impl HandleComponent for Level {
+impl Component for Level {
     type Config = ();
     type Handle = ();
     type View<'a> = u64;
@@ -488,11 +486,10 @@ fn handle_parents_borrowed_and_owned() {
 /// A handle component with a handler of its own (a by-value parent, `tw`, with a call).
 #[derive(ComponentSubscription)]
 #[subscribe(tw: Twice, Tick::A(a): Tick)]
-#[handle]
 pub struct Acc {
     sum: u64,
 }
-impl HandleComponent for Acc {
+impl Component for Acc {
     type Config = ();
     type Handle = ();
     type View<'a> = u64;

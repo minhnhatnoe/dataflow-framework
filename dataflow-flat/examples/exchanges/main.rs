@@ -12,7 +12,7 @@
 //!   has one symbol, so only that cone runs; everything else keeps its stored
 //!   output.
 //! * Before anything is constructed, build collects the selectors read from
-//!   each `#[listener]` and calls `Request<S>::add` once per distinct one; the
+//!   each listener and calls `Request<S>::add` once per distinct one; the
 //!   listener's `new` gets them as `init.requests`. Doge is on the wire (and a
 //!   variant of the frame enums) but nobody reads it, so it is never requested.
 //! * `OrderSender` is a handler component (handled entries in its `#[subscribe]`): it handles the

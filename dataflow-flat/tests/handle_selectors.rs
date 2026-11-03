@@ -1,4 +1,4 @@
-//! Selectors on a `#[handle]` source: a selector takes the view and returns a view of the matched
+//! Selectors on a handle-component source: a selector takes the view and returns a view of the matched
 //! part (`SelectView`, written by `#[derive(Demux)]` on an enum with a lifetime parameter), so a
 //! selected input stays a borrowed or owned view. Checks reference and owned variants, a switch
 //! over several subscribers, nested chains (`Some(..)`), `new` and `on_update` of a selected
@@ -8,7 +8,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::Mutex;
 
-use dataflow_flat::{Component, ComponentSubscription, Configs, Demux, HandleComponent, Pipeline, Root, UpdateHandler};
+use dataflow_flat::{Component, ComponentSubscription, Configs, Demux, Pipeline, Root, UpdateHandler};
 
 static SERIAL: Mutex<()> = Mutex::new(());
 static LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -73,13 +73,12 @@ pub enum FrameView<'a> {
 /// a trade (`1`) or a sequence number (`2`).
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Msg::A(v): Msg)]
-#[handle]
 pub struct Feed {
     ring: [Frame; 4],
     n: usize,
     _life: Life,
 }
-impl HandleComponent for Feed {
+impl Component for Feed {
     type Config = ();
     type Handle = usize;
     type View<'a> = FrameView<'a>;
@@ -234,12 +233,11 @@ fn order_and_lifecycle() {
 
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Msg::B(v): Msg)]
-#[handle]
 pub struct Feed2 {
     last: Frame,
     _life: Life,
 }
-impl HandleComponent for Feed2 {
+impl Component for Feed2 {
     type Config = ();
     type Handle = ();
     type View<'a> = Option<FrameView<'a>>;
@@ -436,12 +434,11 @@ fn a_wide_subscriber_with_a_selected_view() {
 
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(l: Level)]
-#[handle]
 pub struct Feed3 {
     book: Book,
     last: u64,
 }
-impl HandleComponent for Feed3 {
+impl Component for Feed3 {
     type Config = ();
     type Handle = ();
     type View<'a> = FrameView<'a>;
@@ -539,11 +536,10 @@ fn two_fields_spelled_alike() {
 
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Msg::B(v): Msg)]
-#[handle]
 pub struct Level {
     v: u64,
 }
-impl HandleComponent for Level {
+impl Component for Level {
     type Config = ();
     type Handle = ();
     type View<'a> = u64;

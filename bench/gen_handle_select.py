@@ -33,7 +33,7 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::time::Instant;
 static OUT_FW: [AtomicU64; 64] = [const { AtomicU64::new(0) }; 64];
 static OUT_H: [AtomicU64; 64] = [const { AtomicU64::new(0) }; 64];
-use dataflow_flat::{Component, ComponentSubscription, Configs, Demux, HandleComponent, Pipeline, Root, UpdateHandler};
+use dataflow_flat::{Component, ComponentSubscription, Configs, Demux, Pipeline, Root, UpdateHandler};
 
 #[derive(Root)]
 pub struct X(pub u64);
@@ -58,9 +58,8 @@ macro_rules! feed_src {
     ($F:ident, $i:expr) => {
         #[derive(ComponentSubscription, UpdateHandler)]
         #[subscribe(x: X)]
-        #[handle]
         pub struct $F { ring: [Msg; 4], n: u32 }
-        impl HandleComponent for $F {
+        impl Component for $F {
             type Config = ();
             type Handle = u32;
             type View<'a> = MsgView<'a>;

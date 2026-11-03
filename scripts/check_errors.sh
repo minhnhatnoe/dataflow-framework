@@ -93,7 +93,8 @@ fn main() {}'
 CMD[cycle]=check
 # The trait solver cannot prove that a component of a cyclic graph is a node (its `Node` impl needs its
 # subscriptions to be nodes, which needs itself); it names a component of the cycle.
-PATTERN[cycle]='E0275.*overflow evaluating the requirement .*(Upstream|Node|Vertex|DepList)'
+# TODO(api-one-component): the overflow now names `Anchor<..>: Planned`, not a component.
+PATTERN[cycle]='E0275.*overflow evaluating the requirement .*(Upstream|Node|Vertex|DepList|Planned)'
 BODY[cycle]='
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(b: B)]
@@ -117,7 +118,7 @@ fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }'
 
 # A component that subscribes to itself.
 CMD[self_cycle]=check
-PATTERN[self_cycle]='E0275.*overflow evaluating the requirement .*(Upstream|Node|Vertex|DepList)'
+PATTERN[self_cycle]='E0275.*overflow evaluating the requirement .*(Upstream|Node|Vertex|DepList|Planned)'
 BODY[self_cycle]='
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(me: A)]
@@ -818,7 +819,7 @@ EOT
 CMD[listener_missing_request]=check
 PATTERN[listener_missing_request]='E0277.*cannot take the request of the selector'
 read -r -d '' BODY[listener_missing_request] <<'EOF2'
-use dataflow_flat::{Demux, Listener, Request};
+use dataflow_flat::{Demux, Request};
 pub mod m { pub struct Btc; pub struct Eth; }
 #[derive(Clone, Copy, Demux)]
 #[demux(markers = m)]
@@ -829,10 +830,9 @@ impl Request<m::Btc> for Reqs { fn add(&mut self) { self.0.push(0); } }
 
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
-#[listener]
 pub struct L;
-impl Listener for L { type Requests = Reqs; }
 impl Component for L {
+    type Requests = Reqs;
     type Config = ();
     type Output = Option<F>;
     fn new((): (), i: Self::Init<'_>) -> (Self, Option<F>) { let _ = i.requests.0; (L, None) }
@@ -854,7 +854,7 @@ EOF2
 CMD[listener_request_ok]=check
 PATTERN[listener_request_ok]=NOERROR
 read -r -d '' BODY[listener_request_ok] <<'EOF2'
-use dataflow_flat::{Demux, Listener, Request};
+use dataflow_flat::{Demux, Request};
 pub mod m { pub struct Btc; pub struct Eth; }
 #[derive(Clone, Copy, Demux)]
 #[demux(markers = m)]
@@ -865,11 +865,10 @@ impl Request<m::Btc> for Reqs { fn add(&mut self) { self.0.push(0); } }
 
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
-#[listener]
 pub struct L;
-impl Listener for L { type Requests = Reqs; }
 impl Component for L {
     type Config = ();
+    type Requests = Reqs;
     type Output = Option<F>;
     fn new((): (), i: Self::Init<'_>) -> (Self, Option<F>) { let _ = i.requests.0; (L, None) }
     fn update(&mut self, _: Self::Input<'_>) -> Option<F> { None }
@@ -890,12 +889,10 @@ EOF2
 # --- handle components -----------------------------------------------------------------------------------------
 
 HANDLE_H='
-use dataflow_flat::HandleComponent;
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
-#[handle]
 pub struct H(u64);
-impl HandleComponent for H {
+impl Component for H {
     type Config = ();
     type Handle = ();
     type View<'"'"'a> = u64;
@@ -920,21 +917,164 @@ impl Component for A {
 }
 fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }"
 
-# `#[handle]` without an `impl HandleComponent`.
-CMD[handle_missing_impl]=check
-PATTERN[handle_missing_impl]='E0277.*HandleComponent'
-BODY[handle_missing_impl]='
+# A handle component (no `type Output`) that did not write `fn view`: found when the code that reads
+# it is built (not by `cargo check`), and the message names the component and says what to write.
+CMD[handle_missing_view]=build
+PATTERN[handle_missing_view]='H as .*Component>::VIEW_DEFINED.*needs .fn view.'
+BODY[handle_missing_view]='
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
-#[handle]
+pub struct H;
+impl Component for H {
+    type Config = ();
+    type Handle = ();
+    type View<'"'"'a> = u64;
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, ()) { (H, ()) }
+    fn update(&mut self, _: Self::Input<'"'"'_>) {}
+}
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(h: H)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (A, 0) }
+    fn update(&mut self, i: Self::Input<'"'"'_>) -> u64 { i.h }
+}
+fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }'
+
+# A component that sets neither `Output` nor `Handle`.
+CMD[component_no_output_no_handle]=check
+PATTERN[component_no_output_no_handle]='NeitherOutputNorHandleIsSet'
+BODY[component_no_output_no_handle]='
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(p: Poll)]
+pub struct H;
+impl Component for H {
+    type Config = ();
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, ()) { (H, ()) }
+    fn update(&mut self, _: Self::Input<'"'"'_>) {}
+}
+fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }'
+
+# `Output` set together with a `View` that is not `&Output`.
+CMD[output_with_conflicting_view]=check
+PATTERN[output_with_conflicting_view]='cannot be read as .&Output. by a subscriber.*of another type'
+BODY[output_with_conflicting_view]='
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(p: Poll)]
 pub struct H;
 impl Component for H {
     type Config = ();
     type Output = u64;
+    type View<'"'"'a> = u32;
     fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (H, 0) }
     fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 0 }
 }
-fn main() { let _ = Pipeline::<Poll, (H,)>::build(Configs::new()); }'
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(h: H)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (A, 0) }
+    fn update(&mut self, i: Self::Input<'"'"'_>) -> u64 { 0 }
+}
+fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }'
+
+# `Output` set together with a `Handle` of another type.
+CMD[output_with_conflicting_handle]=check
+PATTERN[output_with_conflicting_handle]='cannot be read as .&Output. by a subscriber.*of another type'
+BODY[output_with_conflicting_handle]='
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(p: Poll)]
+pub struct H;
+impl Component for H {
+    type Config = ();
+    type Output = u64;
+    type Handle = u32;
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u32) { (H, 0) }
+    fn update(&mut self, _: Self::Input<'"'"'_>) -> u32 { 0 }
+}
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(h: H)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (A, 0) }
+    fn update(&mut self, _: Self::Input<'"'"'_>) -> u64 { 0 }
+}
+fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }'
+
+# A handle component that is also a listener builds and runs (`Requests` is independent of `Handle`).
+CMD[handle_with_listener]=build
+PATTERN[handle_with_listener]='NOERROR'
+BODY[handle_with_listener]='
+use dataflow_flat::Request;
+#[derive(Default)]
+pub struct Reqs(u32);
+impl Request<u8> for Reqs { fn add(&mut self) { self.0 += 1; } }
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(p: Poll)]
+pub struct HL(u64);
+impl Component for HL {
+    type Config = ();
+    type Handle = ();
+    type View<'"'"'a> = u64;
+    type Requests = Reqs;
+    fn new((): (), i: Self::Init<'"'"'_>) -> (Self, ()) { (HL(i.requests.0 as u64), ()) }
+    fn update(&mut self, _: Self::Input<'"'"'_>) {}
+    fn view<'"'"'a>(&'"'"'a self, (): &'"'"'a ()) -> u64 { self.0 }
+}
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(h: HL)]
+pub struct A;
+impl Component for A {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'"'"'_>) -> (Self, u64) { (A, 0) }
+    fn update(&mut self, i: Self::Input<'"'"'_>) -> u64 { i.h }
+}
+fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }'
+
+# A handle component that is a listener: a selector read through its view whose `Requests` has no
+# `Request<S>` impl for it is the same error as for a by-value listener.
+CMD[handle_listener_missing_request]=check
+PATTERN[handle_listener_missing_request]='E0277.*cannot take the request of the selector'
+read -r -d '' BODY[handle_listener_missing_request] <<'EOF2'
+use dataflow_flat::{Demux, Request};
+pub mod m { pub struct Btc; pub struct Eth; }
+#[derive(Demux)]
+#[demux(markers = m)]
+pub enum V<'a> { Btc(&'a u64), Eth(&'a u64) }
+#[derive(Default)]
+pub struct Reqs(Vec<u32>);
+impl Request<m::Btc> for Reqs { fn add(&mut self) { self.0.push(0); } }
+
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(p: Poll)]
+pub struct L(u64);
+impl Component for L {
+    type Config = ();
+    type Handle = ();
+    type View<'a> = V<'a>;
+    type Requests = Reqs;
+    fn new((): (), i: Self::Init<'_>) -> (Self, ()) { let _ = i.requests.0; (L(0), ()) }
+    fn update(&mut self, _: Self::Input<'_>) {}
+    fn view<'a>(&'a self, (): &'a ()) -> V<'a> { V::Btc(&self.0) }
+}
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(m::Eth(t): L)]
+pub struct R;
+impl Component for R {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (R, 0) }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 { *i.t }
+}
+fn main() { let _ = Pipeline::<Poll, (R,)>::build(Configs::new()); }
+EOF2
 
 # A handler (unnamed entry, `on_update` gets the handle parent's view exactly) over a handle component builds.
 CMD[handle_handler_ok]=build
@@ -953,28 +1093,15 @@ impl UpdateHandler<H> for A { fn on_update(&mut self, _: Self::Input<'_>, v: u64
 impl UpdateHandler<Src> for A { const ACTIVE: bool = false; }
 fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }"
 
-# `#[handle]` on a listener is rejected for now.
-CMD[handle_with_listener]=check
-PATTERN[handle_with_listener]='`#\[handle\]` cannot be combined with `#\[listener\]`'
-BODY[handle_with_listener]="$HANDLE_H
-#[derive(ComponentSubscription, UpdateHandler)]
-#[subscribe(p: Poll)]
-#[handle]
-#[listener]
-pub struct L;
-fn main() {}"
-
 # A handle component whose view is an enum of borrowed and owned variants (selectors on it work).
 HANDLE_V='
-use dataflow_flat::HandleComponent;
 pub struct Big(u64);
 #[derive(dataflow_flat::Demux)]
 pub enum Vw<'"'"'a> { Big(&'"'"'a Big), Small(u64) }
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
-#[handle]
 pub struct HV(Big);
-impl HandleComponent for HV {
+impl Component for HV {
     type Config = ();
     type Handle = ();
     type View<'"'"'a> = Vw<'"'"'a>;
@@ -1077,7 +1204,10 @@ fn main() { let _ = Pipeline::<Poll, (A,)>::build(Configs::new()); }"
 
 # Generic code written for `Node<Output = u64>` does not accept a handle component.
 CMD[handle_generic_node_bound]=check
-PATTERN[handle_generic_node_bound]='is not a by-value Node'
+# rustc reports the projection mismatch of the `Node` impl before any marker trait, so the message is
+# `type mismatch resolving <H as Component>::Handle == HandleComponentHasNoOutputSoItIsNotAByValueNode`
+# (the sentinel's name says what is wrong) followed by `required for H to implement Node`.
+PATTERN[handle_generic_node_bound]='E0271.*Handle == .*HandleComponentHasNoOutputSoItIsNotAByValueNode.*required for .H. to implement .Node.'
 BODY[handle_generic_node_bound]="$HANDLE_H
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(x: X)]
@@ -1119,7 +1249,7 @@ ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        pattern_struct pattern_multi_field pattern_range pattern_range_literal pattern_guard pattern_or pattern_literal
        pattern_reference pattern_arrow unit_selector_unknown unit_selector_data_variant pattern_ok
        listener_missing_request listener_request_ok
-       handle_ok handle_handler_ok handle_missing_impl handle_with_listener handle_selector_ok handle_selector_by_value handle_selector_wrong_view handle_selector_view_on_by_value handle_selector_stored handle_generic_node_bound handle_field_is_the_view)
+       handle_ok handle_handler_ok handle_missing_view component_no_output_no_handle output_with_conflicting_view output_with_conflicting_handle handle_with_listener handle_listener_missing_request handle_selector_ok handle_selector_by_value handle_selector_wrong_view handle_selector_view_on_by_value handle_selector_stored handle_generic_node_bound handle_field_is_the_view)
 
 run_case() {
     local name=$1 dir="$CASES_DIR/$1"

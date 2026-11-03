@@ -1,4 +1,4 @@
-//! Handle components (`#[handle]` + `impl HandleComponent`): the pipeline stores a handle and a
+//! Handle components (a `Component` with `Handle`, `View` and `fn view`, no `Output`): the pipeline stores a handle and a
 //! subscriber's field is the component's `View<'a>` itself, owned or borrowed, computed from the
 //! parent's state each time the subscriber runs or is constructed. Checks values, the view of a
 //! parent that did not run in this step, a wide subscriber, an aliased parent, mixed by-value and
@@ -7,7 +7,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::Mutex;
 
-use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Demux, HandleComponent, Node, Pipeline, Root, Sinks};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Demux, Node, Pipeline, Root, Sinks};
 
 static SERIAL: Mutex<()> = Mutex::new(());
 static LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -64,13 +64,12 @@ fn val(m: &Msg) -> u64 {
 /// reference into the state. Runs on `A` events only.
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Msg::A(v): Msg)]
-#[handle]
 pub struct Ring {
     arr: [u64; 4],
     n: usize,
     _life: Life,
 }
-impl HandleComponent for Ring {
+impl Component for Ring {
     type Config = u64;
     type Handle = usize;
     type View<'a> = &'a u64;
@@ -94,12 +93,11 @@ impl HandleComponent for Ring {
 /// `Handle = ()`: the whole state is the value; the view is owned.
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(m: Msg)]
-#[handle]
 pub struct Level {
     v: u64,
     _life: Life,
 }
-impl HandleComponent for Level {
+impl Component for Level {
     type Config = ();
     type Handle = ();
     type View<'a> = u64;
@@ -265,12 +263,11 @@ fn an_aliased_parent_is_one_component_with_one_view() {
 /// Doubles the ring's view into its own state; the view is the state.
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(r: Ring, m: Msg)]
-#[handle]
 pub struct Doubler {
     last: u64,
     _life: Life,
 }
-impl HandleComponent for Doubler {
+impl Component for Doubler {
     type Config = ();
     type Handle = ();
     type View<'a> = &'a u64;
@@ -318,11 +315,10 @@ fn a_handle_component_can_read_a_handle_component() {
 
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(m: Msg)]
-#[handle]
 pub struct Cell<const K: usize> {
     v: u64,
 }
-impl<const K: usize> HandleComponent for Cell<K> {
+impl<const K: usize> Component for Cell<K> {
     type Config = ();
     type Handle = u64;
     type View<'a> = u64;

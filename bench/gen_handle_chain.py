@@ -10,7 +10,7 @@ and a runner that times them (min of alternating rounds, run it pinned: taskset 
 
   fw_value   framework, by-value components: `update` returns `[u64; K]`, stored in the pipeline,
              the next component reads `&[u64; K]`
-  fw_handle  framework, `#[handle]` components: the state holds the buffer, `update` writes it in
+  fw_handle  framework, handle components: the state holds the buffer, `update` writes it in
              place and returns `()`, the next component reads the view `&[u64; K]`
   hand_value hand-written: `o[i] = step(&o[i-1])`
   hand_inplace hand-written: `step_in(&mut b[i], &b[i-1])` (what a handle makes possible)
@@ -53,7 +53,7 @@ open(f"{out}/rust-toolchain.toml", "w").write('[toolchain]\nchannel = "nightly-2
 L = []
 L.append(f"""#![allow(long_running_const_eval)]
 #![recursion_limit = "4096"]
-use dataflow_flat::{{Component, ComponentSubscription, UpdateHandler, Configs, HandleComponent, Pipeline, Root}};
+use dataflow_flat::{{Component, ComponentSubscription, UpdateHandler, Configs, Pipeline, Root}};
 use std::sync::atomic::{{AtomicU64, Ordering::Relaxed}};
 use std::time::Instant;
 
@@ -124,9 +124,8 @@ for i in range(N):
     body = "first_in(&mut self.buf, i.t.0, 0)" if i == 0 else f"step_in(&mut self.buf, i.p, {i})"
     L.append(f"""#[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe({sub})]
-#[handle]
 pub struct H{i} {{ buf: Out }}
-impl HandleComponent for H{i} {{
+impl Component for H{i} {{
     type Config = ();
     type Handle = ();
     type View<'a> = &'a Out;

@@ -19,7 +19,7 @@ Modes:
   enum selectors via one `#[derive(Demux)]` enum per exchange with a variant per market
        (`#[subscribe(<S as Symbol>::Sel(body::Depth(u)): W)]`); works on phase 1b. The baseline is a
        `match` on the same enum. Every component runs only when its edges fire.
-  req  `enum`, but each exchange's feed component is a `#[listener]` whose `Requests` counts the distinct
+  req  `enum`, but each exchange's feed component is a listener (`type Requests`) whose `Requests` counts the distinct
        selectors the graph reads from it (`Request<S>::add`); measures the cost of the request pass.
 
 Layout of what is generated (per market: Book, Trades, Mid, Imbalance, Spread, Vwap, Vol, Momentum, Fair, Quoter):
@@ -42,7 +42,7 @@ import argparse, os, shutil, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
-REQ = False  # mode req: enum plus #[listener] feeds (set in main)
+REQ = False  # mode req: enum plus listener feeds (set in main)
 LIB = REPO  # the checkout whose dataflow-flat / dataflow-macros are used (--lib)
 
 # Spec table: Lighter 224, Binance 2214, Hyperliquid 527 markets (total 2965; perps 213+827+179).
@@ -475,15 +475,14 @@ use crate::wire::*;
     for e, (mod, var, ws) in enumerate(EX):
         if ENUM:
             evt = f"crate::catalog::{mod}::Ev"
-            lattr = "\n#[listener]" if REQ else ""
-            limpl = f"impl dataflow_flat::Listener for {ws} {{ type Requests = crate::stats::Reqs; }}\n" if REQ else ""
+            lreq = "\n    type Requests = crate::stats::Reqs;" if REQ else ""
             newbody = (f"{{ crate::stats::SUBS[{e}].store(i.requests.n, std::sync::atomic::Ordering::Relaxed); crate::stats::SUBKEYS[{e}].store(i.requests.digest, std::sync::atomic::Ordering::Relaxed); ({ws}, {evt}::default()) }}"
                        if REQ else f"{{ ({ws}, {evt}::default()) }}")
             comp.append(f"""#[derive(ComponentSubscription, UpdateHandler)]
-#[subscribe({lsub(var)})]{lattr}
+#[subscribe({lsub(var)})]
 pub struct {ws};
-{limpl}impl Component for {ws} {{
-    type Config = ();
+impl Component for {ws} {{
+    type Config = ();{lreq}
     type Output = {evt};
     fn new((): (), {"i" if REQ else "_"}: Self::Init<'_>) -> (Self, {evt}) {newbody}
     fn update(&mut self, i: Self::Input<'_>) -> {evt} {{ *i.w }}

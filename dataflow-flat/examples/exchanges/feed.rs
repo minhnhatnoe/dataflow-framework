@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Listener, Request, Root};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Request, Root};
 
 use crate::market::*;
 
@@ -77,19 +77,16 @@ impl<S: BinanceStream> Request<S> for Streams {
 }
 
 /// Subscribes to `Some(Packet::Binance(m))` of `Nic` (`Some`, then `packet::Binance`): it runs only for a
-/// Binance packet. `#[listener]` tells the plan that this component wants to be
+/// Binance packet. `type Requests` tells the plan that this component wants to be
 /// told, at build and before `new`, the markets its subscribers read from it.
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(Packet::Binance(m)): Nic)]
-#[listener]
 #[allow(dead_code)] // kept: a real listener owns its connection
 pub struct BinanceWs {
     streams: Vec<&'static str>,
 }
-impl Listener for BinanceWs {
-    type Requests = Streams;
-}
 impl Component for BinanceWs {
+    type Requests = Streams;
     type Config = ();
     type Output = Option<BinanceFrame>;
     fn new((): (), init: Self::Init<'_>) -> (Self, Option<BinanceFrame>) {
@@ -124,15 +121,12 @@ impl<S: CoinbaseProduct> Request<S> for Products {
 /// The same for Coinbase, with its own framing.
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Some(Packet::Coinbase(m)): Nic)]
-#[listener]
 #[allow(dead_code)]
 pub struct CoinbaseWs {
     products: Vec<&'static str>,
 }
-impl Listener for CoinbaseWs {
-    type Requests = Products;
-}
 impl Component for CoinbaseWs {
+    type Requests = Products;
     type Config = ();
     type Output = Option<CoinbaseFrame>;
     fn new((): (), init: Self::Init<'_>) -> (Self, Option<CoinbaseFrame>) {

@@ -1,4 +1,4 @@
-//! Listener requests as types: a `#[listener]` is told, before its `new`, the
+//! Listener requests as types: a listener (`type Requests`) is told, before its `new`, the
 //! selectors its subscribers read (`Request<S>::add`, once per distinct
 //! selector, in the order of the first reader: components in execution order,
 //! subscriptions in listing order, chains left to right). Exact lists, no
@@ -9,7 +9,7 @@
 use std::marker::PhantomData;
 use std::sync::Mutex;
 
-use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Demux, Listener, Pipeline, Request, Root, Select};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler, Configs, Demux, Pipeline, Request, Root, Select};
 
 static SERIAL: Mutex<()> = Mutex::new(());
 /// (listener, what its `new` got in `init.requests`).
@@ -73,12 +73,9 @@ macro_rules! listener {
     ($name:ident, $out:ty, $field:ident) => {
         #[derive(ComponentSubscription, UpdateHandler)]
         #[subscribe(w: Wire)]
-        #[listener]
         pub struct $name;
-        impl Listener for $name {
-            type Requests = Names;
-        }
         impl Component for $name {
+            type Requests = Names;
             type Config = ();
             type Output = $out;
             fn new((): (), init: Self::Init<'_>) -> (Self, $out) {
@@ -156,12 +153,9 @@ fn a_listener_nobody_reads_gets_an_empty_default() {
 
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(w: Wire)]
-#[listener]
 pub struct LD;
-impl Listener for LD {
-    type Requests = Names;
-}
 impl Component for LD {
+    type Requests = Names;
     type Config = ();
     type Output = BinFrame;
     fn new((): (), init: Self::Init<'_>) -> (Self, BinFrame) {
@@ -253,12 +247,9 @@ impl Request<frame_kind::B> for Kinds {
 }
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(w: Wire)]
-#[listener]
 pub struct LK;
-impl Listener for LK {
-    type Requests = Kinds;
-}
 impl Component for LK {
+    type Requests = Kinds;
     type Config = ();
     type Output = FrameKind;
     fn new((): (), init: Self::Init<'_>) -> (Self, FrameKind) {
@@ -294,12 +285,9 @@ impl<S: Name> Request<S> for Logged {
 }
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(w: Wire)]
-#[listener]
 pub struct LL;
-impl Listener for LL {
-    type Requests = Logged;
-}
 impl Component for LL {
+    type Requests = Logged;
     type Config = ();
     type Output = Option<BinFrame>;
     fn new((): (), _: Self::Init<'_>) -> (Self, Option<BinFrame>) {
