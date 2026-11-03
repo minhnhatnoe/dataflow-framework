@@ -36,7 +36,7 @@ These came from the person who asked for the framework, roughly in the order the
 | R4 | Each component takes an owned config in its constructor, returns its first output from it, and has a single `update` that takes what it subscribes to and produces its next output. |
 | R5 | Components run in topological order, and the order is a documented guarantee, not an implementation detail. |
 | R6 | No dynamic dispatch. |
-| R7 | Nightly features are acceptable, but must not leak into user crates: user code needs no feature gate. |
+| R7 | Nightly features are acceptable. Keeping them out of user crates is no longer required (dropped 2026-11-03); today user code still needs no feature gate. |
 | R8 | Declaration syntax: the user names subscriptions, and `update` receives a struct with named fields (`input.sub1`), not a tuple. |
 | R9 | Event-driven: one root, fed by `push`. A step runs only the components whose inputs changed. Outputs persist between steps. |
 | R10 | `#![forbid(unsafe_code)]` in the framework. |
