@@ -507,6 +507,7 @@ impl<A: Planned, const N: usize> PnC<A, N> {
     pub const SJ: usize = A::PLAN.sw_depth(N);
     pub const HAS_SW: bool = A::PLAN.prog_has_switch(N);
     pub const VIEW_LEAF: bool = A::PLAN.prog_view_leaf(N);
+    pub const TINY_ARM: bool = A::PLAN.prog_tiny_arm(N);
 }
 /// The root node of the program of `A`.
 #[doc(hidden)]
@@ -816,7 +817,7 @@ pub fn exec_arm<A: Layout, Ph, const N: usize>(ctx: &mut PushCtx<'_, A>)
 where
     Pn<A, N>: Exec<A, Ph>,
 {
-    if PnC::<A, N>::HAS_SW || PnC::<A, N>::VIEW_LEAF {
+    if PnC::<A, N>::HAS_SW || PnC::<A, N>::VIEW_LEAF || PnC::<A, N>::TINY_ARM {
         <Pn<A, N> as Exec<A, Ph>>::exec(ctx)
     } else {
         exec_out::<A, Ph, N>(ctx)

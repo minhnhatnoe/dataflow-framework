@@ -62,6 +62,9 @@ pub const MAX_EDGES: usize = 1 << 17;
 /// [`Plan::decision`]).
 pub const MAX_DECISIONS: usize = 1 << 15;
 
+/// Graphs with more components than this keep every switch arm outlined (`Plan::prog_tiny_arm`).
+pub const TINY_ARM_MAX_COMPONENTS: usize = 1000;
+
 /// Upper bound on the terms of one node's condition (after absorption).
 pub const MAX_TERMS: usize = 1 << 13;
 
@@ -2419,6 +2422,28 @@ impl Plan {
             // The run of the view reader, then at most one more run (its join).
             let a = self.pg_a[n] as usize;
             return self.prog_view_leaf(self.ch_node[a] as usize)
+                && (self.pg_b[n] == 1 || self.pg_kind[self.ch_node[a + 1] as usize] == PG_RUN);
+        }
+        false
+    }
+
+    /// Is program node `n` one run of a component with only by-value parents, alone or followed by
+    /// one more such run (a switch arm and its join)? Such an arm is a few instructions; outlined,
+    /// it costs a call and a return per packet, so it is inlined into the switch like a view leaf.
+    pub(crate) const fn prog_tiny_arm(&self, n: usize) -> bool {
+        // Measured: faster at 111, 415 and 823 components, slower (+1.6 ns of 91) at 4,079, where
+        // the extra inlining makes the switch functions large.
+        if self.n_comp > TINY_ARM_MAX_COMPONENTS {
+            return false;
+        }
+        let kind = self.pg_kind[n];
+        if kind == PG_RUN || kind == PG_RUN_IF {
+            return true;
+        }
+        if kind == PG_SEQ && self.pg_b[n] >= 1 && self.pg_b[n] <= 2 {
+            let a = self.pg_a[n] as usize;
+            let k0 = self.pg_kind[self.ch_node[a] as usize];
+            return (k0 == PG_RUN || k0 == PG_RUN_IF)
                 && (self.pg_b[n] == 1 || self.pg_kind[self.ch_node[a + 1] as usize] == PG_RUN);
         }
         false
