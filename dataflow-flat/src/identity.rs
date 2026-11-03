@@ -36,16 +36,35 @@ pub(crate) const BLANK: TypeId = TypeId::of::<()>();
 /// FNV-1a of a type name: where the plan's table starts looking for a
 /// component (see `table`). It is only a hint: equal names or equal hashes of
 /// different types are told apart by `TypeId`.
+///
+/// It hashes a bounded part of the name, because the constant interpreter
+/// charges per byte (0.44 ms for each of 824 names at 823 components): the
+/// length, the last `TAIL` bytes (what differs between instantiations of one
+/// generic) and `SPREAD` bytes sampled at an even stride over the rest.
 const fn name_hash(s: &str) -> u64 {
+    const TAIL: usize = 24;
+    const SPREAD: usize = 24;
     let bytes = s.as_bytes();
-    let mut hash: u64 = 0xcbf29ce484222325;
+    let len = bytes.len();
+    let mut hash: u64 = 0xcbf29ce484222325 ^ len as u64;
+    hash = hash.wrapping_mul(0x100000001b3);
+    let head = if len > TAIL { len - TAIL } else { 0 };
+    // sampled bytes of bytes[..head]
+    let step = if head > SPREAD { head / SPREAD } else { 1 };
     let mut i = 0;
-    while i < bytes.len() {
+    while i < head {
+        hash ^= bytes[i] as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+        i += step;
+    }
+    let mut i = head;
+    while i < len {
         hash ^= bytes[i] as u64;
         hash = hash.wrapping_mul(0x100000001b3);
         i += 1;
     }
-    hash
+    // FNV's low bits are weak for the table's mask: fold the high half in.
+    hash ^ (hash >> 32)
 }
 
 /// Where the plan's table starts looking for a component.
