@@ -367,3 +367,11 @@ Chain, 64 links, by value / handle / hand-written in place: 64 B 103 / 99 / 98 n
 Zero-cost survey at 4,079 (branch `zero-cost`, not merged): no flags, guarded runs or stored slots in generated apps. Extra stores are mostly call overhead from outlined functions, and removing them doesn't change time. At tiny the gap was the baseline's `#[inline(always)]` on `big_digest` that `Big::update` lacks; at 4,079 it follows the wide components through `run_wide`. Rebuilding the same baseline code moves it 2 to 4 ns from layout alone.
 
 One-`Component` prototype: branch `one-component`, patch against 3db775e. Not adopted; the user decides.
+
+## Small graphs and a fair benchmark (2026-11-02)
+
+`gen_app.py` now gives `Sender`, `Risk`, `Big` and their hand-written counterparts the same `#[inline(always)]` (`--user-inline always|none`, default `always`), so earlier framework-vs-baseline numbers from it are superseded. Gap on master before the arm change, then after: tiny +1.9 then +0.7 ns, small +0.9 then +0.3, typical -0.5 then -1.0, 4,079 about +6.3 both (`.text` identical there). Old generator: tiny +4.5, typical -0.8, 4,079 +6.1.
+
+Arms of one plain run, optionally with one more run, are inlined at up to 1,000 components (`prog_tiny_arm`, `TINY_ARM_MAX_COMPONENTS`): `gen_handle_select.py` value direct 7 feeds 9.8-10.1 to 7.7 ns (hand-written 8.2-8.5), value join 15 feeds 23.6 to 19.2-19.7 (17.5). At 4,079 inlining them cost +1.6 ns, hence the limit; `.text` above the limit is byte-identical to master.
+
+Handle source gap is stores, from hardware counters (`perf`, paranoid 1): same retired ops, 51.3 vs 43.6 cycles per push, store-queue stalls about 4x. Adding only the handle store to the hand-written loop reproduces the whole gap, about 0.2 ns per store. These stores are dead when only same-push readers use them. Not fixed; needs handles passed without the `outs` tree, after flag removal. 4,079's gap isn't explained.
