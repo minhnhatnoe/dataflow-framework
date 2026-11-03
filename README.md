@@ -291,7 +291,7 @@ trait Select<In>: 'static {
 }
 ```
 
-`key_of` lets the push evaluate one function and branch on a jump table instead of testing each selector in turn. All keyed selectors applied at one place must belong to one family (give the same `key_of`). A guard returns `GUARD` from `key_of`. A hand-written selector that is read in steps where it does not match also implements `Initial<In>` (below). The source of the subscription decides which trait it needs: a stored output takes `Select`; a `#[handle]` component takes `SelectView<View>` (`fn select(x: View) -> Option<Out>`, by value, see [Selectors on a handle component](#selectors-on-a-handle-component)).
+`key_of` lets the push evaluate one function and branch on a jump table instead of testing each selector in turn. All keyed selectors applied at one place must belong to one family (give the same `key_of`). A guard returns `GUARD` from `key_of`. A hand-written selector that is read in steps where it does not match also implements `Initial<In>` (below). The source of the subscription decides which trait it needs: a stored output takes `Select`; a handle component takes `SelectView<View>` (`fn select(x: View) -> Option<Out>`, by value, see [Selectors on a handle component](#selectors-on-a-handle-component)).
 
 ## Demux, markers and generic selectors
 
@@ -437,7 +437,7 @@ impl<S: Symbol + Select<Tick, Out = Quote>> UpdateHandler<Quoter<S>> for Oms {
 ```
 
 * **The key `E` of an entry.** A plain entry, named (`limits: Limits`) or not (`Quoter<Btc>`), is keyed by its node type. A selected entry, named (`Some(Sol(sol)): Ws`) or not (`Btc(_): Ws`), is keyed by a marker the derive generates in a module named after the struct: for `struct Tape` it is `tape_edges::Btc`. The marker's name is the binding's name in camel case (`sol` gives `tape_edges::Sol`; `_` takes the innermost selector's name, and so does a unit selector; for a generic selector `Tag::<Btc>` it is the type argument's name). Two unit selectors that would get one name are told apart by their position (`Name2`).
-* **The value `v`.** It follows the source. A by-value parent gives `&Output` (`&i64` above). A handle parent (`#[handle]`, below) gives exactly its `View<'a>`: `u64` for an owned view, `&'a u64` for a borrowed one. A selected entry gives the selected part, by reference, and `E`'s `Arg<'a>` (`HandledEdge::Arg`) is that type.
+* **The value `v`.** It follows the source. A by-value parent gives `&Output` (`&i64` above). A handle parent (a component with no `Output`, below) gives exactly its `View<'a>`: `u64` for an owned view, `&'a u64` for a borrowed one. A selected entry gives the selected part, by reference, and `E`'s `Arg<'a>` (`HandledEdge::Arg`) is that type.
 * **`ACTIVE`.** `UpdateHandler` has `const ACTIVE: bool = true` and `on_update` has an empty default body. `impl UpdateHandler<E> for C {}` therefore means a call that does nothing; `const ACTIVE: bool = false` in the impl says the plan need not make it. The plan reads `ACTIVE` once per edge: a component with no active edge is an ordinary one in the push program. Unnamed entries are not fields of `Input`; a named entry stays one whether it is active or not, so `input.limits` and `v` can both be read in a call for it.
 * **A missing impl** is ``error[E0277]: `Oms` subscribes to `Limits` without an `UpdateHandler<Limits>` impl``, pointing at the struct (`cargo check` already shows it), with a note that says to derive `UpdateHandler` or to write the impl. **`#[derive(UpdateHandler)]` with a hand-written impl** is Rust's own ``error[E0119]: conflicting implementations of trait `UpdateHandler<Limits>` for type `Oms` ``: the blanket impl the derive wrote overlaps every hand-written one. Remove the derive from a component that has handlers (the derive is for components that have none); there is no way to combine them, a hand-written impl for every entry with `const ACTIVE: bool = false` is the same thing.
 * **An unnamed entry whose impl is `ACTIVE = false`** is a trigger only: the component runs when the edge fires, and nothing reads the value.
@@ -467,7 +467,7 @@ When a handler runs (the OR rule over *all* its entries, named and unnamed), eac
     ```
 
     A catalog is a nested tuple built by `catalog![A, B, C]`, or one of the combinators, which take catalogs: `Concat<A, B>` (the elements of `A`, then `B`), `Product<A, B>` (all pairs, row by row), `Zip<A, B>` (position-wise pairs; `A` and `B` must have the same shape). Pairs are `M<X, S>`, destructured in the `for`: `for (X: Tag, S: Symbol) in Product<Venues, Coins> { Book<X, S> }`, and `((X, S), Y)` for nesting. The derive cannot see what a catalog contains, so it generates a mapper from the body; there is no filtering. An enum with `#[derive(Demux)]` is a catalog of its markers (`mkt::All`, below). The body must be one node type (`a `for` body is one node type`), and a pattern with more than a pair is rejected (``a `for` pattern destructures a pair: `(X, S)` ``).
-* **Handle components** take part like any other: a handle parent's `View<'a>` is the value `v`, and a `#[handle]` component can have handlers and `for` entries of its own. The component is then updated through the split of the states (`SplitAt`) and `on_update` gets `input` read from the same context as `update` does.
+* **Handle components** take part like any other: a handle parent's `View<'a>` is the value `v`, and a handle component can have handlers and `for` entries of its own. The component is then updated through the split of the states (`SplitAt`) and `on_update` gets `input` read from the same context as `update` does.
 * **Cost.** The edge's flag is tested only where the plan cannot know statically that the edge fired. Inside a `Switch` arm the fired edge is known, so there is no test; `on_update`'s `input` is gathered at the call, and an empty body leaves nothing behind after inlining. An `impl UpdateHandler<E> for C {}` (default `ACTIVE = true`) makes the plan treat the component as a handler (it is `PG_HRUN` instead of `PG_RUN`, with one item per edge that can fire), even though each call does nothing; set `ACTIVE = false` on entries that never need a call.
 
 ### Handler buffer guidance
@@ -522,7 +522,7 @@ Nobody outside the tests has used it yet.
 
 ## Listeners
 
-A **listener** is a component whose subscribers read only some alternatives of its output (one feed, many markets), and which wants to know which ones, once, before it is constructed: so one websocket can carry exactly the symbols the graph uses. Mark it with `#[listener]` on the derive, implement `Listener` with a `Requests` type, and implement `Request<S>` for the selectors it accepts:
+A **listener** is a component whose subscribers read only some alternatives of its output (one feed, many markets), and which wants to know which ones, once, before it is constructed: so one websocket can carry exactly the symbols the graph uses. Write `type Requests = ..` in its `impl Component`, and implement `Request<S>` for the selectors it accepts:
 
 ```rust
 #[derive(Default)]
@@ -533,10 +533,9 @@ impl<S: Stream> Request<S> for Streams {
 
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(p: Poll)]
-#[listener]
 pub struct Ws { streams: Vec<&'static str> }
-impl Listener for Ws { type Requests = Streams; }
 impl Component for Ws {
+    type Requests = Streams;             // this line makes it a listener
     // ...
     fn new((): (), init: Self::Init<'_>) -> (Self, Option<Frame>) {
         println!("subscribing to {:?}", init.requests.0); // `init.requests` is the Requests value
@@ -554,22 +553,21 @@ subscribing to ["solusdt@bookTicker", "btcusdt@bookTicker"]
 
 * **Exactly the read selectors.** `Request<S>::add` is called once per distinct *requested* selector `S` that a subscriber reads through this listener. The requested selectors are those of `#[derive(Demux)]` (`Select::REQUEST` is true); `Some`, `Ok`, `Err`, guards and hand-written selectors are not requests.
 * **Order.** Components in execution order; within a component its subscriptions in listing order; within a chain, left to right. A selector already added for that listener is skipped, so the order is that of the first reader (above: `Sink` lists `Sol` first).
-* **Before anything is constructed.** A first pass over the component positions runs in `Pipeline::build`; it constructs nothing. The collected value reaches the listener's `new` as `init.requests`. A listener nobody reads gets `Requests::default()`.
+* **Before anything is constructed.** A first pass over the component positions runs in `Pipeline::build`; it constructs nothing. The collected value reaches the listener's `new` as `init.requests`. A listener nobody reads gets `Requests::default()`. `Requests` is independent of `Output`/`Handle`: a [handle component](#handle-components) can be a listener too, and requests are collected through selectors on its view (`SelectView::REQUEST`, set by `#[derive(Demux)]`).
 * **Missing impl.** A selector read downstream of a listener whose `Requests` has no `Request<S>` impl is ``error[E0277]: the listener's requests type `Reqs` cannot take the request of the selector `Eth` ``.
 * The same marker through different enums is the same request. Two listeners on different enums each get their own list.
 
 ## Handle components
 
-A by-value component stores its output and its subscribers read `&Output`. A **handle component** stores a small *handle* instead, and its subscribers read a *view* the component computes from its own state and that handle, each time a subscriber runs. The output never has to be built as a value and moved into the pipeline: `update` changes the state in place and returns the handle. Mark the struct with `#[handle]` next to the derive and implement `HandleComponent` instead of `Component`:
+A by-value component stores its output and its subscribers read `&Output`. A **handle component** stores a small *handle* instead, and its subscribers read a *view* the component computes from its own state and that handle, each time a subscriber runs. The output never has to be built as a value and moved into the pipeline: `update` changes the state in place and returns the handle. Implement `Component` without `type Output`: write `type Handle`, `type View<'a>` and `fn view` instead (there is no marker; a component that sets `Output` is by value):
 
 ```rust
-use dataflow_flat::{ComponentSubscription, UpdateHandler, HandleComponent};
+use dataflow_flat::{Component, ComponentSubscription, UpdateHandler};
 
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(tick: Tick)]
-#[handle]
 pub struct Ring { arr: [u64; 4], n: usize }
-impl HandleComponent for Ring {
+impl Component for Ring {
     type Config = ();
     type Handle = usize;                 // the slot of the last write; stored between pushes
     type View<'a> = &'a u64;           // what a subscriber's field is, exactly
@@ -595,12 +593,13 @@ impl Component for Reader {
 ```
 
 * **The field is `View<'a>`.** Owned (`type View<'a> = u64;`) or a reference or a struct that borrows (`&'a Level`, `Depth<'a>`): the field of a subscriber is that type and nothing is added to it. A by-value parent is still `&Output`. `new` of a subscriber gets the view computed from the parent as it was constructed (its first handle).
-* **`output` is evaluated at each use and not cached**: once per subscriber run and once per subscriber `new`. It should be cheap (an index, a reference into the state, a copy of a few words). Anything expensive belongs in `update`, whose result is the handle.
+* **`view` is evaluated at each use and not cached**: once per subscriber run and once per subscriber `new`. It should be cheap (an index, a reference into the state, a copy of a few words). Anything expensive belongs in `update`, whose result is the handle.
 * **Persistence.** The stored thing is the handle, and the state stays where it is. A subscriber that runs in a step where the handle component did not run reads the view of the state and handle as they were (`tests/handle.rs`, `a_parent_that_did_not_run_gives_the_same_view`). The execution order, the OR rule, the one-instance-per-type rule and the lifecycle (constructed, run at most once per push, dropped once) are those of any component.
-* **`Handle` needs no `Copy`**, only `'static`: the framework stores it and lends `&Handle` to `output`. `()` and indices are typical.
-* **Config.** `HandleComponent::Config` is given with `Configs::new().with::<Ring>(cfg)` (`with` takes both kinds of component).
-* **Generic code.** `X: Node<Output = T>` still means "a node whose subscribers read `&T`", so existing generic components compile unchanged (their field is `&T`); a handle component is not a `Node` and is rejected there with ``error[E0277]: `Ring` is not a by-value Node``. The one bound for generic *pipeline* code is still `S: Sinks<R>`.
-* **Selectors work on a handle component** (next subsection). **Not supported** (each is a clear compile error, `scripts/check_errors.sh handle_*`): `#[handle]` on a `#[listener]`, and a selected value from a handle source that would have to be stored.
+* **`Handle` needs no `Copy`**, only `'static`: the framework stores it and lends `&Handle` to `view`. `()` and indices are typical.
+* **`fn view` is required for a handle component**, but a trait cannot require it of one kind only (a by-value component writes no `view`), so `cargo check` does not see a missing one. `Pipeline::build` calls `view` on each handle component once after `new`, so the error appears whenever the pipeline is built, whether or not anyone reads the component: ``error[E0080]: evaluation panicked: a component with no `type Output` is a handle component and needs `fn view` `` (it names `<X as Component>::VIEW_DEFINED`).
+* **Config.** `Component::Config` is given with `Configs::new().with::<Ring>(cfg)`, as for any component.
+* **Generic code.** `X: Node<Output = T>` still means "a node whose subscribers read `&T`", so existing generic components compile unchanged (their field is `&T`); a handle component is not a `Node` and is rejected there with ``error[E0271]: type mismatch resolving `<Ring as Component>::Handle == HandleComponentHasNoOutputSoItIsNotAByValueNode`, required for `Ring` to implement `Node` `` (rustc reports the projection mismatch of the `Node` impl before any marker trait's message, so the hidden sentinel type that stands for "no `Output`" is named for what it means). The one bound for generic *pipeline* code is still `S: Sinks<R>`.
+* **Selectors work on a handle component** (next subsection). **Not supported** (a clear error, `scripts/check_errors.sh handle_*`): a selected value from a handle source that would have to be stored. A handle component can be a listener (`type Requests`).
 
 ### Selectors on a handle component
 
@@ -612,9 +611,8 @@ pub enum FrameView<'a> { Book(&'a Book), Trade(&'a Trade), Seq(u64) }   // refer
 
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(Msg::A(v): Msg)]
-#[handle]
 pub struct Feed { /* a ring of frames */ }
-impl HandleComponent for Feed {
+impl Component for Feed {
     type View<'a> = FrameView<'a>;
     /* .. fn view<'a>(&'a self, h: &'a usize) -> FrameView<'a> { match &self.ring[*h] { Frame::Book(b) => FrameView::Book(b), .. } } */
 }
@@ -650,11 +648,11 @@ The handle source costs what the by-value source costs; the framework is 20% and
 
 **Cost of selectors on handles in the library** (generated app with no handle component, `--mode enum`, cold `cargo check -p app` and `cargo build --release -p runner`, `taskset -c 0-7,12-19`, 4 jobs, 3 alternating runs each, the base is `api-handlers` `afca850`, same directory names, peak RSS of the largest process): typical (823 components): check 7.89 s (7.93, 7.85, 7.88) against 8.04 s (8.09, 7.99, 8.04), +1.9%, peak 486 against 487 MB; release 21.00 s against 21.18 s, +0.9%, peak 888 against 890 MB. `m30-300-70` (4,079): check 28.77 s against 29.09 s, +1.1%, peak 1,567 against 1,577 MB (+0.6%); release 93.70 s against 94.38 s, +0.7%, peak 2,972 against 2,982 MB (+0.3%). The release `.text` of the binary is byte-identical to the base's at both sizes (hashes of `objcopy -O binary --only-section=.text`; typical `6e923b21`, 4,079 `2e730a00`), so the run time of a by-value app is unchanged. The cost that is left is the `ChainWrap` projection and the `INPUTS` constant on the derive's output for the selected entries (the first version of this change, before fusion and arm inlining, measured the same within noise: 7.98 s and 29.01 s check). `full` (about 56k edges) was not built here.
 
-**How it works.** `Node` is split in two. The internal, sealed `Vertex` is what the plan, the storage and the drivers use; its `Stored` type is the output of a by-value component and the handle of a handle component. `Edge::Read<'a>` says what a subscriber's field is for a parent, and the public `Node` is a `Vertex` whose `Read` is pinned (`for<'a> Self: Edge<Read<'a> = &'a Self::Output>`) so that the field of a by-value parent is `&Output` to generic code. A handle component implements `Edge` with `Read<'a> = Output<'a>` and is not a `Node`.
+**How it works.** `Component` is one trait for all kinds; the node impls (`Sealed`, `Edge`, `Vertex`, `Node`) are blanket impls over it. `Output` defaults to a hidden unsized `HandleComponentHasNoOutputSoItIsNotAByValueNode`, and `trait OutInfo` (implemented for every sized type and for the sentinel) tells the two apart at the type level: `Vertex::Kind` is `CompKind` or `HandleKind`, so generic components need no const and user crates no feature gate. `Node` is split in two. The internal, sealed `Vertex` is what the plan, the storage and the drivers use; its `Stored` type is the output of a by-value component and the handle of a handle component. `Edge::Read<'a>` says what a subscriber's field is for a parent, and the public `Node` is a `Vertex` whose `Read` is pinned (`for<'a> Self: Edge<Read<'a> = &'a Self::Output>`) so that the field of a by-value parent is `&Output` to generic code. A handle component's `Edge::Read<'a>` is its `View<'a>`, and it is not a `Node` (its `Output` is that sentinel).
 
 A component with a handle parent needs its parent's *state* while its own state is `&mut`: both sit in the same tree of tuples. `store::AtPos::at_mut` borrows the whole tree, so such a component runs through the safe split descent of `src/split.rs`: at each of the (at most four) levels of the constant path to its position the block's tuple is split by pattern, the own element becomes `&mut` and the elements before it become `&`; a parent (always at a smaller position) is picked from the context of the level where the two paths first differ and read down by shared steps. All indices are constants, so after inlining it is the same field offsets as `at_mut`, with no `unsafe`. A component with only by-value parents does not use it: the plan picks the program node kind (`PG_RUN_VIEW` and `PG_RUN_IF_VIEW` for a component with a handle parent, set while the walk records the edge; `PG_RUN` and `PG_RUN_IF` otherwise), so the by-value path has the bounds and the code that existed before handles (`.text` of an app made of by-value components is identical, see below).
 
-**Measured** (`bench/gen_handle_chain.py`, a chain of 64 components, each rewriting a whole output of `K` words from the previous one; framework by value against framework `#[handle]` (state holds the buffer, `update` writes it in place, handle `()`, subscriber reads `&[u64; K]`) against a hand-written `o[i] = step(&o[i-1])` and a hand-written in-place version; release, `taskset -c 9`, min of 15 alternating rounds, best of 3 processes, ns per push; every variant computes the same checksum):
+**Measured** (`bench/gen_handle_chain.py`, a chain of 64 components, each rewriting a whole output of `K` words from the previous one; framework by value against framework handle components (state holds the buffer, `update` writes it in place, handle `()`, subscriber reads `&[u64; K]`) against a hand-written `o[i] = step(&o[i-1])` and a hand-written in-place version; release, `taskset -c 9`, min of 15 alternating rounds, best of 3 processes, ns per push; every variant computes the same checksum):
 
 | Output | framework by value | framework handle | hand-written by value | hand-written in place |
 |---|---|---|---|---|
@@ -669,7 +667,7 @@ Handles cost nothing at 64 B (3% faster), tie at 512 B, and are 2.2 times faster
 
 ## How it works, start to finish
 
-1. **Macro expansion** (`dataflow-macros`). The derive turns `#[subscribe(..)]` into: the `Input`/`Init` structs, `ComponentSubscription::Deps` (the subscription list as a type-level tree: leaves of up to 15 entries, inner nodes of exactly 16 subtrees, `ARITY = 16` defined once in `dataflow-macros`, every per-shape impl generated from it by callback macros), and the node impls (`Edge`, `Vertex`, `Node`; for `#[handle]`, `Edge`, `Vertex`, `HandleView` and a forwarding `Component`). Each entry becomes `Sub<Node, SelectorChain, position>`; the position tells apart two entries naming one type through an alias. The generated tokens are re-spanned to the struct's identifier so that moving a declaration does not turn unrelated incremental queries red.
+1. **Macro expansion** (`dataflow-macros`). The derive turns `#[subscribe(..)]` into: the `Input`/`Init` structs, `ComponentSubscription::Deps` (the subscription list as a type-level tree: leaves of up to 15 entries, inner nodes of exactly 16 subtrees, `ARITY = 16` defined once in `dataflow-macros`, every per-shape impl generated from it by callback macros), (the node impls `Edge`, `Vertex`, `Node` and `HandleView` are blanket impls over `Component` in the library, not derive output). Each entry becomes `Sub<Node, SelectorChain, position>`; the position tells apart two entries naming one type through an alias. The generated tokens are re-spanned to the struct's identifier so that moving a declaration does not turn unrelated incremental queries red.
 2. **Type checking** (`cargo check`). Every subscription is a node, `update`'s inputs match the upstream outputs, the selector chains apply to the output types. `cargo check` does not monomorphise, so the plan's errors only appear with `cargo build`.
 3. **Plan** (`plan.rs`, constant evaluation). The depth-first walk from the sinks runs once in a `const fn` (`const_trait_impl`), recording every node's `TypeId`, first parent, execution position, subtree end and upstream edges; each selector as a *decision* `(parent, position in the chain, key)`; every component's *condition* (terms of decisions, absorbed, checked pairwise exclusive); which selected inputs need a stored slot; the listener requests' structure; and the **push program**: `Seq` (children in execution order), `Run`, `RunIf` (for conditions a trie cannot express, such as guards), `Switch` (one `key_of` call at a place, then a decision tree over the sorted constant keys, which LLVM lowers to jump tables) and `PG_HRUN` (a handler's run). The plan is integer arrays only. A failed plan produces an empty program and one error, because a const panic inside the plan once caused a 13 GB hang.
 4. **Flat storage** (`flat.rs`, `store.rs`). The states of the components and their stored outputs are two balanced trees of blocks (16-ary) with one value per component in execution order. The type at a position is found by a halving descent of the first-parent tree, so the solver depth is about log2 of the graph depth. A position is read or written by a constant descent that is one field offset after inlining: one function per position walks a path of at most four digits (`store::path`) through projection steps that are shared by every position under the same child. Stored selector values take positions after the components.
@@ -702,11 +700,11 @@ The price of being `unsafe`-free is `generic_const_exprs`, which is confined to 
 | More than `MAX_COMPONENTS` (32,768) components | `cargo build` | ``evaluation panicked: too many components: raise dataflow_flat::MAX_COMPONENTS`` |
 | A config for a component outside the graph | `Pipeline::build` returns | `BuildError { unused: [..] }` |
 | Generic code without the `Sinks<R>` bound | `cargo check` | `E0277` ``not valid sinks`` / `Sinks<R>` |
-| `#[handle]` without `impl HandleComponent` | `cargo check` | `E0277` ``the trait bound `X: HandleComponent` is not satisfied`` |
-| A `Node<Output = ..>` bound on a handle component | `cargo check` | `E0277` ``is not a by-value Node: its subscribers read a view, not `&Output` `` |
+| A handle component (no `type Output`) without `fn view` | `cargo build` (post-monomorphization; `cargo check` cannot see it) | `E0080` ``a component with no `type Output` is a handle component and needs `fn view` `` (names `<X as Component>::VIEW_DEFINED`) |
+| `Output` set together with a `Handle` or `View` of another type | `cargo check` | `E0277` ``the component `X` cannot be read as `&Output` by a subscriber`` |
+| A `Node<Output = ..>` bound on a handle component | `cargo check` | `E0271` ``type mismatch resolving `<X as Component>::Handle == HandleComponentHasNoOutputSoItIsNotAByValueNode` `` |
 | A by-value selector (or one for another view) on a handle component | `cargo check` | `E0277` ``the selector chain `..` cannot be applied to the view `..` `` |
 | A selected input of a handle component that would have to be stored | `cargo build` | ``the input `n` selects from a handle component and is read in steps where its selectors do not match, so its value would have to be stored, and a view is not stored`` |
-| `#[handle]` with `#[listener]` | `cargo check` | ``cannot be combined with `#[listener]` yet`` |
 | An entry without an `UpdateHandler` impl | `cargo check` | `E0277` ``subscribes to `Limits` without an `UpdateHandler<Limits>` impl`` |
 | `#[derive(UpdateHandler)]` and a hand-written impl | `cargo check` | `E0119` conflicting implementations of `UpdateHandler<..>` |
 
@@ -770,7 +768,7 @@ With a different training seed: small 90.6 to 86.2 (-4.8%, baseline -2.4%), tiny
 
 ### Tools
 
-`bench/gen_app.py --size tiny|small|typical|perps|full|m<L>-<B>-<H> --mode 1a|enum|req` generates a multi-crate app (`marketlib/`, `app/`, `baseline/`, `runner/`). **`--mode` is required.** Use `enum` (selectors through one `#[derive(Demux)]` enum per exchange) for anything meant to resemble a real app, `req` for `enum` with `#[listener]` feeds, and `1a` only for the old no-selector shape. `scripts/measure.py --mode ..` drives it (its default `--out` is `target/harness`); `bench/gen_handler.py N OUT [for]` builds an OMS-style handler graph; `bench/gen_enum_keys.py` compares enum keys; `scripts/gen_selbench.py` writes `examples/selbench.rs`. `bench/gen_bench.py full 20` regenerates `bench/src/main.rs`; the committed file should be what the generator produces.
+`bench/gen_app.py --size tiny|small|typical|perps|full|m<L>-<B>-<H> --mode 1a|enum|req` generates a multi-crate app (`marketlib/`, `app/`, `baseline/`, `runner/`). **`--mode` is required.** Use `enum` (selectors through one `#[derive(Demux)]` enum per exchange) for anything meant to resemble a real app, `req` for `enum` with listener feeds (`type Requests`), and `1a` only for the old no-selector shape. `scripts/measure.py --mode ..` drives it (its default `--out` is `target/harness`); `bench/gen_handler.py N OUT [for]` builds an OMS-style handler graph; `bench/gen_enum_keys.py` compares enum keys; `scripts/gen_selbench.py` writes `examples/selbench.rs`. `bench/gen_bench.py full 20` regenerates `bench/src/main.rs`; the committed file should be what the generator produces.
 
 ## Design history and rejected alternatives
 
@@ -819,7 +817,7 @@ Smaller decisions: configs are keyed by component `TypeId`; `type Config: Defaul
 | Capacity | `MAX_COMPONENTS` 32,768, `MAX_EDGES` 131,072, `MAX_DECISIONS` 32,768, `MAX_TERMS` 8,192. At most 15 sinks. Compile-time memory grows with the number of components. The plan's pools (push program 131,072 nodes, child pool 131,072, lists 262,144, key pool 65,536) have private limits with messages such as "the push program is too large: raise dataflow_flat's list pool". What `full` (29,650 components, 30,187 nodes) uses, measured 2026-11-02: 56,503 edges, 8,898 decisions, 23,727 pool words of terms, 60,440 term-list entries, push program 69,341 nodes and 69,334 child entries, lists 90,035, candidate lists 101,033, keys 13,317. Nodes are within 8% of `MAX_COMPONENTS`: `full` is about the largest graph that fits. A plan error is reported once (as `E0080` on `Planned::CHECK`), not once per component. |
 | Graph depth | The plan's `Upstream` proof is as deep as the graph. The depth is about 1.1 solver levels per layer plus about 35 for the rest of the pipeline's proof, so at the default `recursion_limit` of 128 a chain builds up to 88 layers (about 4 s in `cargo check`). At 89 rustc warns about the overflow and still finishes (7 s, 0.83 GB). From 90 it fails, after an expensive cascade of follow-up errors (90: 15 s and 2.1 GB, 95: 20 s and 3 GB; this is the steep part, not the build itself). Deeper chains need `#![recursion_limit = "N"]` in the user's crate: with 4096, 250 layers take 6 s / 0.63 GB and 500 take 11.7 s / 2.1 GB (`cargo check`; dev and release builds of 250 layers 7.8 s). Many parallel chains are fine (16 chains of 50: 8 s). Typical graphs are shallow (about 6 levels) and wide. |
 | Scale | `long_running_const_eval` allow needed above about 1,300 to 2,000 components. Cold `cargo check` of `full` (29,650, `enum`, patched rustc, empty `MALLOC_CONF`): passes, 310 s, 10.1 GB, 4.8M page faults. Run time above hand-written code: typical about 0 (-0.7 ns, within layout noise), 4,079 components 7.2 ns. Release of 12,412 components: 416 s, 8.75 GB, 4 to 7 ns per packet above hand-written code. Release of 30,186 components: 1,537 s, 19.66 GB, about 8.5 ns above hand-written code (4 runs; the hand-written code slows more than the framework at this size, for a reason not yet known). |
-| Handle components | Selectors on them select from the view and are never stored (a selected input the condition does not imply is an error); `new` gets an `Option` of the selected view; no switch fusion with the source's run; no `#[listener]` that is itself `#[handle]`. `view` is not cached (called per subscriber run). Release `.text` is unchanged for apps without them; `cargo check` of a 4,079-component app is 11% slower for the library having them (see the section). A subscriber of a handle component reads `View<'a>` borrowed from the pipeline, so it can't keep it past `update`. |
+| Handle components | Selectors on them select from the view and are never stored (a selected input the condition does not imply is an error); `new` gets an `Option` of the selected view; no switch fusion with the source's run. `view` is not cached (called per subscriber run). Release `.text` is unchanged for apps without them; `cargo check` of a 4,079-component app is 11% slower for the library having them (see the section). A subscriber of a handle component reads `View<'a>` borrowed from the pipeline, so it can't keep it past `update`. |
 | Listeners | `Select::REQUEST` is true only for derived selectors; a hand-written selector never reaches `Request`. One component can read several variants of one listener (stored selector values). |
 | Unit selector on a data variant | Compiles and ignores the payload. |
 | Patterns | Enum-variant style with at most one field; anything else is a hand-written `Select`. `for` bodies are one node type. |
