@@ -2,6 +2,8 @@
 
 A framework for building programs out of many small components (designed for hundreds, tested into the thousands) that form a directed acyclic graph and react to events. You feed one *root* value into a `Pipeline` with `push`. Each component is constructed from an owned config, subscribes to the outputs of other components (or to the part of an output that matches a pattern), and has one `update` method that produces a new output. Everything upstream of the *sinks* you name is discovered by the compiler, built exactly once per concrete type, and updated only when something it reads changed, in a documented order. At run time there is no dynamic dispatch, no lookup and no `unsafe`: a `push` compiles to straight-line code with a jump table where the graph branches, comparable to a hand-written nested `match` (about 1% to 8% slower on the benchmark graph, see [Performance](#performance-and-compile-time)).
 
+**To see all the syntax in one place, read `dataflow-flat/examples/tour/`** (`cargo run -p dataflow-flat --example tour`): one small market-feed graph with every flavor of component, subscription, handler, set and listener, each explained where it is defined, and asserts on what every push does.
+
 **Status:** working prototype; the focus is the design rather than polish. Everything here was built and checked on the pinned nightly (see [Toolchain](#toolchain)). Code blocks in this file were compiled as a scratch crate against this tree; the output shown is what they printed.
 
 ## Contents
