@@ -36,7 +36,8 @@
 //! run is one program node (`PG_HRUN`) with the list of the handled edges that may have fired
 //! *under the decisions known in that place of the program* (`Plan::mk_hrun`): inside a `Switch`
 //! leaf that is exactly the edges whose cones are inside the leaf, with no test at run time.
-//! Elsewhere an edge keeps a test on its parent's flag and/or its selectors. A component with no
+//! Elsewhere an edge keeps a guard (its parent's condition and its selectors, asked again from the
+//! stored outputs, see `guard`; no bit "this fired" is stored). A component with no
 //! handled edge is planned exactly as an ordinary component. The unnamed (`Hd`) wrapper is a
 //! separate matter: it only says that `update` does not read the edge (rule 5, no storage).
 //!
@@ -47,13 +48,14 @@
 use std::marker::PhantomData;
 
 use crate::component::ComponentSubscription;
-use crate::drive::{CondAt, Ch, Drive, EntryOf, ExecK, FiredOf, FiredOps, HRunK, Pn, PnC, PushCtx, PushPh, Rg, RgCl, SlotWriteBy, SrcSlots};
+use crate::drive::{Ch, Drive, EntryOf, ExecK, HRunK, Pn, PnC, PushCtx, PushPh, Rg, RgCl, SlotWriteBy, SrcSlots};
+use crate::guard::GSel;
 use crate::flat::{EntryPos, Inner, Leaf, NthT, PickEdge, PosSelect};
-use crate::gather::{ChainKeyAt, ChainKeyPre, ChainRead, ChainReadCx, ChainSeed, ChainTest, ChainTestCx, CtxOf, GatherCx, GatherIn, Layout, Ready, Source};
+use crate::gather::{ChainAtom, ChainKeyAt, ChainKeyPre, ChainRead, ChainReadCx, ChainSeed, CtxOf, GatherCx, GatherIn, Layout, Source};
 use crate::component::Component;
 use crate::node::{Comp, Edge, Vertex};
 use crate::split::SplitAt;
-use crate::plan::{Planned, NO_FLAG};
+use crate::plan::Planned;
 use crate::select::{ChainKey, ChainWalk, SelectChain};
 use crate::store::AtPos;
 
@@ -173,21 +175,11 @@ impl<E: Source<A>, A: Layout, Em: 'static, C: SelectChain<E::Stored>, const P: u
     }
 }
 
-impl<E: Source<A>, A: Layout, Em: 'static, C: ChainTest<E, A>> ChainTest<E, A> for Hd<Em, C> {
+impl<E: Source<A>, A: Layout, Em: 'static, C: ChainAtom<E, A, J, K>, const J: usize, const K: u32> ChainAtom<E, A, J, K> for Hd<Em, C> {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn test(root: &A::Root, states: &A::States, outs: &A::Outs) -> bool {
-        C::test(root, states, outs)
-    }
-}
-impl<E: Source<A>, A: Layout, Em: 'static, C: ChainTestCx<E, A, P>, const P: usize> ChainTestCx<E, A, P> for Hd<Em, C> {
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn test_cx<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, cx: &'c CtxOf<'x, A, P>) -> bool
-    where
-        A::States: SplitAt<P>,
-    {
-        C::test_cx(root, outs, cx)
+    fn atom(root: &A::Root, states: &A::States, outs: &A::Outs) -> bool {
+        C::atom(root, states, outs)
     }
 }
 impl<E: Vertex, Em: 'static, C: ChainKeyPre<E, J>, const J: usize> ChainKeyPre<E, J> for Hd<Em, C> {
@@ -347,25 +339,53 @@ where
 // ---------------------------------------------------------------------------
 
 /// The plan's facts about the `K`-th item of the range `Q`: the entry position
-/// of the handled edge, and its mode (bit 0: test the parent's flag, bit 1:
-/// match the selectors; as a `usize` so it can be a const generic).
+/// of the handled edge, and its guard if the program's place does not say it fired.
 #[doc(hidden)]
 pub struct HiOf<A, Q, const K: usize>(PhantomData<(A, Q)>);
 impl<A: Planned, Q: Rg, const K: usize> HiOf<A, Q, K> {
     pub const POS: usize = A::PLAN.hi_pos_of(Q::LO + K);
-    pub const MODE: usize = A::PLAN.hi_mode_of(Q::LO + K) as usize;
+    /// The index of the item within its run.
+    pub const IDX: usize = A::PLAN.hi_rel_of(Q::LO + K);
 }
 
-/// Item `K`: if the handled edge fired, `on_update` it.
+/// Whether the handled edge at index `K` of a run fired, asked again from the pushed root and the
+/// stored outputs right before its `on_update` (see `guard`; nothing is stored in between).
 #[doc(hidden)]
-pub trait HItemAt<Cx: Copy, H: ComponentSubscription, const P: usize, const I: usize, const M: usize>: Layout {
-    fn item(root: &Self::Root, outs: &Self::Outs, fired: &FiredOf<Self>, me: &mut H, cx: Cx);
+pub trait ItemHolds<A: Layout, const K: usize> {
+    fn holds(root: &A::Root, states: &A::States, outs: &A::Outs) -> bool;
+}
+/// The items of handler run `N`, in the phase `Ph` (the marker the guard types are resolved with).
+#[doc(hidden)]
+pub struct Fire<A, Ph, const N: usize>(PhantomData<(A, Ph)>);
+/// The guard of item `K` of run `N`.
+#[doc(hidden)]
+pub struct FireG<A, const N: usize, const K: usize>(PhantomData<A>);
+impl<A: Planned, const N: usize, const K: usize> FireG<A, N, K> {
+    pub const G: usize = A::PLAN.hi_guard_of(A::PLAN.hr_start(N) + K);
+    pub const HAS: bool = Self::G != usize::MAX;
+}
+impl<A: Layout, Ph, const N: usize, const K: usize> ItemHolds<A, K> for Fire<A, Ph, N>
+where
+    (): GSel<A, Ph, { FireG::<A, N, K>::HAS }, { FireG::<A, N, K>::G }>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn holds(root: &A::Root, states: &A::States, outs: &A::Outs) -> bool {
+        <() as GSel<A, Ph, { FireG::<A, N, K>::HAS }, { FireG::<A, N, K>::G }>>::holds(root, states, outs)
+    }
+}
+
+/// Item `K`: if the handled edge fired (`Gs` asks again; the handler's state is borrowed after
+/// that), `on_update` it. `Mo` is `HVal` or `HVw`, the way the run reads.
+#[doc(hidden)]
+pub trait HItemAt<Mo, H: ComponentSubscription, const P: usize, const I: usize, Gs, const K: usize>: Layout {
+    fn item(ctx: &mut PushCtx<'_, Self>);
 }
 type EOf<A, const P: usize, const I: usize> = <A as EntryOf<PushPh<A>, P, I>>::E;
 type COf<A, const P: usize, const I: usize> = <A as EntryOf<PushPh<A>, P, I>>::Ch;
 type EmOf<A, const P: usize, const I: usize> = <<A as HookOf<PushPh<A>, P, I>>::X as HookEm>::Em;
 
-impl<A: Layout, H: ComponentSubscription, const P: usize, const I: usize, const M: usize> HItemAt<(), H, P, I, M> for A
+impl<A: Layout, H: ComponentSubscription, const P: usize, const I: usize, Gs: ItemHolds<A, K>, const K: usize> HItemAt<HVal, H, P, I, Gs, K> for A
 where
     A: NthT<P, T = H>,
     A: EntryOf<PushPh<A>, P, I>,
@@ -376,49 +396,45 @@ where
     H: UpdateHandler<EmOf<A, P, I>>,
     for<'a> EmOf<A, P, I>: HandledEdge<Arg<'a> = <COf<A, P, I> as EdgeRd<EOf<A, P, I>, A, P, I>>::V<'a>>,
     <H as ComponentSubscription>::Deps: GatherIn<A, P>,
+    A::States: AtPos<H, P>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn item(root: &A::Root, outs: &A::Outs, fired: &FiredOf<A>, me: &mut H, _: ()) {
-        let mode = M;
-        if (mode & 1 == 0 || <EOf<A, P, I> as Source<A>>::fires(fired))
-            && (mode & 2 == 0
-                || <COf<A, P, I> as SelectChain<<EOf<A, P, I> as Vertex>::Stored>>::matches(<EOf<A, P, I> as Source<A>>::fetch(root, outs)))
-        {
-            let inputs = <<H as ComponentSubscription>::Deps as GatherIn<A, P>>::gather(root, outs);
+    fn item(ctx: &mut PushCtx<'_, A>) {
+        if Gs::holds(ctx.root, &*ctx.states, &*ctx.outs) {
+            let me = <A::States as AtPos<H, P>>::at_mut(&mut *ctx.states);
+            let inputs = <<H as ComponentSubscription>::Deps as GatherIn<A, P>>::gather(ctx.root, &*ctx.outs);
             <H as UpdateHandler<EmOf<A, P, I>>>::on_update(
                 me,
                 <H as ComponentSubscription>::input(inputs),
-                <COf<A, P, I> as EdgeRd<EOf<A, P, I>, A, P, I>>::read_v(root, outs),
+                <COf<A, P, I> as EdgeRd<EOf<A, P, I>, A, P, I>>::read_v(ctx.root, &*ctx.outs),
             );
         }
     }
 }
-impl<'c, 'x, A: Layout, H: ComponentSubscription, const P: usize, const I: usize, const M: usize> HItemAt<&'c CtxOf<'x, A, P>, H, P, I, M> for A
+impl<A: Layout, H: ComponentSubscription, const P: usize, const I: usize, Gs: ItemHolds<A, K>, const K: usize> HItemAt<HVw, H, P, I, Gs, K> for A
 where
     A: NthT<P, T = H>,
     A: EntryOf<PushPh<A>, P, I>,
     A: HookOf<PushPh<A>, P, I>,
     <A as HookOf<PushPh<A>, P, I>>::X: HookEm,
     EOf<A, P, I>: Source<A>,
-    COf<A, P, I>: EdgeRdCx<EOf<A, P, I>, A, P, I> + ChainTestCx<EOf<A, P, I>, A, P>,
+    COf<A, P, I>: EdgeRdCx<EOf<A, P, I>, A, P, I>,
     H: UpdateHandler<EmOf<A, P, I>>,
     for<'a> EmOf<A, P, I>: HandledEdge<Arg<'a> = <COf<A, P, I> as EdgeRdCx<EOf<A, P, I>, A, P, I>>::V<'a>>,
     <H as ComponentSubscription>::Deps: GatherCx<A, P>,
-    A::States: SplitAt<P>,
+    A::States: SplitAt<P, Child = H>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn item(root: &A::Root, outs: &A::Outs, fired: &FiredOf<A>, me: &mut H, cx: &'c CtxOf<'x, A, P>) {
-        let mode = M;
-        if (mode & 1 == 0 || <EOf<A, P, I> as Source<A>>::fires(fired))
-            && (mode & 2 == 0 || <COf<A, P, I> as ChainTestCx<EOf<A, P, I>, A, P>>::test_cx(root, outs, cx))
-        {
-            let inputs = <<H as ComponentSubscription>::Deps as GatherCx<A, P>>::gather(root, outs, cx);
+    fn item(ctx: &mut PushCtx<'_, A>) {
+        if Gs::holds(ctx.root, &*ctx.states, &*ctx.outs) {
+            let (cx, me) = <A::States as SplitAt<P>>::split_at(&mut *ctx.states);
+            let inputs = <<H as ComponentSubscription>::Deps as GatherCx<A, P>>::gather(ctx.root, &*ctx.outs, &cx);
             <H as UpdateHandler<EmOf<A, P, I>>>::on_update(
                 me,
                 <H as ComponentSubscription>::input(inputs),
-                <COf<A, P, I> as EdgeRdCx<EOf<A, P, I>, A, P, I>>::read_vx(root, outs, cx),
+                <COf<A, P, I> as EdgeRdCx<EOf<A, P, I>, A, P, I>>::read_vx(ctx.root, &*ctx.outs, &cx),
             );
         }
     }
@@ -433,20 +449,20 @@ impl<A: Planned, const N: usize> Rg for HItems<A, N> {
 }
 
 #[doc(hidden)]
-pub trait HDrive<A: Layout, Cx: Copy, H: ComponentSubscription, const P: usize, Cl>: Rg {
-    fn items(root: &A::Root, outs: &A::Outs, fired: &FiredOf<A>, me: &mut H, cx: Cx);
+pub trait HDrive<A: Layout, Mo, H: ComponentSubscription, const P: usize, Gs, Cl>: Rg {
+    fn items(ctx: &mut PushCtx<'_, A>);
 }
 macro_rules! h_leaf {
     ($n:literal; $($k:literal)*) => {
-        impl<A: Layout, Cx: Copy, H: ComponentSubscription, const P: usize, Q: Rg> HDrive<A, Cx, H, P, Leaf<$n>> for Q
+        impl<A: Layout, Mo, H: ComponentSubscription, const P: usize, Gs, Q: Rg> HDrive<A, Mo, H, P, Gs, Leaf<$n>> for Q
         where
-            $(A: HItemAt<Cx, H, P, { HiOf::<A, Q, $k>::POS }, { HiOf::<A, Q, $k>::MODE }>,)*
+            $(A: HItemAt<Mo, H, P, { HiOf::<A, Q, $k>::POS }, Gs, { HiOf::<A, Q, $k>::IDX }>,)*
         {
             #[cfg_attr(not(debug_assertions), inline(always))]
             #[cfg_attr(debug_assertions, inline)]
             #[allow(unused_variables)]
-            fn items(root: &A::Root, outs: &A::Outs, fired: &FiredOf<A>, me: &mut H, cx: Cx) {
-                $(<A as HItemAt<Cx, H, P, { HiOf::<A, Q, $k>::POS }, { HiOf::<A, Q, $k>::MODE }>>::item(root, outs, fired, &mut *me, cx);)*
+            fn items(ctx: &mut PushCtx<'_, A>) {
+                $(<A as HItemAt<Mo, H, P, { HiOf::<A, Q, $k>::POS }, Gs, { HiOf::<A, Q, $k>::IDX }>>::item(ctx);)*
             }
         }
     };
@@ -454,21 +470,28 @@ macro_rules! h_leaf {
 dataflow_macros::leaf_idx!(h_leaf);
 macro_rules! h_inner {
     ($($k:literal)*) => {
-        impl<A: Layout, Cx: Copy, H: ComponentSubscription, const P: usize, Q: Rg> HDrive<A, Cx, H, P, Inner> for Q
+        impl<A: Layout, Mo, H: ComponentSubscription, const P: usize, Gs, Q: Rg> HDrive<A, Mo, H, P, Gs, Inner> for Q
         where
             $(Ch<Q, $k>: RgCl,
-              Ch<Q, $k>: HDrive<A, Cx, H, P, <Ch<Q, $k> as RgCl>::Cl>,)*
+              Ch<Q, $k>: HDrive<A, Mo, H, P, Gs, <Ch<Q, $k> as RgCl>::Cl>,)*
         {
             #[cfg_attr(not(debug_assertions), inline(always))]
             #[cfg_attr(debug_assertions, inline)]
-            fn items(root: &A::Root, outs: &A::Outs, fired: &FiredOf<A>, me: &mut H, cx: Cx) {
-                $(<Ch<Q, $k> as HDrive<A, Cx, H, P, <Ch<Q, $k> as RgCl>::Cl>>::items(root, outs, fired, &mut *me, cx);)*
+            fn items(ctx: &mut PushCtx<'_, A>) {
+                $(<Ch<Q, $k> as HDrive<A, Mo, H, P, Gs, <Ch<Q, $k> as RgCl>::Cl>>::items(ctx);)*
             }
         }
     };
 }
 dataflow_macros::inner_idx!(h_inner);
 
+/// The number of items of handler run `N`, and the guard of the run itself.
+#[doc(hidden)]
+pub struct HrCnt<A, const N: usize>(PhantomData<A>);
+impl<A: Planned, const N: usize> HrCnt<A, N> {
+    pub const G: usize = A::PLAN.hr_guard(N);
+    pub const HAS: bool = Self::G != usize::MAX;
+}
 /// The two ways to run a handler: reading stored outputs (by-value parents), or through the split
 /// of the states (a handle parent). The plan says which (`Plan::hr_view`).
 #[doc(hidden)]
@@ -504,44 +527,44 @@ where
 /// Run the handler items of program node `N` and `update` of the component, in the way its mode
 /// says; returns the output.
 #[doc(hidden)]
-pub trait HVia<A: Layout, const P: usize, const N: usize> {
+pub trait HVia<A: Layout, const P: usize, const N: usize, Gs> {
     fn via(ctx: &mut PushCtx<'_, A>) -> <<A as NthT<P>>::T as Vertex>::Stored
     where
         A: NthT<P>,
         <A as NthT<P>>::T: Vertex;
 }
-impl<A: Layout, const P: usize, const N: usize> HVia<A, P, N> for HVal
+impl<A: Layout, const P: usize, const N: usize, Gs> HVia<A, P, N, Gs> for HVal
 where
     A: NthT<P>,
     <A as NthT<P>>::T: Comp,
     <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P>,
     A::States: AtPos<<A as NthT<P>>::T, P>,
     HItems<A, N>: RgCl,
-    HItems<A, N>: HDrive<A, (), <A as NthT<P>>::T, P, <HItems<A, N> as RgCl>::Cl>,
+    HItems<A, N>: HDrive<A, HVal, <A as NthT<P>>::T, P, Gs, <HItems<A, N> as RgCl>::Cl>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
     fn via(ctx: &mut PushCtx<'_, A>) -> <<A as NthT<P>>::T as Vertex>::Stored {
+        <HItems<A, N> as HDrive<A, HVal, <A as NthT<P>>::T, P, Gs, <HItems<A, N> as RgCl>::Cl>>::items(ctx);
         let me = <A::States as AtPos<<A as NthT<P>>::T, P>>::at_mut(&mut *ctx.states);
-        <HItems<A, N> as HDrive<A, (), <A as NthT<P>>::T, P, <HItems<A, N> as RgCl>::Cl>>::items(ctx.root, &*ctx.outs, &ctx.fired, &mut *me, ());
         let inputs = <<<A as NthT<P>>::T as ComponentSubscription>::Deps as GatherIn<A, P>>::gather(ctx.root, &*ctx.outs);
         me.update(<<A as NthT<P>>::T as ComponentSubscription>::input(inputs))
     }
 }
-impl<A: Layout, const P: usize, const N: usize> HVia<A, P, N> for HVw
+impl<A: Layout, const P: usize, const N: usize, Gs> HVia<A, P, N, Gs> for HVw
 where
     A: NthT<P>,
     <A as NthT<P>>::T: Comp,
     <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherCx<A, P>,
     A::States: SplitAt<P, Child = <A as NthT<P>>::T>,
     HItems<A, N>: RgCl,
-    for<'c, 'x> HItems<A, N>: HDrive<A, &'c CtxOf<'x, A, P>, <A as NthT<P>>::T, P, <HItems<A, N> as RgCl>::Cl>,
+    HItems<A, N>: HDrive<A, HVw, <A as NthT<P>>::T, P, Gs, <HItems<A, N> as RgCl>::Cl>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
     fn via(ctx: &mut PushCtx<'_, A>) -> <<A as NthT<P>>::T as Vertex>::Stored {
+        <HItems<A, N> as HDrive<A, HVw, <A as NthT<P>>::T, P, Gs, <HItems<A, N> as RgCl>::Cl>>::items(ctx);
         let (cx, me) = <A::States as SplitAt<P>>::split_at(&mut *ctx.states);
-        <HItems<A, N> as HDrive<A, &CtxOf<'_, A, P>, <A as NthT<P>>::T, P, <HItems<A, N> as RgCl>::Cl>>::items(ctx.root, &*ctx.outs, &ctx.fired, &mut *me, &cx);
         let inputs = <<<A as NthT<P>>::T as ComponentSubscription>::Deps as GatherCx<A, P>>::gather(ctx.root, &*ctx.outs, &cx);
         me.update(<<A as NthT<P>>::T as ComponentSubscription>::input(inputs))
     }
@@ -549,42 +572,32 @@ where
 
 /// Run the handler of program node `N`.
 #[doc(hidden)]
-pub trait HRunAt<Ph, const P: usize, const N: usize>: Layout {
+pub trait HRunAt<Ph, const P: usize, const N: usize, Gs>: Layout {
     fn hrun(ctx: &mut PushCtx<'_, Self>);
 }
 
 #[cfg_attr(not(debug_assertions), inline(always))]
 #[cfg_attr(debug_assertions, inline)]
-fn hrun_at<A: Layout, H: Comp, const P: usize, const N: usize>(ctx: &mut PushCtx<'_, A>)
+fn hrun_at<A: Layout, H: Comp, Gs, const P: usize, const N: usize>(ctx: &mut PushCtx<'_, A>)
 where
     A: NthT<P, T = H>,
-    <H as ComponentSubscription>::Deps: Ready<A>,
     HrView<A, N>: HrM,
-    <HrView<A, N> as HrM>::M: HVia<A, P, N>,
+    <HrView<A, N> as HrM>::M: HVia<A, P, N, Gs>,
     A::Outs: AtPos<<H as Vertex>::Stored, P>,
     SrcSlots<A, P>: RgCl,
     SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
 {
-    if A::PLAN.hr_guarded(N)
-        && !<<H as ComponentSubscription>::Deps as Ready<A>>::ready(ctx.root, &*ctx.states, &*ctx.outs, &ctx.fired)
-    {
-        return;
-    }
-    let out = <<HrView<A, N> as HrM>::M as HVia<A, P, N>>::via(ctx);
+    let out = <<HrView<A, N> as HrM>::M as HVia<A, P, N, Gs>>::via(ctx);
     *<A::Outs as AtPos<<H as Vertex>::Stored, P>>::at_mut(&mut *ctx.outs) = out;
     <SrcSlots<A, P> as Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>>::drive(ctx);
-    if CondAt::<A, P>::FLAG != NO_FLAG {
-        ctx.fired.set(CondAt::<A, P>::FLAG);
-    }
 }
 
-impl<A: Layout, const P: usize, const N: usize> HRunAt<PushPh<A>, P, N> for A
+impl<A: Layout, const P: usize, const N: usize, Gs> HRunAt<PushPh<A>, P, N, Gs> for A
 where
     A: NthT<P>,
     <A as NthT<P>>::T: Comp,
-    <<A as NthT<P>>::T as ComponentSubscription>::Deps: Ready<A>,
     HrView<A, N>: HrM,
-    <HrView<A, N> as HrM>::M: HVia<A, P, N>,
+    <HrView<A, N> as HrM>::M: HVia<A, P, N, Gs>,
     A::Outs: AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>,
     SrcSlots<A, P>: RgCl,
     SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
@@ -592,17 +605,26 @@ where
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
     fn hrun(ctx: &mut PushCtx<'_, A>) {
-        hrun_at::<A, <A as NthT<P>>::T, P, N>(ctx)
+        hrun_at::<A, <A as NthT<P>>::T, Gs, P, N>(ctx)
     }
 }
 
+/// A handler's run: its own guard (if any), then `on_update` for each handled edge that fired (each
+/// edge's guard is asked again right before its call), then `update`.
 impl<A: Layout, Ph, const N: usize> ExecK<A, Ph, HRunK> for Pn<A, N>
 where
-    A: HRunAt<Ph, { PnC::<A, N>::A0 }, N>,
+    A: HRunAt<Ph, { PnC::<A, N>::A0 }, N, Fire<A, Ph, N>>,
+    (): GSel<A, Ph, { HrCnt::<A, N>::HAS }, { HrCnt::<A, N>::G }>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn exec_k(ctx: &mut PushCtx<'_, A>) {
-        <A as HRunAt<Ph, { PnC::<A, N>::A0 }, N>>::hrun(ctx)
+    fn exec_k(ctx: &mut PushCtx<'_, A>) -> bool {
+        if HrCnt::<A, N>::HAS
+            && !<() as GSel<A, Ph, { HrCnt::<A, N>::HAS }, { HrCnt::<A, N>::G }>>::holds(ctx.root, &*ctx.states, &*ctx.outs)
+        {
+            return true;
+        }
+        <A as HRunAt<Ph, { PnC::<A, N>::A0 }, N, Fire<A, Ph, N>>>::hrun(ctx);
+        true
     }
 }

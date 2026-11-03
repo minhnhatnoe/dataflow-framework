@@ -40,6 +40,12 @@ use crate::plan::Plan;
 pub const GUARD: u32 = u32::MAX;
 
 /// A pattern test on a value of type `In`.
+///
+/// **Selectors must be pure and total.** `select` and `key_of` may run several times per push, and
+/// the push never stores whether an edge fired: where the push program's position does not say,
+/// it asks again by running the chain on the pushed root and the stored outputs. An impure
+/// selector (a counter, a clock, interior mutability) is called more than once per push and can
+/// answer differently each time; nothing detects that. `key_of` must agree with `select`.
 pub trait Select<In>: 'static {
     /// The matched part.
     type Out: 'static;
@@ -399,6 +405,31 @@ impl<In: 'static, S: Select<In>, T: ChainKey<S::Out, { dec(J) }>, const J: usize
     }
 }
 
+/// Does the chain match up to depth `J` (the selectors at depths `0..=J`)? The push asks it again
+/// for the decisions of a condition it cannot decide by position: a decision is a pure function of
+/// the source's stored output.
+#[doc(hidden)]
+pub trait ChainMatchTo<In: 'static, const J: usize>: SelectChain<In> {
+    fn matches_to(x: &In) -> bool;
+}
+impl<In: 'static, const J: usize> ChainMatchTo<In, J> for () {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn matches_to(_: &In) -> bool {
+        true
+    }
+}
+impl<In: 'static, S: Select<In>, T: ChainMatchTo<S::Out, { dec(J) }>, const J: usize> ChainMatchTo<In, J> for (S, T) {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn matches_to(x: &In) -> bool {
+        match S::select(x) {
+            Some(y) => J == 0 || T::matches_to(y),
+            None => false,
+        }
+    }
+}
+
 /// The plan's walk of a chain: record each selector as a decision under the
 /// previous one, starting at `dn` under node `parent`; returns the last.
 #[doc(hidden)]
@@ -443,6 +474,9 @@ const impl<In: 'static, S: Select<In>, T: [const] ChainWalk<S::Out>> ChainWalk<I
     label = "`{Self}` must implement `SelectView<{In}>` to select from this view",
     note = "a selector on a handle component selects from its `View<'a>`: put `#[derive(Demux)]` on the view's enum (`enum V<'a> {{ A(&'a X), .. }}`), or implement `SelectView<V<'a>>` by hand; a by-value selector (`Select<T>`) cannot be applied to a view"
 )]
+///
+/// **Selectors must be pure and total** (see [`Select`]): the push asks again by running them on
+/// the view of the source's state and handle.
 pub trait SelectView<In>: 'static {
     /// The matched part (may borrow: it has the lifetime of `In`).
     type Out;
@@ -475,6 +509,8 @@ pub trait ViewChainOn<In>: 'static {
     fn try_get(x: In) -> Option<Self::Out>;
     /// The key of the alternative at depth `J` (as [`ChainKey`]).
     fn key(x: In, j: usize) -> u32;
+    /// Does the chain match up to depth `j` (as [`ChainMatchTo`])?
+    fn matches_to(x: In, j: usize) -> bool;
 }
 impl<In> ViewChainOn<In> for () {
     type Out = In;
@@ -497,6 +533,11 @@ impl<In> ViewChainOn<In> for () {
     #[cfg_attr(debug_assertions, inline)]
     fn key(_: In, _: usize) -> u32 {
         GUARD
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn matches_to(_: In, _: usize) -> bool {
+        true
     }
 }
 impl<In, S: SelectView<In>, T: ViewChainOn<S::Out>> ViewChainOn<In> for (S, T) {
@@ -537,6 +578,14 @@ impl<In, S: SelectView<In>, T: ViewChainOn<S::Out>> ViewChainOn<In> for (S, T) {
             }
         }
     }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn matches_to(x: In, j: usize) -> bool {
+        match S::select(x) {
+            Some(y) => j == 0 || T::matches_to(y, j - 1),
+            None => false,
+        }
+    }
 }
 
 /// A chain of view selectors applied to the view of the node `E` (`E::Read<'a>`, for every `'a`).
@@ -553,6 +602,7 @@ pub trait ViewChain<E: Vertex>: 'static {
     fn get<'a>(x: <E as Edge>::Read<'a>) -> Self::Out<'a>;
     fn try_get<'a>(x: <E as Edge>::Read<'a>) -> Option<Self::Out<'a>>;
     fn key<'a, const J: usize>(x: <E as Edge>::Read<'a>) -> u32;
+    fn matches_to<'a, const J: usize>(x: <E as Edge>::Read<'a>) -> bool;
 }
 impl<E: Vertex, C> ViewChain<E> for C
 where
@@ -578,6 +628,11 @@ where
     #[cfg_attr(debug_assertions, inline)]
     fn key<'a, const J: usize>(x: <E as Edge>::Read<'a>) -> u32 {
         <C as ViewChainOn<<E as Edge>::Read<'a>>>::key(x, J)
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn matches_to<'a, const J: usize>(x: <E as Edge>::Read<'a>) -> bool {
+        <C as ViewChainOn<<E as Edge>::Read<'a>>>::matches_to(x, J)
     }
 }
 

@@ -10,8 +10,9 @@
 //!
 //! A push is a program built by the plan (`Plan::build_program`), not a run of
 //! per-component guards: `Seq` (children in execution order), `Run` (a component,
-//! unconditionally), `RunIf` (guarded by the firing of its edges; only for
-//! conditions the trie cannot express, such as guards) and `Switch` (the key of
+//! unconditionally), `RunIf` (guarded by its condition, asked again at run time from the
+//! pushed root and the stored outputs, see `guard`; only for conditions the trie cannot express,
+//! such as guards) and `Switch` (the key of
 //! the alternative a value is, from `Select::key_of`, evaluated once; then a
 //! decision tree over the sorted constant keys of the sibling decisions, which
 //! LLVM lowers to a jump table). Leaves run their cones straight-line; a
@@ -24,12 +25,13 @@ use std::marker::PhantomData;
 
 use crate::build::ConstructPass;
 use crate::component::{Component, ComponentSubscription, DepList};
-use crate::flat::{bound, class, ClassOf, EntryPos, Inner, Leaf, Loc, NthS, NthT, PickEdge, PosSelect, Whole};
-use crate::gather::{ChainKeyAt, ChainKeyPre, GatherCx, GatherIn, GatherInit, Layout, Ready, Source};
+use crate::flat::{bound, class, ClassOf, EntryPos, Inner, Leaf, NthS, NthT, PickEdge, PosSelect, Whole};
+use crate::gather::{ChainKeyAt, ChainKeyPre, GatherCx, GatherIn, GatherInit, Layout, Source};
+use crate::guard::{Gd, Holds};
 use crate::split::SplitAt;
 use crate::select::{ChainInitial, Keep, SelectChain};
 use crate::node::{Comp, SlotNode, Vertex};
-use crate::plan::{Planned, NO_FLAG};
+use crate::plan::Planned;
 use crate::store::AtPos;
 
 // ---------------------------------------------------------------------------
@@ -201,75 +203,12 @@ where
 // Push
 // ---------------------------------------------------------------------------
 
-/// Which components fired in this step, by flag (see
-/// [`Plan`](crate::plan::Plan): only components whose firing a conditional
-/// component reads have a flag), indexed by constants. After inlining the
-/// array is split into locals and the unused flags vanish: with no conditions
-/// there is no `fired` state in the generated code.
-#[doc(hidden)]
-pub struct Fired<const N: usize> {
-    bits: [bool; N],
-}
-/// The number of `fired` flags pipeline `A` needs.
-#[doc(hidden)]
-pub struct NFlags<A>(PhantomData<A>);
-impl<A: Planned> NFlags<A> {
-    pub const N: usize = A::PLAN.n_flag_slots();
-}
-/// `Fired<N>` for a constant, as a type (the pattern of `flat::RngTy`: the
-/// constant lives in the where clause of an impl, not in an associated type).
-#[doc(hidden)]
-pub trait FiredSized<const N: usize> {
-    type T: FiredOps;
-}
-impl<const N: usize> FiredSized<N> for () {
-    type T = Fired<N>;
-}
-#[doc(hidden)]
-pub trait FiredTy {
-    type T: FiredOps;
-}
-impl<A: Planned> FiredTy for NFlags<A>
-where
-    (): FiredSized<{ NFlags::<A>::N }>,
-{
-    type T = <() as FiredSized<{ NFlags::<A>::N }>>::T;
-}
-/// Operations on the `fired` flags (of whichever size the pipeline needs).
-#[doc(hidden)]
-pub trait FiredOps {
-    fn new() -> Self;
-    fn set(&mut self, flag: usize);
-    fn get(&self, flag: usize) -> bool;
-}
-impl<const N: usize> FiredOps for Fired<N> {
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn new() -> Self {
-        Fired { bits: [false; N] }
-    }
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn set(&mut self, flag: usize) {
-        self.bits[flag] = true;
-    }
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn get(&self, flag: usize) -> bool {
-        self.bits[flag]
-    }
-}
-/// The `fired` flags of pipeline `A`.
-#[doc(hidden)]
-pub type FiredOf<A> = <A as Layout>::Fired;
-
 /// The state of one push.
 #[doc(hidden)]
 pub struct PushCtx<'c, A: Layout> {
     pub(crate) root: &'c A::Root,
     pub(crate) states: &'c mut A::States,
     pub(crate) outs: &'c mut A::Outs,
-    pub(crate) fired: FiredOf<A>,
 }
 
 /// The phase marker of a push. The traits that select an impl of `A` by its
@@ -307,9 +246,6 @@ macro_rules! run_body_pre {
         // Stored selected values whose source is this component: written when their
         // selectors match, before any subscriber of this step reads them.
         <SrcSlots<$A, $P> as Drive<$A, SlotWriteBy<$A>, <SrcSlots<$A, $P> as RgCl>::Cl>>::drive($ctx);
-        if CondAt::<$A, $P>::FLAG != NO_FLAG {
-            $ctx.fired.set(CondAt::<$A, $P>::FLAG);
-        }
         pre
     }};
 }
@@ -333,8 +269,7 @@ macro_rules! upd_view {
 }
 
 /// Run the component at component position `P` unconditionally: gather its
-/// inputs, update it, store its output, and record that it fired if a guarded
-/// component reads that.
+/// inputs, update it and store its output.
 #[doc(hidden)]
 pub trait RunAt<Ph, const P: usize>: Layout {
     fn run(ctx: &mut PushCtx<'_, Self>);
@@ -431,68 +366,6 @@ where
     run_body!(upd_view, A, P, ctx);
 }
 
-/// Run the component at `P` if one of its edges fired (the flag-based guard).
-#[doc(hidden)]
-pub trait RunIfAt<Ph, const P: usize>: Layout {
-    fn run_if(ctx: &mut PushCtx<'_, Self>);
-}
-impl<A: Layout, const P: usize> RunIfAt<PushPh<A>, P> for A
-where
-    A: NthT<P>,
-    <A as NthT<P>>::T: Comp,
-    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P> + Ready<A>,
-    A::States: AtPos<<A as NthT<P>>::T, P>,
-    A::Outs: AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>,
-    SrcSlots<A, P>: RgCl,
-    SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
-{
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn run_if(ctx: &mut PushCtx<'_, A>) {
-        if <<<A as NthT<P>>::T as ComponentSubscription>::Deps as Ready<A>>::ready(ctx.root, &*ctx.states, &*ctx.outs, &ctx.fired) {
-            if WIDE_RUN::<A, P>() {
-                run_wide::<A, P>(ctx);
-            } else {
-                run_body!(upd_val, A, P, ctx);
-            }
-        }
-    }
-}
-/// `RunIfAt` for a component with a handle parent.
-#[doc(hidden)]
-pub trait RunIfViewAt<Ph, const P: usize>: Layout {
-    fn run_if_view(ctx: &mut PushCtx<'_, Self>);
-}
-impl<A: Layout, const P: usize> RunIfViewAt<PushPh<A>, P> for A
-where
-    A: NthT<P>,
-    <A as NthT<P>>::T: Comp,
-    <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherCx<A, P> + Ready<A>,
-    A::States: SplitAt<P, Child = <A as NthT<P>>::T>,
-    A::Outs: AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>,
-    SrcSlots<A, P>: RgCl,
-    SrcSlots<A, P>: Drive<A, SlotWriteBy<A>, <SrcSlots<A, P> as RgCl>::Cl>,
-{
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn run_if_view(ctx: &mut PushCtx<'_, A>) {
-        if <<<A as NthT<P>>::T as ComponentSubscription>::Deps as Ready<A>>::ready(ctx.root, &*ctx.states, &*ctx.outs, &ctx.fired) {
-            if WIDE_RUN::<A, P>() {
-                run_wide_view::<A, P>(ctx);
-            } else {
-                run_body!(upd_view, A, P, ctx);
-            }
-        }
-    }
-}
-
-/// The flag of the component at component position `P`, from the plan.
-#[doc(hidden)]
-pub struct CondAt<A, const P: usize>(PhantomData<A>);
-impl<A: Planned, const P: usize> CondAt<A, P> {
-    pub const FLAG: usize = A::PLAN.flag_idx(Loc::<A, P>::IDX);
-}
-
 // ---------------------------------------------------------------------------
 // The push program: a tree of nodes from the plan
 // ---------------------------------------------------------------------------
@@ -507,6 +380,7 @@ impl<A: Planned, const N: usize> PnC<A, N> {
     pub const KIND: u8 = A::PLAN.pg_kind_of(N);
     pub const A0: usize = A::PLAN.pg_a_of(N);
     pub const B0: usize = A::PLAN.pg_b_of(N);
+    pub const IFG: usize = A::PLAN.if_guard(N);
     pub const SP: usize = A::PLAN.sw_pos(N);
     pub const SI: usize = A::PLAN.sw_entry(N);
     pub const SJ: usize = A::PLAN.sw_depth(N);
@@ -551,7 +425,7 @@ impl<Q: Rg> Rg for RightOf<Q> {
 /// Run program node `Self`.
 #[doc(hidden)]
 pub trait Exec<A: Layout, Ph> {
-    fn exec(ctx: &mut PushCtx<'_, A>);
+    fn exec(ctx: &mut PushCtx<'_, A>) -> bool;
 }
 
 #[doc(hidden)]
@@ -567,9 +441,6 @@ pub struct HRunK;
 #[doc(hidden)]
 pub trait PgKindOf<const K: u8> {
     type Ty;
-}
-impl PgKindOf<0> for () {
-    type Ty = SeqK;
 }
 impl PgKindOf<1> for () {
     type Ty = RunK;
@@ -604,8 +475,23 @@ impl PgKindOf<8> for () {
     type Ty = RunIfViewK;
 }
 #[doc(hidden)]
+pub struct IfK;
+#[doc(hidden)]
+pub struct GateK;
+impl PgKindOf<10> for () {
+    type Ty = GateK;
+}
+impl PgKindOf<0> for () {
+    type Ty = SeqK;
+}
+impl PgKindOf<9> for () {
+    type Ty = IfK;
+}
+#[doc(hidden)]
+/// Run a node of the kind `K`. The result says whether the list the node is in goes on: false only
+/// for a gate (`GateK`) whose guard does not hold.
 pub trait ExecK<A: Layout, Ph, K> {
-    fn exec_k(ctx: &mut PushCtx<'_, A>);
+    fn exec_k(ctx: &mut PushCtx<'_, A>) -> bool;
 }
 #[doc(hidden)]
 pub trait PnKind {
@@ -624,7 +510,7 @@ where
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn exec(ctx: &mut PushCtx<'_, A>) {
+    fn exec(ctx: &mut PushCtx<'_, A>) -> bool {
         <Pn<A, N> as ExecK<A, Ph, <Pn<A, N> as PnKind>::Ty>>::exec_k(ctx)
     }
 }
@@ -635,18 +521,54 @@ where
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn exec_k(ctx: &mut PushCtx<'_, A>) {
-        <A as RunAt<Ph, { PnC::<A, N>::A0 }>>::run(ctx)
+    fn exec_k(ctx: &mut PushCtx<'_, A>) -> bool {
+        <A as RunAt<Ph, { PnC::<A, N>::A0 }>>::run(ctx);
+        true
     }
 }
+/// A guarded run: the component runs if its guard holds (its condition, asked again from the pushed
+/// root and the stored outputs: see `guard`).
 impl<A: Layout, Ph, const N: usize> ExecK<A, Ph, RunIfK> for Pn<A, N>
 where
-    A: RunIfAt<Ph, { PnC::<A, N>::A0 }>,
+    A: RunAt<Ph, { PnC::<A, N>::A0 }>,
+    Gd<A, Ph, { PnC::<A, N>::B0 }>: Holds<A, Ph>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn exec_k(ctx: &mut PushCtx<'_, A>) {
-        <A as RunIfAt<Ph, { PnC::<A, N>::A0 }>>::run_if(ctx)
+    fn exec_k(ctx: &mut PushCtx<'_, A>) -> bool {
+        if <Gd<A, Ph, { PnC::<A, N>::B0 }> as Holds<A, Ph>>::holds(ctx.root, &*ctx.states, &*ctx.outs) {
+            <A as RunAt<Ph, { PnC::<A, N>::A0 }>>::run(ctx)
+        }
+        true
+    }
+}
+
+/// A gate: the rest of the list it is in runs only if its guard decision holds (asked once, here).
+impl<A: Layout, Ph, const N: usize> ExecK<A, Ph, GateK> for Pn<A, N>
+where
+    Gd<A, Ph, { PnC::<A, N>::IFG }>: Holds<A, Ph>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn exec_k(ctx: &mut PushCtx<'_, A>) -> bool {
+        <Gd<A, Ph, { PnC::<A, N>::IFG }> as Holds<A, Ph>>::holds(ctx.root, &*ctx.states, &*ctx.outs)
+    }
+}
+
+/// A block: its children run if its guard decision holds (asked once, here).
+impl<A: Layout, Ph, const N: usize> ExecK<A, Ph, IfK> for Pn<A, N>
+where
+    NodeRg<A, N>: RgCl,
+    NodeRg<A, N>: SeqDrive<A, Ph, <NodeRg<A, N> as RgCl>::Cl>,
+    Gd<A, Ph, { PnC::<A, N>::IFG }>: Holds<A, Ph>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn exec_k(ctx: &mut PushCtx<'_, A>) -> bool {
+        if <Gd<A, Ph, { PnC::<A, N>::IFG }> as Holds<A, Ph>>::holds(ctx.root, &*ctx.states, &*ctx.outs) {
+            let _ = <NodeRg<A, N> as SeqDrive<A, Ph, <NodeRg<A, N> as RgCl>::Cl>>::seq(ctx);
+        }
+        true
     }
 }
 
@@ -656,18 +578,23 @@ where
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn exec_k(ctx: &mut PushCtx<'_, A>) {
-        <A as RunViewAt<Ph, { PnC::<A, N>::A0 }>>::run_view(ctx)
+    fn exec_k(ctx: &mut PushCtx<'_, A>) -> bool {
+        <A as RunViewAt<Ph, { PnC::<A, N>::A0 }>>::run_view(ctx);
+        true
     }
 }
 impl<A: Layout, Ph, const N: usize> ExecK<A, Ph, RunIfViewK> for Pn<A, N>
 where
-    A: RunIfViewAt<Ph, { PnC::<A, N>::A0 }>,
+    A: RunViewAt<Ph, { PnC::<A, N>::A0 }>,
+    Gd<A, Ph, { PnC::<A, N>::B0 }>: Holds<A, Ph>,
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn exec_k(ctx: &mut PushCtx<'_, A>) {
-        <A as RunIfViewAt<Ph, { PnC::<A, N>::A0 }>>::run_if_view(ctx)
+    fn exec_k(ctx: &mut PushCtx<'_, A>) -> bool {
+        if <Gd<A, Ph, { PnC::<A, N>::B0 }> as Holds<A, Ph>>::holds(ctx.root, &*ctx.states, &*ctx.outs) {
+            <A as RunViewAt<Ph, { PnC::<A, N>::A0 }>>::run_view(ctx)
+        }
+        true
     }
 }
 
@@ -682,7 +609,8 @@ impl<A: Planned, const N: usize> Rg for NodeRg<A, N> {
 }
 #[doc(hidden)]
 pub trait SeqDrive<A: Layout, Ph, Cl>: Rg {
-    fn seq(ctx: &mut PushCtx<'_, A>);
+    /// Runs the list in order; false if a gate stopped it.
+    fn seq(ctx: &mut PushCtx<'_, A>) -> bool;
 }
 macro_rules! seq_leaf {
     ($n:literal; $($k:literal)*) => {
@@ -693,8 +621,8 @@ macro_rules! seq_leaf {
             #[cfg_attr(not(debug_assertions), inline(always))]
             #[cfg_attr(debug_assertions, inline)]
             #[allow(unused_variables)]
-            fn seq(ctx: &mut PushCtx<'_, A>) {
-                $(<Pn<A, { ChOf::<A, Q, $k>::NODE }> as Exec<A, Ph>>::exec(ctx);)*
+            fn seq(ctx: &mut PushCtx<'_, A>) -> bool {
+                true $(&& <Pn<A, { ChOf::<A, Q, $k>::NODE }> as Exec<A, Ph>>::exec(ctx))*
             }
         }
     };
@@ -709,8 +637,8 @@ macro_rules! seq_inner {
         {
             #[cfg_attr(not(debug_assertions), inline(always))]
             #[cfg_attr(debug_assertions, inline)]
-            fn seq(ctx: &mut PushCtx<'_, A>) {
-                $(<Ch<Q, $k> as SeqDrive<A, Ph, <Ch<Q, $k> as RgCl>::Cl>>::seq(ctx);)*
+            fn seq(ctx: &mut PushCtx<'_, A>) -> bool {
+                true $(&& <Ch<Q, $k> as SeqDrive<A, Ph, <Ch<Q, $k> as RgCl>::Cl>>::seq(ctx))*
             }
         }
     };
@@ -724,8 +652,9 @@ where
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn exec_k(ctx: &mut PushCtx<'_, A>) {
-        <NodeRg<A, N> as SeqDrive<A, Ph, <NodeRg<A, N> as RgCl>::Cl>>::seq(ctx)
+    fn exec_k(ctx: &mut PushCtx<'_, A>) -> bool {
+        let _ = <NodeRg<A, N> as SeqDrive<A, Ph, <NodeRg<A, N> as RgCl>::Cl>>::seq(ctx);
+        true
     }
 }
 
@@ -738,7 +667,7 @@ where
     NodeRg<A, N>: RgCl,
     NodeRg<A, N>: SeqDrive<A, Ph, <NodeRg<A, N> as RgCl>::Cl>,
 {
-    <NodeRg<A, N> as SeqDrive<A, Ph, <NodeRg<A, N> as RgCl>::Cl>>::seq(ctx)
+    let _ = <NodeRg<A, N> as SeqDrive<A, Ph, <NodeRg<A, N> as RgCl>::Cl>>::seq(ctx);
 }
 impl<A: Layout, Ph, const N: usize> ExecK<A, Ph, TailK> for Pn<A, N>
 where
@@ -747,8 +676,9 @@ where
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn exec_k(ctx: &mut PushCtx<'_, A>) {
-        exec_tail::<A, Ph, N>(ctx)
+    fn exec_k(ctx: &mut PushCtx<'_, A>) -> bool {
+        exec_tail::<A, Ph, N>(ctx);
+        true
     }
 }
 
@@ -823,7 +753,7 @@ where
     Pn<A, N>: Exec<A, Ph>,
 {
     if PnC::<A, N>::HAS_SW || PnC::<A, N>::VIEW_LEAF || PnC::<A, N>::TINY_ARM {
-        <Pn<A, N> as Exec<A, Ph>>::exec(ctx)
+        let _ = <Pn<A, N> as Exec<A, Ph>>::exec(ctx);
     } else {
         exec_out::<A, Ph, N>(ctx)
     }
@@ -835,7 +765,7 @@ pub fn exec_out<A: Layout, Ph, const N: usize>(ctx: &mut PushCtx<'_, A>)
 where
     Pn<A, N>: Exec<A, Ph>,
 {
-    <Pn<A, N> as Exec<A, Ph>>::exec(ctx)
+    let _ = <Pn<A, N> as Exec<A, Ph>>::exec(ctx);
 }
 macro_rules! bst_leaf {
     ($n:literal; $($k:literal)*) => {
@@ -880,9 +810,10 @@ where
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn exec_k(ctx: &mut PushCtx<'_, A>) {
+    fn exec_k(ctx: &mut PushCtx<'_, A>) -> bool {
         let key = <Pn<A, N> as SwitchKey<A, Ph>>::key(ctx.root, &*ctx.states, &*ctx.outs);
         <NodeRg<A, N> as BstExec<A, Ph, <NodeRg<A, N> as RgCl>::Cl>>::bst(ctx, key);
+        true
     }
 }
 
@@ -987,8 +918,9 @@ where
 {
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
-    fn exec_k(ctx: &mut PushCtx<'_, A>) {
-        <Pn<A, { PnC::<A, N>::B0 }> as FuLink<A, Ph, { PnC::<A, N>::A0 }>>::go(ctx)
+    fn exec_k(ctx: &mut PushCtx<'_, A>) -> bool {
+        <Pn<A, { PnC::<A, N>::B0 }> as FuLink<A, Ph, { PnC::<A, N>::A0 }>>::go(ctx);
+        true
     }
 }
 

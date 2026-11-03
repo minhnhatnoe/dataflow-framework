@@ -12,11 +12,10 @@
 use std::marker::PhantomData;
 
 use crate::component::{DepList, Sub};
-use crate::drive::{FiredOf, FiredOps};
 use crate::identity::At;
 use crate::node::{CompKind, Edge, HandleKind, Is, NodeKind, RootKind, Vertex};
-use crate::plan::{Planned, NO_FLAG};
-use crate::select::{ChainKey, SelInit, Select, SelectChain, ViewC, ViewChain};
+use crate::plan::Planned;
+use crate::select::{ChainKey, ChainMatchTo, SelInit, Select, SelectChain, ViewC, ViewChain};
 use crate::split::{SplitAt, StateAt};
 use crate::store::AtPos;
 
@@ -33,8 +32,6 @@ pub trait Layout: Planned {
     type StatesOpt: crate::store::Empty + crate::store::Finish<Done = Self::States>;
     /// `Outs` with every output still to be produced.
     type OutsOpt: crate::store::Empty + crate::store::Finish<Done = Self::Outs>;
-    /// The `fired` flags of a push.
-    type Fired: crate::drive::FiredOps;
 }
 
 /// Component position of node `N` in the plan of `A`.
@@ -55,8 +52,6 @@ pub trait SourceKind<N: Vertex, A: Layout>: NodeKind {
     fn fetch<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a N::Stored;
     /// What `new` is given while the pipeline is built.
     fn seed<'a>(states: &'a A::StatesOpt, outs: &'a A::OutsOpt) -> <Self as NodeKind>::Init<'a, N>;
-    /// Did the node fire in this step?
-    fn fires(fired: &FiredOf<A>) -> bool;
 }
 
 impl<N: Vertex<Kind = RootKind>, A: Layout> SourceKind<N, A> for RootKind
@@ -71,11 +66,6 @@ where
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, inline)]
     fn seed<'a>(_: &'a A::StatesOpt, _: &'a A::OutsOpt) {}
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn fires(_: &FiredOf<A>) -> bool {
-        true
-    }
 }
 
 impl<N: Vertex<Kind = CompKind>, A: Layout> SourceKind<N, A> for CompKind
@@ -94,18 +84,6 @@ where
         <A::OutsOpt as AtPos<Option<N::Stored>, { PosOf::<A, N>::P }>>::at(outs)
             .as_ref()
             .expect("a subscription is constructed before its subscriber")
-    }
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn fires(fired: &FiredOf<A>) -> bool {
-        // A component nobody's condition reads has no flag, and nobody asks
-        // (the plan gives a flag to every component a conditional component
-        // reads).
-        if FlagOf::<A, N>::ALWAYS || FlagOf::<A, N>::FLAG == NO_FLAG {
-            true
-        } else {
-            fired.get(FlagOf::<A, N>::FLAG)
-        }
     }
 }
 
@@ -133,15 +111,6 @@ where
             .expect("a subscription is constructed before its subscriber");
         N::__view(state, handle)
     }
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn fires(fired: &FiredOf<A>) -> bool {
-        if FlagOf::<A, N>::ALWAYS || FlagOf::<A, N>::FLAG == NO_FLAG {
-            true
-        } else {
-            fired.get(FlagOf::<A, N>::FLAG)
-        }
-    }
 }
 
 /// A node that can be read in the pipeline `A`.
@@ -149,7 +118,6 @@ where
 pub trait Source<A: Layout>: Vertex {
     fn fetch<'a>(root: &'a A::Root, outs: &'a A::Outs) -> &'a Self::Stored;
     fn seed<'a>(states: &'a A::StatesOpt, outs: &'a A::OutsOpt) -> crate::node::InitOf<'a, Self>;
-    fn fires(fired: &FiredOf<A>) -> bool;
 }
 impl<A: Layout, N: Vertex> Source<A> for N
 where
@@ -164,11 +132,6 @@ where
     #[cfg_attr(debug_assertions, inline)]
     fn seed<'a>(states: &'a A::StatesOpt, outs: &'a A::OutsOpt) -> crate::node::InitOf<'a, N> {
         <N::Kind as SourceKind<N, A>>::seed(states, outs)
-    }
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn fires(fired: &FiredOf<A>) -> bool {
-        <N::Kind as SourceKind<N, A>>::fires(fired)
     }
 }
 
@@ -556,56 +519,6 @@ macro_rules! gather_cx_inner {
 }
 dataflow_macros::inner_shape!(gather_cx_inner);
 
-// ---------------------------------------------------------------------------
-// Firing
-// ---------------------------------------------------------------------------
-
-/// The plan's facts about node `N` in pipeline `A`, as constants.
-#[doc(hidden)]
-pub struct FlagOf<A, N>(PhantomData<(A, N)>);
-impl<A: Planned, N: Vertex> FlagOf<A, N> {
-    /// Does `N` run in every step?
-    pub const ALWAYS: bool = A::PLAN.always_idx(At::<A, N>::INDEX);
-    /// Its `fired` flag.
-    pub const FLAG: usize = A::PLAN.flag_idx(At::<A, N>::INDEX);
-}
-
-/// Does the selector chain of an entry match the current value of its source? From the pushed
-/// root and the stored outputs (a by-value source), or, for a handle source, from its state and
-/// stored handle (`test`); inside the split of the states, the state comes from the context
-/// (`ChainTestCx`).
-#[doc(hidden)]
-pub trait ChainTest<E: Source<A>, A: Layout>: SelectChain<E::Stored> {
-    fn test(root: &A::Root, states: &A::States, outs: &A::Outs) -> bool;
-}
-impl<E: Source<A>, A: Layout> ChainTest<E, A> for () {
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn test(_: &A::Root, _: &A::States, _: &A::Outs) -> bool {
-        true
-    }
-}
-impl<E: Source<A>, A: Layout, S: Select<E::Stored>, T: SelectChain<S::Out>> ChainTest<E, A> for (S, T) {
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn test(root: &A::Root, _: &A::States, outs: &A::Outs) -> bool {
-        <(S, T) as SelectChain<E::Stored>>::matches(<E as Source<A>>::fetch(root, outs))
-    }
-}
-impl<E: crate::node::HandleView + Source<A>, A: Layout, C: ViewChain<E>> ChainTest<E, A> for ViewC<E, C>
-where
-    A::States: AtPos<E, { PosOf::<A, E>::P }>,
-    A::Outs: AtPos<E::Stored, { PosOf::<A, E>::P }>,
-{
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn test(_: &A::Root, states: &A::States, outs: &A::Outs) -> bool {
-        let state = <A::States as AtPos<E, { PosOf::<A, E>::P }>>::at(states);
-        let handle = <A::Outs as AtPos<E::Stored, { PosOf::<A, E>::P }>>::at(outs);
-        C::matches(E::__view(state, handle))
-    }
-}
-
 /// The key of the alternative the chain is at depth `J` at a *fused* switch: from the source `E`'s
 /// state `me` and the value `o` its `update` just returned (before it is stored): `o` itself for
 /// a by-value source, the view of `me` and the handle `o` for a handle source.
@@ -635,45 +548,6 @@ impl<E: crate::node::HandleView, C: ViewChain<E>, const J: usize> ChainKeyPre<E,
     #[cfg_attr(debug_assertions, inline)]
     fn key_pre(me: &E, o: &E::Stored) -> u32 {
         C::key::<J>(me.__view(o))
-    }
-}
-
-/// As [`ChainTest`], inside the split of the states at position `P` (a handle source's state is
-/// read from the context).
-#[doc(hidden)]
-pub trait ChainTestCx<E: Source<A>, A: Layout, const P: usize>: SelectChain<E::Stored> {
-    fn test_cx<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, cx: &'c CtxOf<'x, A, P>) -> bool
-    where
-        A::States: SplitAt<P>;
-}
-impl<E: Source<A>, A: Layout, const P: usize> ChainTestCx<E, A, P> for () {
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn test_cx<'c, 'x>(_: &'c A::Root, _: &'c A::Outs, _: &'c CtxOf<'x, A, P>) -> bool
-    where
-        A::States: SplitAt<P>,
-    {
-        true
-    }
-}
-impl<E: Source<A>, A: Layout, S: Select<E::Stored>, T: SelectChain<S::Out>, const P: usize> ChainTestCx<E, A, P> for (S, T) {
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn test_cx<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, _: &'c CtxOf<'x, A, P>) -> bool
-    where
-        A::States: SplitAt<P>,
-    {
-        <(S, T) as SelectChain<E::Stored>>::matches(<E as Source<A>>::fetch(root, outs))
-    }
-}
-impl<E: crate::node::HandleView + Source<A> + SourceCx<A, P>, A: Layout, C: ViewChain<E>, const P: usize> ChainTestCx<E, A, P> for ViewC<E, C> {
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, inline)]
-    fn test_cx<'c, 'x>(root: &'c A::Root, outs: &'c A::Outs, cx: &'c CtxOf<'x, A, P>) -> bool
-    where
-        A::States: SplitAt<P>,
-    {
-        C::matches(<E as SourceCx<A, P>>::read_cx(root, outs, cx))
     }
 }
 
@@ -714,35 +588,61 @@ where
     }
 }
 
-/// Has any edge of a subscription tree fired? An edge fires if its node fired
-/// and its selectors match the node's current value (the pushed root, or the
-/// stored output, or a handle component's view of its state).
+// ---------------------------------------------------------------------------
+// Deciding a condition again
+// ---------------------------------------------------------------------------
+//
+// Whether an edge fired is never stored. Where the position in the push program does not tell
+// (the decisions of a component's condition that the enclosing switches have not made), the push
+// asks again: a decision is the match of one selector (with the ones before it in its chain) on
+// the source's output, which is a pure function of the pushed root and the stored outputs (and,
+// for a handle source, of its state), so it is recomputed from them. The plan's terms contain the
+// decisions of every condition up to the root, so a stale stored output of a component that did
+// not run is never believed: its own condition is part of the term.
+
+/// Is the decision at depth `J` of the chain, with key `K`, true of the current value of the
+/// source `E`? A keyed decision compares the key the switches use ([`ChainKey`]); a guard
+/// (`K == GUARD`) is the match of the chain up to depth `J`.
 #[doc(hidden)]
-pub trait Ready<A: Layout>: DepList {
-    fn ready(root: &A::Root, states: &A::States, outs: &A::Outs, fired: &FiredOf<A>) -> bool;
+pub trait ChainAtom<E: Source<A>, A: Layout, const J: usize, const K: u32>: SelectChain<E::Stored> {
+    fn atom(root: &A::Root, states: &A::States, outs: &A::Outs) -> bool;
 }
-macro_rules! ready_leaf {
-    ([$($E:ident $C:ident $I:ident $X:ident)*]) => {
-        impl<A: Layout, $($E: Source<A>, $C: ChainTest<$E, A>, const $I: usize, $X: 'static,)*> Ready<A> for ($(Sub<$E, $C, $I, $X>,)*) {
-            #[cfg_attr(not(debug_assertions), inline(always))]
-            #[cfg_attr(debug_assertions, inline)]
-            #[allow(unused_variables)]
-            fn ready(root: &A::Root, states: &A::States, outs: &A::Outs, fired: &FiredOf<A>) -> bool {
-                false $(|| (<$E as Source<A>>::fires(fired) && <$C as ChainTest<$E, A>>::test(root, states, outs)))*
-            }
+impl<E: Source<A>, A: Layout, const J: usize, const K: u32> ChainAtom<E, A, J, K> for () {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn atom(_: &A::Root, _: &A::States, _: &A::Outs) -> bool {
+        true
+    }
+}
+impl<E: Source<A>, A: Layout, S: Select<E::Stored>, T: SelectChain<S::Out>, const J: usize, const K: u32> ChainAtom<E, A, J, K> for (S, T)
+where
+    (S, T): ChainKey<E::Stored, J> + ChainMatchTo<E::Stored, J>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn atom(root: &A::Root, _: &A::States, outs: &A::Outs) -> bool {
+        let x = <E as Source<A>>::fetch(root, outs);
+        if K == crate::select::GUARD {
+            <(S, T) as ChainMatchTo<E::Stored, J>>::matches_to(x)
+        } else {
+            <(S, T) as ChainKey<E::Stored, J>>::key(x) == K
         }
-    };
+    }
 }
-dataflow_macros::leaf_shapes!(ready_leaf);
-macro_rules! ready_inner {
-    ([$($K:ident)*]) => {
-        impl<A: Layout, $($K: Ready<A>,)*> Ready<A> for ($($K,)*) {
-            #[cfg_attr(not(debug_assertions), inline(always))]
-            #[cfg_attr(debug_assertions, inline)]
-            fn ready(root: &A::Root, states: &A::States, outs: &A::Outs, fired: &FiredOf<A>) -> bool {
-                false $(|| <$K as Ready<A>>::ready(root, states, outs, fired))*
-            }
+impl<E: crate::node::HandleView + Source<A>, A: Layout, C: ViewChain<E>, const J: usize, const K: u32> ChainAtom<E, A, J, K> for ViewC<E, C>
+where
+    A::States: AtPos<E, { PosOf::<A, E>::P }>,
+    A::Outs: AtPos<E::Stored, { PosOf::<A, E>::P }>,
+{
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, inline)]
+    fn atom(_: &A::Root, states: &A::States, outs: &A::Outs) -> bool {
+        let state = <A::States as AtPos<E, { PosOf::<A, E>::P }>>::at(states);
+        let handle = <A::Outs as AtPos<E::Stored, { PosOf::<A, E>::P }>>::at(outs);
+        if K == crate::select::GUARD {
+            C::matches_to::<J>(E::__view(state, handle))
+        } else {
+            C::key::<J>(E::__view(state, handle)) == K
         }
-    };
+    }
 }
-dataflow_macros::inner_shape!(ready_inner);

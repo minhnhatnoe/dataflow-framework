@@ -80,6 +80,13 @@ const ALLT: u32 = u32::MAX - 1;
 /// `live_dec_at`: the term conflicts with the context.
 const CONFL: u32 = u32::MAX - 2;
 const MAX_CTX: usize = 32;
+/// The most guard blocks inside one another. Each level costs the trait solver a few steps of
+/// recursion (a user crate's `recursion_limit` is 128 by default); past it, a component asks
+/// again for the decisions the blocks do not hold.
+const MAX_IF_DEPTH: usize = 10;
+/// The most guard decisions of the context at once (the blocks and gates around the code being
+/// emitted). A gate costs the trait solver nothing per level (it is a sibling, not a parent).
+const MAX_GH: usize = 256;
 
 /// Program node kinds.
 pub(crate) const PG_SEQ: u8 = 0;
@@ -101,10 +108,24 @@ pub(crate) const PG_TAIL: u8 = 6;
 /// with a switch or shared in a tail; by-value components keep the bounds they had before handles.
 pub(crate) const PG_RUN_VIEW: u8 = 7;
 pub(crate) const PG_RUN_IF_VIEW: u8 = 8;
+/// A block under one guard decision: its children (`a`, `b` as in a `PG_SEQ`) run only if the guard
+/// `c` (one decision) holds, and inside it the decision is held, so a component whose
+/// condition went through it asks only what is new (`Plan::emit`, `guard_block`).
+pub(crate) const PG_IF: u8 = 9;
+/// A gate: if its guard `c` (one decision) does not hold, the rest of the list it is in is skipped.
+/// It is a block that ends where its list ends, written as a sibling of the nodes it guards, so
+/// that a chain of blocks does not nest in the trait solver (`Plan::emit`).
+pub(crate) const PG_GATE: u8 = 10;
 /// The fewest runs worth a shared tail (0 disables sharing).
 const TAIL_MIN: usize = 2;
 /// Items (handled edges that may fire) of all handler runs in the program.
 const HPOOL: usize = 1 << 17;
+/// Guards (the conditions the program tests again at run time): guards, their terms and the
+/// decisions of the terms; and the longest term one guard term is built from.
+const GDPOOL: usize = 1 << 16;
+const GTPOOL: usize = 1 << 17;
+const GAPOOL: usize = 1 << 18;
+const GSCRATCH: usize = 1 << 10;
 
 /// Sizes of the pools that hold terms (lists of decisions), the lists of
 /// terms of each node.
@@ -124,12 +145,19 @@ const fn mix3(a: u32, b: u32, c: u32) -> usize {
 /// Longest name kept for a message.
 const NAME: usize = 96;
 
+/// The index of guard `g`, `usize::MAX` for none.
+const fn guard_id(g: u32) -> usize {
+    if g == NONE {
+        usize::MAX
+    } else {
+        g as usize
+    }
+}
+
 /// The first parent of the anchor: it was not reached from any node. Also
 /// "none" in the plan's index arrays.
 const NO_PARENT: u32 = u32::MAX;
 const NONE: u32 = u32::MAX;
-/// `flag` of a component whose firing nobody reads.
-pub(crate) const NO_FLAG: usize = usize::MAX;
 
 // ---------------------------------------------------------------------------
 // Const panics with a name
@@ -458,12 +486,24 @@ pub struct Plan {
     edge_a: [bool; MAX_EDGES],
     edge_pos: [u32; MAX_EDGES],
     cur_h: bool,
-    /// Items of handler runs: entry position and mode (bit 0: the parent's flag
-    /// must be read, bit 1: the selectors must be matched).
+    /// Items of handler runs: entry position and guard (`NONE`: the edge fired, as far as the
+    /// place in the program knows; else the condition to ask again).
     hi_len: usize,
     hi_pos: [u32; HPOOL],
-    hi_mode: [u8; HPOOL],
+    hi_guard: [u32; HPOOL],
+    hi_rel: [u32; HPOOL],
     hi_key: [u32; HPOOL],
+    /// Guards: a guard is a list of terms (any of them), a term a list of decisions (all of
+    /// them); `gd_t`/`gd_n` index `gt_a`/`gt_n`, which index `ga`. `gs` is scratch.
+    gd_len: usize,
+    gd_t: [u32; GDPOOL],
+    gd_n: [u32; GDPOOL],
+    gt_len: usize,
+    gt_a: [u32; GTPOOL],
+    gt_n: [u32; GTPOOL],
+    ga_len: usize,
+    ga: [u32; GAPOOL],
+    gs: [u32; GSCRATCH],
     /// Terms: at `tpool[o]` the number of decisions, then the decisions.
     /// Offset 0 is the empty term ("always").
     tpool: [u32; TPOOL],
@@ -476,10 +516,6 @@ pub struct Plan {
     cn: [u32; MAX_COMPONENTS],
     /// Is the node's condition "always"?
     always: [bool; MAX_COMPONENTS],
-    /// Index into the push's `fired` flags of a component whose firing is
-    /// read by a conditional component (`NONE` if nobody reads it).
-    flag: [u32; MAX_COMPONENTS],
-    n_flags: usize,
     /// Component position of each component (`NONE` for the root and the
     /// anchor) and the node index of each component position.
     cpos: [u32; MAX_COMPONENTS],
@@ -492,8 +528,6 @@ pub struct Plan {
     /// that first walked it.
     dn_owner: [u32; MAX_DECISIONS],
     dn_opos: [u32; MAX_DECISIONS],
-    /// Does a guarded run read whether this component fired?
-    flag_need: [bool; MAX_COMPONENTS],
     /// Stored selected values ("slots"). Edge `e` is *stored* when some term of its
     /// subscriber's condition does not imply it (the subscriber reads it in a step where
     /// its selectors do not match): `edge_need[e]`. Per decision (the last of a chain):
@@ -535,6 +569,13 @@ pub struct Plan {
     cur: [u32; MAX_DECISIONS],
     ctx_old: [u32; MAX_CTX],
     ctx_len: usize,
+    /// The guard decisions of the context (the blocks of `PG_IF` around the code being emitted).
+    gh: [u32; MAX_GH],
+    gh_len: usize,
+    /// Per decision: how many entries of `gh` have it on their chain (it is then held).
+    hc: [u16; MAX_DECISIONS],
+    /// How many `PG_IF` blocks are open around the code being emitted.
+    if_depth: usize,
     /// Per entry of `lst`: the candidate terms of the component in the current context (a list
     /// in `cp_t`/`cp_next`, `ALLT` = all its terms), and the list's tail.
     lst_t: [u32; MAX_LST],
@@ -550,8 +591,6 @@ pub struct Plan {
     hp_e: [u32; MAX_LST],
     hp_next: [u32; MAX_LST],
     hp_len: usize,
-    /// Handlers whose flags were already requested for a guarded run.
-    hg_done: [bool; MAX_COMPONENTS],
     /// The pipeline's root type, and its index once the walk has met it.
     root_id: TypeId,
     root_idx: u32,
@@ -618,8 +657,18 @@ impl Plan {
             cur_h: false,
             hi_len: 0,
             hi_pos: [0; HPOOL],
-            hi_mode: [0; HPOOL],
+            hi_guard: [NONE; HPOOL],
+            hi_rel: [0; HPOOL],
             hi_key: [0; HPOOL],
+            gd_len: 0,
+            gd_t: [0; GDPOOL],
+            gd_n: [0; GDPOOL],
+            gt_len: 0,
+            gt_a: [0; GTPOOL],
+            gt_n: [0; GTPOOL],
+            ga_len: 0,
+            ga: [0; GAPOOL],
+            gs: [0; GSCRATCH],
             tpool: [0; TPOOL],
             tp_len: 1,
             olist: [0; OPOOL],
@@ -627,8 +676,6 @@ impl Plan {
             co: [0; MAX_COMPONENTS],
             cn: [0; MAX_COMPONENTS],
             always: [false; MAX_COMPONENTS],
-            flag: [NONE; MAX_COMPONENTS],
-            n_flags: 0,
             cpos: [NONE; MAX_COMPONENTS],
             by_cpos: [NONE; MAX_COMPONENTS],
             n_comp: 0,
@@ -636,7 +683,6 @@ impl Plan {
             cur_pos: 0,
             dn_owner: [NONE; MAX_DECISIONS],
             dn_opos: [0; MAX_DECISIONS],
-            flag_need: [false; MAX_COMPONENTS],
             edge_need: [false; MAX_EDGES],
             dn_need: [false; MAX_DECISIONS],
             dn_rep_sub: [NONE; MAX_DECISIONS],
@@ -666,6 +712,10 @@ impl Plan {
             cur: [0; MAX_DECISIONS],
             ctx_old: [0; MAX_CTX],
             ctx_len: 0,
+            gh: [0; MAX_GH],
+            gh_len: 0,
+            hc: [0; MAX_DECISIONS],
+            if_depth: 0,
             lst_t: [0; MAX_LST],
             lst_tail: [0; MAX_LST],
             cp_t: [0; MAX_LST],
@@ -676,7 +726,6 @@ impl Plan {
             hp_e: [0; MAX_LST],
             hp_next: [0; MAX_LST],
             hp_len: 0,
-            hg_done: [false; MAX_COMPONENTS],
             root_id,
             root_idx: NO_PARENT,
             failed: false,
@@ -1241,18 +1290,6 @@ impl Plan {
         self.ol_len += n;
         let always = n == 1 && self.term_len(self.sc_offs[0]) == 0;
         self.always[i] = always;
-        // The firing of the components this one reads is read by its check.
-        if !always || self.handler[i] {
-            let mut e = self.up_head[i];
-            while e != NONE {
-                let u = self.edge_to[e as usize] as usize;
-                if self.kind[u] == KIND_COMPONENT && !self.always[u] && self.flag[u] == NONE {
-                    self.flag[u] = self.n_flags as u32;
-                    self.n_flags += 1;
-                }
-                e = self.edge_next[e as usize];
-            }
-        }
     }
 
     /// Number the slots: the decisions read by a stored edge, ordered by the execution
@@ -1359,7 +1396,7 @@ impl Plan {
     //
     // The program is a tree of nodes: `Seq` (children in order), `Run` (a
     // component, unconditionally), `RunIf` (a component guarded by its edges,
-    // as the flag-based push), `Switch` (branch on the key of the alternative
+    // by a guard asked again at run time), `Switch` (branch on the key of the alternative
     // a value is, one child per key). It is built by `emit` over a *context*
     // of decisions known to hold: components whose condition has a term inside
     // the context run straight-line; consecutive components that all wait for
@@ -1368,10 +1405,33 @@ impl Plan {
     // added. Order is kept: every list is in execution order and a segment is
     // a run of consecutive entries of the list.
 
+    /// Add guard decision `d` to the context (every decision on its chain is then held).
+    const fn gh_push(&mut self, d: u32) {
+        self.gh[self.gh_len] = d;
+        self.gh_len += 1;
+        let mut z = d;
+        while z != NONE {
+            self.hc[z as usize] += 1;
+            z = self.dn_prev[z as usize];
+        }
+    }
+    /// Remove the last guard decision of the context.
+    const fn gh_pop(&mut self) {
+        self.gh_len -= 1;
+        let mut z = self.gh[self.gh_len];
+        while z != NONE {
+            self.hc[z as usize] -= 1;
+            z = self.dn_prev[z as usize];
+        }
+    }
     /// Is decision `d` (or an equal one at its place) in the context? The context holds at most
-    /// one decision per place, never a guard.
+    /// one keyed decision per place, and any number of guard decisions (the blocks around the code):
+    /// a guard decision holds its whole chain.
     const fn held(&self, d: u32) -> bool {
         let du = d as usize;
+        if self.hc[du] != 0 {
+            return true;
+        }
         let key = self.dn_key[du];
         if key == crate::select::GUARD {
             return false;
@@ -1668,88 +1728,192 @@ impl Plan {
         (false, 0, 0)
     }
 
-    // -- handler components ----------------------------------------------------
+    // -- guards and handler components -----------------------------------------
     //
-    // A handler's run is one `on_update` per handled edge that fired, then
-    // `update`. Under the context of decisions known to hold, each handled edge
-    // is classified: it fired (its parent ran and its selectors match), it did
-    // not (the parent cannot have run, or a selector decision excludes the
-    // context), or it may have (then the parent's flag and/or the selector match
-    // is tested at run time). Edges that did not fire are not in the list; the
-    // others are listed in execution order of their parents.
+    // Whether an edge fired is never stored. Under the context of decisions known to hold
+    // (the enclosing switches), what is left of a condition is a *guard*: the terms of the
+    // condition that the context does not exclude, each reduced to the decisions the context
+    // does not hold. The push evaluates it again from the pushed root and the stored outputs
+    // (`gather::ChainAtom`): a decision is a pure function of its source's output, and the
+    // terms hold the decisions of every ancestor's condition, so a stored output of a component
+    // that did not run in this step is never believed on its own.
+    //
+    // A handler's run is one `on_update` per handled edge that fired, then `update`. An edge
+    // fires iff its parent ran and its selectors match: the parent's terms extended by the
+    // edge's chain. Under the context that is static (every decision held: no test), impossible
+    // (the edge is not in the list), or a guard. The items are listed in execution order of
+    // their parents.
 
-    /// The chain ending at decision `d` under the context: 0 excluded, 1 held, 2 unknown.
-    const fn path_state(&self, d: u32) -> u8 {
-        let mut all = true;
-        let mut x = d;
-        while x != NONE {
-            if self.dec_conflicts(x as usize) {
+    /// Is decision `x` on the chain that ends at `y` (`y` itself included)?
+    const fn on_chain(&self, y: u32, x: u32) -> bool {
+        let mut z = y;
+        while z != NONE {
+            if z == x {
+                return true;
+            }
+            z = self.dn_prev[z as usize];
+        }
+        false
+    }
+    /// Can decisions `x` and `y` never hold together (different keys at one place, neither a guard)?
+    const fn dec_excl(&self, x: usize, y: usize) -> bool {
+        x != y
+            && self.dn_node[x] == self.dn_node[y]
+            && self.dn_prev[x] == self.dn_prev[y]
+            && self.dn_key[x] != self.dn_key[y]
+            && self.dn_key[x] != crate::select::GUARD
+            && self.dn_key[y] != crate::select::GUARD
+    }
+    /// Add the term made of term `tp` and the chain ending at `d` (`NONE`: none) to the guard
+    /// being built, reduced by the context: 0 if it cannot hold (it conflicts with the context,
+    /// or holds two keys at one place), 1 if the context holds all of it, 2 if added. A decision
+    /// is left out when a deeper one of the term tests it with its prefix (`ChainAtom` matches
+    /// the chain up to its depth).
+    const fn guard_term(&mut self, tp: u32, d: u32) -> u8 {
+        let n = self.term_len(tp);
+        let mut m = 0;
+        let mut k = 0;
+        while k < n {
+            if m == GSCRATCH {
+                self.fail("a condition has too many decisions: ", "raise dataflow_flat's GSCRATCH", "");
                 return 0;
             }
-            if !self.held(x) {
-                all = false;
+            self.gs[m] = self.term_item(tp, k);
+            m += 1;
+            k += 1;
+        }
+        let mut x = d;
+        while x != NONE {
+            if !self.term_has(tp, x) {
+                if m == GSCRATCH {
+                    self.fail("a condition has too many decisions: ", "raise dataflow_flat's GSCRATCH", "");
+                    return 0;
+                }
+                self.gs[m] = x;
+                m += 1;
             }
             x = self.dn_prev[x as usize];
         }
-        if all {
-            1
-        } else {
-            2
+        let mut a = 0;
+        while a < m {
+            let xa = self.gs[a] as usize;
+            if self.dec_conflicts(xa) {
+                return 0;
+            }
+            let mut b = a + 1;
+            while b < m {
+                if self.dec_excl(xa, self.gs[b] as usize) {
+                    return 0;
+                }
+                b += 1;
+            }
+            a += 1;
         }
-    }
-    /// Did node `u` run, under the context: 0 no, 1 yes, 2 unknown.
-    const fn ran_state(&self, u: usize) -> u8 {
-        if self.kind[u] == KIND_ROOT {
+        let start = self.ga_len;
+        let mut cnt = 0;
+        let mut a = 0;
+        while a < m {
+            let xa = self.gs[a];
+            if !self.held(xa) {
+                let mut implied = false;
+                let mut b = 0;
+                while b < m {
+                    let y = self.gs[b];
+                    if y != xa && !self.held(y) && self.on_chain(self.dn_prev[y as usize], xa) {
+                        implied = true;
+                        break;
+                    }
+                    b += 1;
+                }
+                if !implied {
+                    if self.ga_len == GAPOOL {
+                        self.fail("too many guard decisions in the push program: ", "raise dataflow_flat's GAPOOL", "");
+                        return 0;
+                    }
+                    self.ga[self.ga_len] = xa;
+                    self.ga_len += 1;
+                    cnt += 1;
+                }
+            }
+            a += 1;
+        }
+        if cnt == 0 {
             return 1;
         }
-        let mut any = false;
+        if self.gt_len == GTPOOL {
+            self.fail("too many guard terms in the push program: ", "raise dataflow_flat's GTPOOL", "");
+            return 0;
+        }
+        self.gt_a[self.gt_len] = start as u32;
+        self.gt_n[self.gt_len] = cnt as u32;
+        self.gt_len += 1;
+        2
+    }
+    /// Close the guard whose terms start at `st` (its decisions at `sg`): its id, or `NONE` (and
+    /// the pools rewound) if it is true under the context (`always`), or has no term.
+    const fn close_guard(&mut self, sg: usize, st: usize, always: bool) -> u32 {
+        let n = self.gt_len - st;
+        if always || n == 0 || self.gd_len == GDPOOL {
+            if !always && n != 0 {
+                self.fail("too many guards in the push program: ", "raise dataflow_flat's GDPOOL", "");
+            }
+            self.ga_len = sg;
+            self.gt_len = st;
+            return NONE;
+        }
+        let g = self.gd_len;
+        self.gd_t[g] = st as u32;
+        self.gd_n[g] = n as u32;
+        self.gd_len = g + 1;
+        g as u32
+    }
+    /// The guard of the component of entry `q` of `lst`: any of its candidate terms. `NONE` if the
+    /// context holds one of them.
+    const fn comp_guard(&mut self, q: usize) -> u32 {
+        let (sg, st) = (self.ga_len, self.gt_len);
+        let mut c = self.c_start(q);
+        while !self.c_end(q, c) {
+            let t = self.c_term(q, c);
+            if self.guard_term(t, NONE) == 1 {
+                return self.close_guard(sg, st, true);
+            }
+            c = self.c_next(q, c);
+        }
+        self.close_guard(sg, st, false)
+    }
+    /// Did edge `eu` fire, under the context: (it may have, the guard that asks again or `NONE`
+    /// if it did).
+    const fn edge_guard(&mut self, eu: usize) -> (bool, u32) {
+        let u = self.edge_to[eu] as usize;
+        let d = self.edge_dn[eu];
+        let (sg, st) = (self.ga_len, self.gt_len);
         let cn = self.cn[u] as usize;
         let mut k = 0;
         while k < cn {
-            let t = self.olist[self.co[u] as usize + k];
-            if !self.conflicts(t) {
-                if self.term_held(t) {
-                    return 1;
-                }
-                any = true;
+            let tp = self.olist[self.co[u] as usize + k];
+            if self.guard_term(tp, d) == 1 {
+                self.close_guard(sg, st, true);
+                return (true, NONE);
             }
             k += 1;
         }
-        if any {
-            2
-        } else {
-            0
-        }
+        let g = self.close_guard(sg, st, false);
+        (g != NONE, g)
     }
 
     const fn mk_hrun(&mut self, i: usize, guarded: bool, q: usize) -> u32 {
         let start = self.hi_len;
-        if guarded && !self.hg_done[i] {
-            self.hg_done[i] = true;
-            let mut e = self.up_head[i];
-            while e != NONE {
-                let u = self.edge_to[e as usize] as usize;
-                if self.kind[u] == KIND_COMPONENT && !self.always[u] {
-                    self.flag_need[u] = true;
-                }
-                e = self.edge_next[e as usize];
-            }
-        }
+        let rg = if guarded { self.comp_guard(q) } else { NONE };
         let mut c = self.h_start(q);
         while c != NONE {
             let eu = self.h_edge(q, c) as usize;
             let u = self.edge_to[eu] as usize;
             {
-                let ps = self.ran_state(u);
-                let cs = if self.edge_dn[eu] == NONE { 1 } else { self.path_state(self.edge_dn[eu]) };
-                if ps != 0 && cs != 0 {
+                let (fires, g) = self.edge_guard(eu);
+                if fires {
                     if self.hi_len == HPOOL {
                         self.fail("too many handled edges in the push program: ", "raise dataflow_flat's HPOOL", "");
                         return 0;
-                    }
-                    let mode = (if ps == 2 { 1u8 } else { 0 }) | (if cs == 2 { 2u8 } else { 0 });
-                    if ps == 2 && self.kind[u] == KIND_COMPONENT && !self.always[u] {
-                        self.flag_need[u] = true;
                     }
                     let key = if self.kind[u] == KIND_ROOT { 0 } else { self.cpos[u] + 1 };
                     // insertion sort by (parent execution position, entry position)
@@ -1759,27 +1923,29 @@ impl Plan {
                     {
                         self.hi_key[at] = self.hi_key[at - 1];
                         self.hi_pos[at] = self.hi_pos[at - 1];
-                        self.hi_mode[at] = self.hi_mode[at - 1];
+                        self.hi_guard[at] = self.hi_guard[at - 1];
                         at -= 1;
                     }
                     self.hi_key[at] = key;
                     self.hi_pos[at] = self.edge_pos[eu];
-                    self.hi_mode[at] = mode;
+                    self.hi_guard[at] = g;
                     self.hi_len += 1;
                 }
             }
             c = self.h_next(q, c);
         }
-        let n = self.new_node(PG_HRUN, self.cpos[i], guarded as u32 | ((self.view[i] as u32) << 1));
+        let mut r = start;
+        while r < self.hi_len {
+            self.hi_rel[r] = (r - start) as u32;
+            r += 1;
+        }
+        let n = self.new_node(PG_HRUN, self.cpos[i], (rg != NONE) as u32 | ((self.view[i] as u32) << 1));
         self.pg_c[n as usize] = start as u32;
         self.pg_d[n as usize] = (self.hi_len - start) as u32;
+        self.pg_e[n as usize] = rg;
         n
     }
 
-    /// Handler run: is it guarded by the firing of its edges.
-    pub(crate) const fn hr_guarded(&self, n: usize) -> bool {
-        self.pg_b[n] & 1 != 0
-    }
     /// Handler run: does the component read a handle parent (it is run through the split of the states)?
     pub(crate) const fn hr_view(&self, n: usize) -> bool {
         self.pg_b[n] & 2 != 0
@@ -1795,8 +1961,48 @@ impl Plan {
     pub(crate) const fn hi_pos_of(&self, k: usize) -> usize {
         self.hi_pos[k] as usize
     }
-    pub(crate) const fn hi_mode_of(&self, k: usize) -> u8 {
-        self.hi_mode[k]
+    /// Item `k`'s index within its run.
+    pub(crate) const fn hi_rel_of(&self, k: usize) -> usize {
+        self.hi_rel[k] as usize
+    }
+    pub(crate) const fn hi_guard_of(&self, k: usize) -> usize {
+        guard_id(self.hi_guard[k])
+    }
+    /// Handler run: its own guard (`usize::MAX` if it runs as soon as it is reached).
+    pub(crate) const fn hr_guard(&self, n: usize) -> usize {
+        guard_id(self.pg_e[n])
+    }
+    /// Guard `g`: first term and number of terms.
+    pub(crate) const fn gd_first(&self, g: usize) -> usize {
+        self.gd_t[g] as usize
+    }
+    pub(crate) const fn gd_count(&self, g: usize) -> usize {
+        self.gd_n[g] as usize
+    }
+    /// Term `t`: first decision entry (in `ga`) and number of decisions.
+    pub(crate) const fn gt_first(&self, t: usize) -> usize {
+        self.gt_a[t] as usize
+    }
+    pub(crate) const fn gt_count(&self, t: usize) -> usize {
+        self.gt_n[t] as usize
+    }
+    /// The decision at `ga[a]`.
+    pub(crate) const fn ga_dec(&self, a: usize) -> usize {
+        self.ga[a] as usize
+    }
+    /// Where the types of decision `d` come from: the component position and entry position of
+    /// the edge that first walked it, the depth of its selector in the chain (from 0), and its key.
+    pub(crate) const fn dec_pos(&self, d: usize) -> usize {
+        self.cpos[self.dn_owner[d] as usize] as usize
+    }
+    pub(crate) const fn dec_entry(&self, d: usize) -> usize {
+        self.dn_opos[d] as usize
+    }
+    pub(crate) const fn dec_depth(&self, d: usize) -> usize {
+        self.dn_depth[d] as usize - 1
+    }
+    pub(crate) const fn dec_key(&self, d: usize) -> u32 {
+        self.dn_key[d]
     }
     /// Number of handled edges of the node at plan index `i` (for tests).
     #[allow(dead_code)]
@@ -1836,23 +2042,14 @@ impl Plan {
         if self.handler[i] {
             return self.mk_hrun(i, guarded, q);
         }
-        if guarded {
-            let mut e = self.up_head[i];
-            while e != NONE {
-                let u = self.edge_to[e as usize] as usize;
-                if self.kind[u] == KIND_COMPONENT && !self.always[u] {
-                    self.flag_need[u] = true;
-                }
-                e = self.edge_next[e as usize];
-            }
-        }
-        let kind = match (guarded, self.view[i]) {
+        let g = if guarded { self.comp_guard(q) } else { NONE };
+        let kind = match (g != NONE, self.view[i]) {
             (false, false) => PG_RUN,
             (true, false) => PG_RUN_IF,
             (false, true) => PG_RUN_VIEW,
             (true, true) => PG_RUN_IF_VIEW,
         };
-        self.new_node(kind, self.cpos[i], 0)
+        self.new_node(kind, self.cpos[i], if g != NONE { g } else { 0 })
     }
 
     /// Binary search in `kpool[m..m+nk]`.
@@ -1890,9 +2087,120 @@ impl Plan {
         }
     }
 
+    /// Does every term of entry `q` that the context does not exclude contain decision `d`, and
+    /// is there such a term?
+    const fn all_terms_have(&self, q: usize, d: u32) -> bool {
+        let mut any = false;
+        let mut c = self.c_start(q);
+        while !self.c_end(q, c) {
+            let t = self.c_term(q, c);
+            if !self.conflicts(t) {
+                if self.term_held(t) || !self.term_has(t, d) {
+                    return false;
+                }
+                any = true;
+            }
+            c = self.c_next(q, c);
+        }
+        any
+    }
+    /// A block for entry `k` of `lst[..hi]`: a guard decision `d` that every consistent term of
+    /// the entry waits for and whose source has run, and the end `j` of the run of entries that all
+    /// wait for it (an entry that runs regardless ends the block: order is kept, the ones after it
+    /// ask again). Only worth a block for two or more entries.
+    const fn guard_block(&self, k: usize, hi: usize) -> (bool, usize, u32) {
+        if self.gh_len >= MAX_GH - 1 {
+            return (false, 0, 0);
+        }
+        let mut c = self.c_start(k);
+        while !self.c_end(k, c) {
+            let t = self.c_term(k, c);
+            if !self.conflicts(t) {
+                let n = self.term_len(t);
+                let mut a = 0;
+                while a < n {
+                    let d = self.term_item(t, a);
+                    if self.dn_key[d as usize] == crate::select::GUARD
+                        && !self.held(d)
+                        && self.node_ready(self.dn_node[d as usize] as usize)
+                        && self.all_terms_have(k, d)
+                    {
+                        let mut j = k + 1;
+                        let mut cnt = 1;
+                        while j < hi {
+                            let (c2, s2) = self.consistent_static(j);
+                            if c2 {
+                                if s2 || !self.all_terms_have(j, d) {
+                                    break;
+                                }
+                                cnt += 1;
+                            }
+                            j += 1;
+                        }
+                        if cnt >= 2 {
+                            return (true, j, d);
+                        }
+                    }
+                    a += 1;
+                }
+                return (false, 0, 0);
+            }
+            c = self.c_next(k, c);
+        }
+        (false, 0, 0)
+    }
+    /// A guard of the single decision `d`: its index, or `usize::MAX` if a pool is full.
+    const fn mk_guard(&mut self, d: u32) -> usize {
+        if self.ga_len == GAPOOL || self.gt_len == GTPOOL || self.gd_len == GDPOOL {
+            self.fail("too many guards in the push program: ", "raise dataflow_flat's GDPOOL", "");
+            return usize::MAX;
+        }
+        let g = self.gd_len;
+        self.ga[self.ga_len] = d;
+        self.gt_a[self.gt_len] = self.ga_len as u32;
+        self.gt_n[self.gt_len] = 1;
+        self.gd_t[g] = self.gt_len as u32;
+        self.gd_n[g] = 1;
+        self.ga_len += 1;
+        self.gt_len += 1;
+        self.gd_len += 1;
+        g
+    }
+    /// The block `lst[lo..hi]` under guard decision `d`.
+    const fn emit_if(&mut self, lo: usize, hi: usize, d: u32) -> u32 {
+        let g = self.mk_guard(d);
+        if g == usize::MAX {
+            return 0;
+        }
+        self.gh_push(d);
+        self.if_depth += 1;
+        let c = self.emit(lo, hi);
+        self.if_depth -= 1;
+        self.gh_pop();
+        if self.failed {
+            return 0;
+        }
+        let (s0, cnt, seq) = self.items_of(c);
+        let first = if seq {
+            s0
+        } else {
+            if self.ch_len == MAX_PCH {
+                self.fail("the push program is too large: ", "raise dataflow_flat's child pool", "");
+                return 0;
+            }
+            self.ch_node[self.ch_len] = c;
+            self.ch_len += 1;
+            self.ch_len - 1
+        };
+        let n = self.new_node(PG_IF, first as u32, cnt as u32);
+        self.pg_c[n as usize] = g as u32;
+        n
+    }
+
     /// The program for the components `lst[lo..hi]` under the current context.
     const fn emit(&mut self, lo: usize, hi: usize) -> u32 {
         let mark = self.ib_len;
+        let mut gates = 0;
         let mut k = lo;
         while k < hi && !self.failed {
             let i = self.lst[k] as usize;
@@ -1909,6 +2217,27 @@ impl Plan {
             }
             let (found, x, prev) = self.first_pend(k);
             if !found {
+                let (gb, gj, gd) = self.guard_block(k, hi);
+                if gb && gj == hi {
+                    // a block that ends with the list: a gate, and the entries after it are items
+                    // of this list, with the decision held
+                    let g = self.mk_guard(gd);
+                    if g == usize::MAX {
+                        return 0;
+                    }
+                    let n = self.new_node(PG_GATE, 0, 0);
+                    self.pg_c[n as usize] = g as u32;
+                    self.push_item(n);
+                    self.gh_push(gd);
+                    gates += 1;
+                    continue;
+                }
+                if gb && self.if_depth < MAX_IF_DEPTH {
+                    let n = self.emit_if(k, gj, gd);
+                    self.push_item(n);
+                    k = gj;
+                    continue;
+                }
                 let n = self.mk_run(i, true, k);
                 self.push_item(n);
                 k += 1;
@@ -1934,6 +2263,10 @@ impl Plan {
                 self.push_item(n);
             }
             k = j;
+        }
+        while gates > 0 {
+            self.gh_pop();
+            gates -= 1;
         }
         let count = self.ib_len - mark;
         let node = if count == 1 {
@@ -1991,6 +2324,17 @@ impl Plan {
                 let (_, len, _) = self.items_of(self.kpool[ch + r]);
                 if l >= len {
                     ok = false;
+                    break;
+                }
+                // an item after a gate is guarded by it: it cannot be shared with the other branches
+                let mut gi = 0;
+                while gi < len - l {
+                    if self.pg_kind[self.item_at(self.kpool[ch + r], gi) as usize] == PG_GATE {
+                        ok = false;
+                    }
+                    gi += 1;
+                }
+                if !ok {
                     break;
                 }
                 let it = self.item_at(self.kpool[ch + r], len - 1 - l) as usize;
@@ -2426,14 +2770,17 @@ impl Plan {
         feed(self.hi_len as u64);
         for k in 0..self.hi_len {
             feed(self.hi_pos[k] as u64);
-            feed(self.hi_mode[k] as u64);
+            feed(self.hi_guard[k] as u64);
             feed(self.hi_key[k] as u64);
         }
-        feed(self.n_flags as u64);
+        feed(self.gd_len as u64);
+        feed(self.gt_len as u64);
+        feed(self.ga_len as u64);
+        for k in 0..self.ga_len {
+            feed(self.ga[k] as u64);
+        }
         for i in 0..self.len {
-            feed(self.flag[i] as u64);
             feed(self.always[i] as u64);
-            feed(self.flag_need[i] as u64);
         }
         h
     }
@@ -2475,46 +2822,9 @@ impl Plan {
     }
 
     /// Does the component at plan index `i` run in every step?
+    #[allow(dead_code)]
     pub(crate) const fn always_idx(&self, i: usize) -> bool {
         self.always[i]
-    }
-
-    /// The `fired` flag of the component at plan index `i` (`NO_FLAG` if no
-    /// condition reads whether it fired).
-    pub(crate) const fn flag_idx(&self, i: usize) -> usize {
-        if self.flag[i] == NONE || !self.flag_need[i] {
-            NO_FLAG
-        } else {
-            self.flag[i] as usize
-        }
-    }
-
-    /// Size of the push's `fired` array: one past the highest flag index that
-    /// is needed (flag indices are handed out to every candidate, so the
-    /// needed ones can be sparse).
-    pub(crate) const fn n_flag_slots(&self) -> usize {
-        let mut n = 0;
-        let mut i = 0;
-        while i < self.len {
-            if self.flag_need[i] && self.flag[i] != NONE && self.flag[i] as usize + 1 > n {
-                n = self.flag[i] as usize + 1;
-            }
-            i += 1;
-        }
-        n
-    }
-
-    /// Number of `fired` flags a push needs.
-    pub(crate) const fn n_flags(&self) -> usize {
-        let mut n = 0;
-        let mut i = 0;
-        while i < self.len {
-            if self.flag_need[i] {
-                n += 1;
-            }
-            i += 1;
-        }
-        n
     }
 
     // -- the push program -----------------------------------------------------
@@ -2539,6 +2849,10 @@ impl Plan {
     }
     pub(crate) const fn sw_entry(&self, n: usize) -> usize {
         self.pg_d[n] as usize
+    }
+    /// The guard of block `n` (`PG_IF`).
+    pub(crate) const fn if_guard(&self, n: usize) -> usize {
+        self.pg_c[n] as usize
     }
     pub(crate) const fn sw_depth(&self, n: usize) -> usize {
         self.pg_e[n] as usize
@@ -2589,7 +2903,7 @@ impl Plan {
         if kind == PG_SWITCH || kind == PG_RUNSW {
             return true;
         }
-        if kind == PG_SEQ {
+        if kind == PG_SEQ || kind == PG_IF {
             let a = self.pg_a[n] as usize;
             let b = self.pg_b[n] as usize;
             let mut i = 0;
@@ -2734,7 +3048,7 @@ mod trace {
         assert!(plan.contains(TypeId::of::<A>()) && !plan.contains(TypeId::of::<u8>()));
     }
 
-    // Conditions and flags.
+    // Conditions.
     pub struct K0;
     pub struct K1;
     impl crate::Select<Poll> for K0 {
@@ -2768,7 +3082,7 @@ mod trace {
     scomp!(W, [z: Z, K0(p): Poll]);
 
     #[test]
-    fn conditions_terms_and_flags() {
+    fn conditions_and_terms() {
         let plan = <Anchor<Poll, (Z,)> as Planned>::PLAN;
         plan.check();
         // Poll, X, Y, Z, anchor.
@@ -2777,9 +3091,8 @@ mod trace {
         assert!(!plan.always_idx(at(1)) && !plan.always_idx(at(2)) && !plan.always_idx(at(3)));
         assert_eq!((plan.n_terms(at(1)), plan.n_terms(at(2)), plan.n_terms(at(3))), (1, 1, 2));
         // The push dispatches on K0/K1 and runs X, Y, Z straight-line in each branch:
-        // no guarded run reads whether anything fired, so no flags.
-        assert_eq!(plan.n_flags(), 0);
-        assert_eq!(plan.flag_idx(at(1)), NO_FLAG);
+        // no run is guarded, so nothing is asked again.
+        assert_eq!((plan.gd_len, plan.gt_len, plan.ga_len), (0, 0, 0));
         // Program: one switch with two branches (K0: X, Z; K1: Y, Z).
         assert_eq!(plan.pg_kind_of(plan.root_prog()), PG_SWITCH);
         assert_eq!(plan.pg_b_of(plan.root_prog()), 2);
@@ -2920,19 +3233,23 @@ mod handler_trace {
             assert_eq!(plan.pg_kind_of(leaf), PG_SEQ);
             let h = plan.ch_node_of(plan.pg_a_of(leaf) + 1);
             assert_eq!(plan.pg_kind_of(h), PG_HRUN);
-            assert!(!plan.hr_guarded(h));
+            assert_eq!(plan.hr_guard(h), usize::MAX);
             assert_eq!(plan.hr_count(h), 1);
-            assert_eq!(plan.hi_mode_of(plan.hr_start(h)), 0);
+            assert_eq!(plan.hi_guard_of(plan.hr_start(h)), usize::MAX);
         }
     }
 
-    /// A handler that always runs (it reads `Z`) tests both edges at run time,
-    /// each by its parent's flag.
+    /// A handler that runs after a switch (it reads `Z`, the join) asks its edges again: each
+    /// handled edge has a guard made of its parent's decision, and nothing is stored.
     #[test]
-    fn an_always_running_handler_tests_its_edges() {
+    fn a_handler_after_a_switch_asks_its_edges_again() {
         let plan = <Anchor<Poll, (G,)> as Planned>::PLAN;
         plan.check();
-        assert!(plan.n_flags() >= 2);
+        assert!(plan.hi_len >= 2);
+        for k in 0..plan.hi_len {
+            assert_ne!(plan.hi_guard_of(k), usize::MAX);
+        }
+        assert!(plan.gd_len >= 2);
     }
 }
 
@@ -3036,5 +3353,5 @@ mod shapes {
         let expected: [u64; 5] = EXPECTED;
         assert_eq!(d, expected);
     }
-    const EXPECTED: [u64; 5] = [0x16a4e2240a908108, 0xa825552f737152ec, 0xfa05ea63fd51c686, 0x0eab1e5f15e96d75, 0x1b8ff799605ad5ba];
+    const EXPECTED: [u64; 5] = [0xe052c3b152c623e6, 0xccb62e0b97267170, 0xa8928e065cc910c7, 0xb899f4943d4d8849, 0x6fd1f6578eb7b08f];
 }

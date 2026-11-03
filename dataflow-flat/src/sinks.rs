@@ -6,8 +6,7 @@ use std::marker::PhantomData;
 use crate::build::ConstructPass;
 use crate::component::{DepList, Sub};
 use crate::drive::{
-    AllSlots, ConstructCtx, ConstructPh, Drive, Exec, FiredOps, FiredTy, NFlags, Pn, PushCtx, PushPh, RgCl, RootProg, RootSlots,
-    SlotInitPh, SlotWriteBy,
+    AllSlots, ConstructCtx, ConstructPh, Drive, Exec, Pn, PushCtx, PushPh, RgCl, RootProg, RootSlots, SlotInitPh, SlotWriteBy,
 };
 use crate::flat::{FlatTop, Whole};
 use crate::gather::Layout;
@@ -68,7 +67,6 @@ where
         + FlatTop<StateOptM>
         + FlatTop<OutOptM>,
 
-    NFlags<Anchor<R, S>>: FiredTy,
     <Anchor<R, S> as FlatTop<StateOptM>>::Of: Empty + Finish<Done = <Anchor<R, S> as FlatTop<StateM>>::Of>,
     <Anchor<R, S> as FlatTop<OutOptM>>::Of: Empty + Finish<Done = <Anchor<R, S> as FlatTop<OutM>>::Of>,
 {
@@ -77,7 +75,6 @@ where
     type Outs = <Anchor<R, S> as FlatTop<OutM>>::Of;
     type StatesOpt = <Anchor<R, S> as FlatTop<StateOptM>>::Of;
     type OutsOpt = <Anchor<R, S> as FlatTop<OutOptM>>::Of;
-    type Fired = <NFlags<Anchor<R, S>> as FiredTy>::T;
 }
 
 /// The storage of a pipeline.
@@ -164,10 +161,10 @@ where
     fn push(store: &mut Self::Store, root: R) {
         type A<R, S> = Anchor<R, S>;
         let mut ctx =
-            PushCtx::<A<R, S>> { root: &root, states: &mut store.states, outs: &mut store.outs, fired: <<A<R, S> as Layout>::Fired as FiredOps>::new() };
+            PushCtx::<A<R, S>> { root: &root, states: &mut store.states, outs: &mut store.outs };
         // The root has "run": its stored selected values take the pushed value if it matches.
         <RootSlots<A<R, S>> as Drive<A<R, S>, SlotWriteBy<A<R, S>>, <RootSlots<A<R, S>> as RgCl>::Cl>>::drive(&mut ctx);
-        <Pn<A<R, S>, { RootProg::<A<R, S>>::N }> as Exec<A<R, S>, PushPh<A<R, S>>>>::exec(&mut ctx);
+        let _ = <Pn<A<R, S>, { RootProg::<A<R, S>>::N }> as Exec<A<R, S>, PushPh<A<R, S>>>>::exec(&mut ctx);
     }
 
     fn requests(pass: &mut ConstructPass) {

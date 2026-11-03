@@ -25,8 +25,10 @@
 //! the terms are pairwise exclusive (otherwise "<C> joins branches that can fire
 //! in the same step"), and that every component is reachable from the root. A
 //! component whose condition is "always" has no check in the push; the others
-//! test their edges' flags, which LLVM keeps in registers. See `plan` for the
-//! data model.
+//! run where the push program's position says they do (inside a `switch`) or
+//! recompute their condition from the pushed root and the stored outputs
+//! (`guard`): no bit "this fired" is ever stored, so selectors must be pure.
+//! See `plan` for the data model.
 //!
 //! # Stored selected values
 //!
@@ -126,6 +128,7 @@ mod component;
 mod drive;
 mod flat;
 mod gather;
+mod guard;
 mod handler;
 mod identity;
 #[doc(hidden)]
