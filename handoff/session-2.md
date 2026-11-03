@@ -355,3 +355,15 @@ Gap on master d256616 (one binary per size, 6 runs, cpu 9): typical framework 10
 Layout test (`BASE_SOA` in `gen_app.py`, 4,079, baseline only): default 85.1, two arrays like the framework 85.9, one array per field 103.5. Storage is already in execution order, so reordering can win about 1 ns at most.
 
 Attribution of the 7.2 ns at 4,079 (cachegrind on an `x86-64-v3` build, framework / baseline per packet): instructions 708 / 749, stores 63.4 / 49.4, L1d read misses 4.07 / 2.06, L1i misses 15.6 / 27.5, conditional mispredicts 2.56 / 5.74, one indirect branch per packet on both. So instruction count, conditional branches and an extra jump level aren't the cause. `--sort` leaves 3.4 ns with everything hot; `--keys 8` 1.5, 32 3.1, 128 4.7, 300 7. So about 3.6 ns is data footprint and about 3.4 is a floor that lines up with the extra stores; 1 to 2 ns of the floor is unexplained. No fix found within the invariants. The earlier "gap grows with distinct packets" was a bump at 4k to 8k packets where both sides slow: gap 5, 7, 9.5, 10, 7.4, 6.9 at 1k to 64k. Next if wanted: count distinct cache lines per packet on each side, diff the stores of one hot arm. No hardware counters yet (`perf_event_paranoid`=4).
+
+## API: handle components, every entry has on_update, rewrap (2026-11-02)
+
+On master be2c3dc: `#[handle]` and `HandleComponent` (`Handle`, `View<'a>`, `view`), `on_update(&mut self, input, v)` on every entry with `#[derive(UpdateHandler)]` and `ACTIVE`, selectors on handle sources through `SelectView`. By-value `.text` byte-identical at typical and 4,079 through all of it. Tests 107 ok, error cases 73 ok.
+
+Chain, 64 links, by value / handle / hand-written in place: 64 B 103 / 99 / 98 ns; 512 B 274 / 272 / 274; 4 KB 5,480 / 2,513 / 2,548. Switch on a handle source, hand-written / by value / handle: 7 feeds 8.0 / 9.8 / 9.5 ns; 15 feeds 17.4 / 23.4 / 23.5 (instructions +2.5%; gap not explained).
+
+`perps` release on be2c3dc: 416.3 s, 9.06 GB; 6 runs on cpu 9, framework min 96.35, baseline min 91.33, per-run gap 2.9 to 6.0. `full` cold check on afca850: 359 s, 11.53 GB. `full` release not rebuilt since d9d4423: only about 20.7 GB is free with the desktop session running, and it needs about 21 GB or more.
+
+Zero-cost survey at 4,079 (branch `zero-cost`, not merged): no flags, guarded runs or stored slots in generated apps. Extra stores are mostly call overhead from outlined functions, and removing them doesn't change time. At tiny the gap was the baseline's `#[inline(always)]` on `big_digest` that `Big::update` lacks; at 4,079 it follows the wide components through `run_wide`. Rebuilding the same baseline code moves it 2 to 4 ns from layout alone.
+
+One-`Component` prototype: branch `one-component`, patch against 3db775e. Not adopted; the user decides.

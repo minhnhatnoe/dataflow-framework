@@ -13,7 +13,7 @@ Always run cargo under a timeout and a memory cap (see "Rules for agents"). Larg
 ```sh
 CARGO_BUILD_JOBS=1 timeout 600 cargo test -p dataflow-flat        # tests are heavy: build one test with --test name
 CARGO_BUILD_JOBS=1 timeout 300 cargo test --doc -p dataflow-flat  # doc tests (pipeline.rs, sinks.rs, node.rs)
-timeout 900 scripts/check_errors.sh                # all 64 cases; or pass case names to run a subset
+timeout 900 scripts/check_errors.sh                # all 73 cases; or pass case names to run a subset
 timeout 120 cargo run -p dataflow-flat --example exchanges   # also basic, diamond, selbench
 python3 bench/gen_app.py --size typical --mode enum --out DIR # --mode is required: 1a | enum | req
 python3 scripts/measure.py --mode enum --sizes tiny,small --out DIR   # default --out is target/harness
@@ -22,7 +22,7 @@ python3 scripts/gen_selbench.py [E S K packets]                        # writes 
 python3 bench/gen_bench.py full 20 && scripts/bench.sh                 # old flat-graph benchmark; restores `full 20`
 ```
 
-Sizes of `bench/gen_app.py` (components): tiny 111, small 415, typical 823, then 2,044 (`m15-150-35`), 4,079 (`m30-300-70`), `perps` 12,412, `full` 29,650. Safe under a few GB: tiny, small, typical (dev first build about 2 GB, release about 1.5 to 3 GB). 2,044 check about 1.2 GB; 4,079 release about 3 GB, 100 s; `perps` check about 5.3 GB with `MALLOC_CONF`, 126 s; `perps` release 8.75 GB, 416 s; `full` check 10.1 GB, 310 s (patched rustc, empty `MALLOC_CONF`); `full` release 19.66 GB, 1,537 s (cap at least 21 GB). The front end sets the release peak at these sizes, and time still grows faster than components (LLVM). Extrapolations have been wrong in both directions, so measure. Apps above about 1,300 to 2,000 components need `#![allow(long_running_const_eval)]` in the application crate (`gen_app.py` adds it above 1,500). `bench/` is excluded from default members; `bench/gen_bench.py` output (`bench/src/main.rs`) should be what the generator produces (`full 20`) when committed.
+Sizes of `bench/gen_app.py` (components): tiny 111, small 415, typical 823, then 2,044 (`m15-150-35`), 4,079 (`m30-300-70`), `perps` 12,412, `full` 29,650. Safe under a few GB: tiny, small, typical (dev first build about 2 GB, release about 1.5 to 3 GB). 2,044 check about 1.2 GB; 4,079 release about 3 GB, 100 s; `perps` check about 5.3 GB with `MALLOC_CONF`, 126 s; `perps` release 9.06 GB, 416 s; `full` check 11.53 GB, 359 s; `full` release 19.66 GB, 1,537 s before the handler API (expect more; cap at least 22 GB). The front end sets the release peak at these sizes, and time still grows faster than components (LLVM). Extrapolations have been wrong in both directions, so measure. Apps above about 1,300 to 2,000 components need `#![allow(long_running_const_eval)]` in the application crate (`gen_app.py` adds it above 1,500). `bench/` is excluded from default members; `bench/gen_bench.py` output (`bench/src/main.rs`) should be what the generator produces (`full 20`) when committed.
 
 ## Invariants: don't break these without discussing
 
