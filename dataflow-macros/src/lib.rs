@@ -442,6 +442,8 @@ impl Parse for Subscription {
 /// `for PAT in CATALOG { BODY }`: one handled entry per element of the catalog.
 struct ForGroup {
     span: Span,
+    /// `name: for ..`: a set, one field of `Input` and `Init` that reads every element.
+    name: Option<Ident>,
     pat: ForPat,
     catalog: Type,
     body: Type,
@@ -511,10 +513,18 @@ enum Entry {
 
 impl Parse for Entry {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        if !input.peek(Token![for]) {
+        let named_for = peek_named(input) && input.peek3(Token![for]);
+        if !input.peek(Token![for]) && !named_for {
             return Ok(Entry::Sub(input.parse()?));
         }
         let span = input.span();
+        let name = if named_for {
+            let n: Ident = input.parse()?;
+            input.parse::<Token![:]>()?;
+            Some(n)
+        } else {
+            None
+        };
         input.parse::<Token![for]>()?;
         let pat = ForPat::parse(input)?;
         input.parse::<Token![in]>()?;
@@ -531,7 +541,7 @@ impl Parse for Entry {
                 "a `for` body is one node type, `for S in Catalog { Quoter<S> }`: a named entry (`x: Ws`) or a selected one (`Some(S(_)): Ws`) is not supported in it yet (a selected handled entry needs a generic `<struct>_edges` marker per element to key its `UpdateHandler` impl, which `Map` does not carry; write the entries out, or put the selector in a component generic over it, `Quoter<S>`)",
             ));
         }
-        Ok(Entry::For(ForGroup { span, pat, catalog, body, at: 0 }))
+        Ok(Entry::For(ForGroup { span, name, pat, catalog, body, at: 0 }))
     }
 }
 
@@ -836,6 +846,14 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         }
     }
 
+    for (k, f) in fors.iter().enumerate() {
+        if let Some(n) = &f.name {
+            if subs.iter().any(|b| b.name.as_ref() == Some(n)) || fors[..k].iter().any(|b| b.name.as_ref() == Some(n)) {
+                return Err(syn::Error::new(n.span(), "duplicate subscription name"));
+            }
+        }
+    }
+
     if let Some(lt) = input.generics.lifetimes().next() {
         return Err(syn::Error::new_spanned(lt, "components must be 'static; remove lifetime parameters"));
     }
@@ -992,6 +1010,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     // entries in a leaf, exactly `ARITY` children in an inner node.
     let types: Vec<&Type> = unique.iter().map(|(_, t, _)| *t).collect();
     let chains: Vec<&TokenStream2> = unique.iter().map(|(_, _, c)| *c).collect();
+    let mut for_base: Vec<usize> = vec![0; fors.len()];
     let (deps_ty, deps_pat, mappers) = if fors.is_empty() {
         let all: Vec<usize> = (0..unique.len()).collect();
         let tree = Shape::build(&all);
@@ -1068,11 +1087,13 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
                     }));
                 }
                 Seg::For(k) => {
+                    for_base[*k] = base;
                     let f = &fors[*k];
                     let mapper = format_ident!("__{}For{}", name, k);
                     let cat = &f.catalog;
                     tys.push(quote!(<#cat as #krate::MapDeps<#mapper<#(#ty_args0),*>, #base>>::Out));
-                    pats.push(quote!(_));
+                    let set_var = format_ident!("__set{}", k);
+                    pats.push(if f.name.is_some() { quote!(#set_var) } else { quote!(_) });
                     // The mapper: a zero-sized type that makes the entry of an element.
                     let mut vars_of = Vec::new();
                     f.pat.vars(&mut vars_of);
@@ -1106,7 +1127,13 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
                         let body = keep_span_at(f.body.to_token_stream(), f.span);
                         let node = keep_span_at(quote_spanned!(f.span=> #krate::Node), f.span);
                         let wc = mg.make_where_clause();
-                        wc.predicates.push(parse_quote!(#body: #node));
+                        if f.name.is_none() {
+                            wc.predicates.push(parse_quote!(#body: #node));
+                        } else {
+                            // A set also takes a handle component, which is a `Vertex` and not a `Node`.
+                            let vertex = keep_span_at(quote_spanned!(f.span=> #krate::Vertex), f.span);
+                            wc.predicates.push(parse_quote!(#body: #vertex));
+                        }
                         let nm = Ident::new(&name.to_string(), f.span);
                         let at = keep_span_at(quote_spanned!(f.span=> #nm #ty_generics), f.span);
                         let uh = keep_span_at(quote_spanned!(f.span=> #krate::UpdateHandler<#body>), f.span);
@@ -1114,12 +1141,14 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
                     }
                     let (mimpl, _, mwhere) = mg.split_for_impl();
                     let (elem, body) = (f.pat.elem(), keep_span_at(f.body.to_token_stream(), f.span));
+                    let kind = if f.name.is_some() { quote!(#krate::Named) } else { quote!(#krate::Unnamed) };
                     mappers.push(quote! {
                         #[doc(hidden)]
                         #[allow(non_camel_case_types)]
                         pub struct #mapper<#(#decl_params),*>(::core::marker::PhantomData<fn() -> (#(#type_params,)*)>);
                         impl #mimpl #krate::Map<#elem> for #mapper<#(#ty_args0),*> #mwhere {
                             type Out = #body;
+                            type Kind = #kind;
                             type Owner = #name #ty_generics;
                         }
                     });
@@ -1133,6 +1162,24 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         (quote!((#(#tys,)*)), quote!((#(#pats,)*)), quote!(#(#mappers)*))
     };
     let field_vars: Vec<&Ident> = keep.iter().map(|&i| &vars[slot_of[i]]).collect();
+    // The sets: (name, field type in `Input`, in `Init`, the constructor argument).
+    let mut set_names: Vec<Ident> = Vec::new();
+    let mut set_input_types: Vec<TokenStream2> = Vec::new();
+    let mut set_init_types: Vec<TokenStream2> = Vec::new();
+    let mut set_vars: Vec<Ident> = Vec::new();
+    {
+        for (k, f) in fors.iter().enumerate() {
+            let Some(n) = &f.name else { continue };
+            let base = for_base[k];
+            let mapper = format_ident!("__{}For{}", name, k);
+            let cat = &f.catalog;
+            let tree = quote!(<#cat as #krate::MapDeps<#mapper<#(#ty_args0),*>, #base>>::Out);
+            set_input_types.push(quote!(#krate::SetIn<#lt, #krate::RunPh, #cat, #tree, #base>));
+            set_init_types.push(quote!(#krate::SetIn<#lt, #krate::InitPh, #cat, #tree, #base>));
+            set_vars.push(format_ident!("__set{}", k));
+            set_names.push(n.clone());
+        }
+    }
     // What `new` gets for a selected field: the slot's value, else the chain's
     // `Initial` (autoref specialization: the concrete types are known here), else a
     // `SelInit` that panics with a clear message when read.
@@ -1281,6 +1328,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         #[allow(non_camel_case_types)]
         pub struct #input_name #input_decl_generics #input_where {
             #( pub #field_names: #input_types, )*
+            #( pub #set_names: #set_input_types, )*
             #[doc(hidden)]
             pub __marker: #marker_ty,
         }
@@ -1290,6 +1338,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         #[allow(non_camel_case_types)]
         pub struct #init_name #input_decl_generics #input_where {
             #( pub #field_names: #init_types, )*
+            #( pub #set_names: #set_init_types, )*
             #init_requests_field
             #[doc(hidden)]
             pub __marker: #marker_ty,
@@ -1309,14 +1358,14 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
             #[allow(unused_variables)]
             fn input<'a>(raw: <Self::Deps as #krate::DepList>::Inputs<'a>) -> Self::Input<'a> {
                 let #deps_pat = raw;
-                #input_name { #( #field_names: #field_vars, )* __marker: ::core::marker::PhantomData }
+                #input_name { #( #field_names: #field_vars, )* #( #set_names: #krate::SetIn::__new(#set_vars), )* __marker: ::core::marker::PhantomData }
             }
 
             #[inline]
             #[allow(unused_variables)]
             fn init<'a>(raw: <Self::Deps as #krate::DepList>::Inits<'a>) -> Self::Init<'a> {
                 let #deps_pat = raw;
-                #init_name { #( #field_names: #init_fields, )* #init_requests_default __marker: ::core::marker::PhantomData }
+                #init_name { #( #field_names: #init_fields, )* #( #set_names: #krate::SetIn::__new(#set_vars), )* #init_requests_default __marker: ::core::marker::PhantomData }
             }
 
             #[doc(hidden)]

@@ -699,6 +699,88 @@ comp!(A, [K0(p): Poll]);
 handler!(H, [#[subscribe(for S in (A,) { Some(S(_)): Ws })]]);
 fn main() {}"
 
+# --- set entries (`name: for S in Catalog { Node<S> }`) ------------------------------------------------------
+
+# A set read by `get`, `fold` and `for_each` compiles.
+CMD[set_ok]=build
+PATTERN[set_ok]='NOERROR'
+BODY[set_ok]="$SELECTORS
+comp!(A, [K0(p): Poll]);
+comp!(B, [K1(p): Poll]);
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(s: for T in dataflow_flat::catalog![A, B] { T })]
+pub struct R;
+impl Component for R {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (R, 0) }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 {
+        let mut n = 0;
+        i.s.for_each(|_: &u64| n += 1);
+        *i.s.get::<A>() + *i.s.get::<B>() + i.s.fold(0u64, |a, v| a + *v) + n
+    }
+}
+fn main() { let _ = Pipeline::<Poll, (R,)>::build(Configs::new()); }"
+
+# `get` of a type that is not an element of the set.
+CMD[set_element_not_in_set]=check
+PATTERN[set_element_not_in_set]='E0277.*`Src` is not an element of this set'
+BODY[set_element_not_in_set]="$SELECTORS
+comp!(A, [K0(p): Poll]);
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(s: for T in dataflow_flat::catalog![A] { T })]
+pub struct R;
+impl Component for R {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (R, 0) }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 { *i.s.get::<Src>() }
+}
+fn main() {}"
+
+# `fold` over elements of different output types: a message that says why, not a nested tuple.
+CMD[set_fold_mixed]=check
+PATTERN[set_fold_mixed]='E0277.*`fold`/`for_each` on a set need every element to be read as the same type'
+BODY[set_fold_mixed]="$SELECTORS
+comp!(A, [K0(p): Poll]);
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(p: Poll)]
+pub struct Txt;
+impl Component for Txt {
+    type Config = ();
+    type Output = String;
+    fn new((): (), _: Self::Init<'_>) -> (Self, String) { (Txt, String::new()) }
+    fn update(&mut self, _: Self::Input<'_>) -> String { String::new() }
+}
+#[derive(ComponentSubscription, UpdateHandler)]
+#[subscribe(s: for T in dataflow_flat::catalog![A, Txt] { T })]
+pub struct R;
+impl Component for R {
+    type Config = ();
+    type Output = u64;
+    fn new((): (), _: Self::Init<'_>) -> (Self, u64) { (R, 0) }
+    fn update(&mut self, i: Self::Input<'_>) -> u64 { i.s.fold(0u64, |a, v: &u64| a + *v) }
+}
+fn main() {}"
+
+# Selected elements in a set stay out: the same message as for an unnamed `for`.
+CMD[set_selected_elements]=check
+PATTERN[set_selected_elements]='a `for` body is one node type.*selected one'
+BODY[set_selected_elements]="$SELECTORS
+$HANDLERS
+comp!(A, [K0(p): Poll]);
+handler!(H, [#[subscribe(s: for S in (A,) { Some(S(_)): Ws })]]);
+fn main() {}"
+
+# A set name that is already taken.
+CMD[set_duplicate_name]=check
+PATTERN[set_duplicate_name]='duplicate subscription name'
+BODY[set_duplicate_name]="$SELECTORS
+$HANDLERS
+comp!(A, [K0(p): Poll]);
+handler!(H, [#[subscribe(s: A, s: for T in (A,) { T })]]);
+fn main() {}"
+
 # A pair pattern needs exactly two parts.
 CMD[for_pattern_triple]=check
 PATTERN[for_pattern_triple]='a `for` pattern destructures a pair'
@@ -1246,6 +1328,7 @@ ORDER=(field_typo not_a_component duplicate_name wrong_input_type cycle
        selector_wrong_input orphan_first
        handler_missing_update handler_missing_update_note handler_non_exclusive_join handler_exclusive_ok handler_duplicate_marker handler_selected_missing_update handler_bare_wildcard handler_named_missing_update handler_derive_and_impl handler_wrong_value_type handler_wrong_edge_type
        for_ok for_missing_update for_not_a_catalog for_zip_shapes for_body_named for_body_selected for_pattern_triple for_missing_bound
+       set_ok set_element_not_in_set set_fold_mixed set_selected_elements set_duplicate_name
        pattern_struct pattern_multi_field pattern_range pattern_range_literal pattern_guard pattern_or pattern_literal
        pattern_reference pattern_arrow unit_selector_unknown unit_selector_data_variant pattern_ok
        listener_missing_request listener_request_ok

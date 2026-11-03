@@ -21,6 +21,7 @@
 //! The shape stays an `ARITY`-sized tree; positions are dense per catalog, in
 //! catalog order, which is the listing order.
 
+use core::any::TypeId;
 use core::marker::PhantomData;
 
 use crate::component::{DepList, Sub};
@@ -47,8 +48,30 @@ pub trait Catalog: 'static {
 pub trait Map<A>: 'static {
     /// The node subscribed to for the element `A`.
     type Out: Vertex;
+    /// How the entries are read: [`Unnamed`] (`for S in C { N<S> }`, one handled entry per
+    /// element, not a field of `Input`) or [`Named`] (`set: for S in C { N<S> }`, a field that
+    /// reads every element, see [`SetIn`](crate::SetIn)).
+    type Kind: ChainFor<Self::Out>;
     /// The component whose `UpdateHandler<Out>` impl handles the entry.
     type Owner: 'static;
+}
+
+/// The selector chain an entry of a `for` has.
+#[doc(hidden)]
+pub trait ChainFor<N: Vertex> {
+    type C: crate::select::SelectChain<N::Stored>;
+}
+/// An unnamed `for`: the entries are handled edges, never read in `update`.
+#[doc(hidden)]
+pub struct Unnamed;
+impl<N: Vertex> ChainFor<N> for Unnamed {
+    type C = Hd<N, ()>;
+}
+/// A named `for` (a set): plain edges, read in `update` through the set field.
+#[doc(hidden)]
+pub struct Named;
+impl<N: Vertex> ChainFor<N> for Named {
+    type C = ();
 }
 
 /// The subscription tree of a catalog under a mapper `F`, with positions from `B`.
@@ -69,7 +92,7 @@ pub trait Ent<F, A, const POS: usize> {
     type S;
 }
 impl<F: Map<A>, A, const POS: usize> Ent<F, A, POS> for () {
-    type S = Sub<<F as Map<A>>::Out, Hd<<F as Map<A>>::Out, ()>, POS, By<<F as Map<A>>::Owner, <F as Map<A>>::Out>>;
+    type S = Sub<<F as Map<A>>::Out, <<F as Map<A>>::Kind as ChainFor<<F as Map<A>>::Out>>::C, POS, By<<F as Map<A>>::Owner, <F as Map<A>>::Out>>;
 }
 
 // -- plain tuples -----------------------------------------------------------------------------------
@@ -83,7 +106,7 @@ macro_rules! tuple_leaf {
         where
             $(F: Map<$A>, (): Ent<F, $A, { BASE + $i }>,)*
         {
-            type Out = ($(Sub<<F as Map<$A>>::Out, Hd<<F as Map<$A>>::Out, ()>, { BASE + $i }, By<<F as Map<$A>>::Owner, <F as Map<$A>>::Out>>,)*);
+            type Out = ($(Sub<<F as Map<$A>>::Out, <<F as Map<$A>>::Kind as ChainFor<<F as Map<$A>>::Out>>::C, { BASE + $i }, By<<F as Map<$A>>::Owner, <F as Map<$A>>::Out>>,)*);
         }
     };
 }
@@ -137,7 +160,7 @@ macro_rules! zip_leaf {
         where
             $(F: Map<M<$A, $B>>, (): Ent<F, M<$A, $B>, { BASE + $i }>,)*
         {
-            type Out = ($(Sub<<F as Map<M<$A, $B>>>::Out, Hd<<F as Map<M<$A, $B>>>::Out, ()>, { BASE + $i }, By<<F as Map<M<$A, $B>>>::Owner, <F as Map<M<$A, $B>>>::Out>>,)*);
+            type Out = ($(Sub<<F as Map<M<$A, $B>>>::Out, <<F as Map<M<$A, $B>>>::Kind as ChainFor<<F as Map<M<$A, $B>>>::Out>>::C, { BASE + $i }, By<<F as Map<M<$A, $B>>>::Owner, <F as Map<M<$A, $B>>>::Out>>,)*);
         }
     };
 }
@@ -179,7 +202,7 @@ macro_rules! row_leaf {
         where
             $(F: Map<M<X, $A>>, (): Ent<F, M<X, $A>, { BASE + $i }>,)*
         {
-            type Out = ($(Sub<<F as Map<M<X, $A>>>::Out, Hd<<F as Map<M<X, $A>>>::Out, ()>, { BASE + $i }, By<<F as Map<M<X, $A>>>::Owner, <F as Map<M<X, $A>>>::Out>>,)*);
+            type Out = ($(Sub<<F as Map<M<X, $A>>>::Out, <<F as Map<M<X, $A>>>::Kind as ChainFor<<F as Map<M<X, $A>>>::Out>>::C, { BASE + $i }, By<<F as Map<M<X, $A>>>::Owner, <F as Map<M<X, $A>>>::Out>>,)*);
         }
     };
 }
@@ -231,3 +254,138 @@ macro_rules! product_inner {
     };
 }
 dataflow_macros::cat_inner!(product_inner);
+
+// -- Finding an element ---------------------------------------------------------------------------
+
+/// The position of `S` among the elements of a catalog, found by `TypeId` in constant evaluation
+/// (`usize::MAX` if it is not there). `get::<S>()` of a set uses it.
+#[doc(hidden)]
+pub trait CatFind<S: 'static> {
+    const P: usize;
+}
+/// `r + off`, keeping "not found".
+const fn at(r: usize, off: usize) -> usize {
+    if r == usize::MAX {
+        usize::MAX
+    } else {
+        r + off
+    }
+}
+macro_rules! tuple_find_leaf {
+    ([$($A:ident $B:ident $i:tt)*] [$($pad:tt)*]) => {
+        impl<S: 'static, $($A: 'static,)*> CatFind<S> for ($($A,)*) {
+            const P: usize = {
+                let mut p = usize::MAX;
+                $(if p == usize::MAX && TypeId::of::<S>() == TypeId::of::<$A>() { p = $i; })*
+                p
+            };
+        }
+    };
+}
+dataflow_macros::cat_leaf!(tuple_find_leaf);
+macro_rules! tuple_find_inner {
+    ([$($K:ident $L:ident $pre:tt)*]) => {
+        impl<S: 'static, $($K: CatFind<S> + Catalog,)*> CatFind<S> for ($($K,)*) {
+            const P: usize = {
+                let mut p = usize::MAX;
+                $(if p == usize::MAX { p = at(<$K as CatFind<S>>::P, $pre); })*
+                p
+            };
+        }
+    };
+}
+dataflow_macros::cat_inner!(tuple_find_inner);
+
+impl<S: 'static, A: CatFind<S> + Catalog, B: CatFind<S> + Catalog> CatFind<S> for Concat<A, B> {
+    const P: usize = {
+        let r = <A as CatFind<S>>::P;
+        if r != usize::MAX {
+            r
+        } else {
+            at(<B as CatFind<S>>::P, <A as Catalog>::LEN)
+        }
+    };
+}
+
+macro_rules! zip_find_leaf {
+    ([$($A:ident $B:ident $i:tt)*] [$($pad:tt)*]) => {
+        impl<S: 'static, $($A: 'static, $B: 'static,)*> CatFind<S> for Zip<($($A,)*), ($($B,)*)> {
+            const P: usize = {
+                let mut p = usize::MAX;
+                $(if p == usize::MAX && TypeId::of::<S>() == TypeId::of::<M<$A, $B>>() { p = $i; })*
+                p
+            };
+        }
+    };
+}
+dataflow_macros::cat_leaf!(zip_find_leaf);
+macro_rules! zip_find_inner {
+    ([$($K:ident $L:ident $pre:tt)*]) => {
+        impl<S: 'static, $($K: Catalog, $L: Catalog,)*> CatFind<S> for Zip<($($K,)*), ($($L,)*)>
+        where $(Zip<$K, $L>: CatFind<S> + Catalog,)*
+        {
+            const P: usize = {
+                let mut p = usize::MAX;
+                $(if p == usize::MAX { p = at(<Zip<$K, $L> as CatFind<S>>::P, $pre); })*
+                p
+            };
+        }
+    };
+}
+dataflow_macros::cat_inner!(zip_find_inner);
+
+macro_rules! row_find_leaf {
+    ([$($A:ident $B:ident $i:tt)*] [$($pad:tt)*]) => {
+        impl<S: 'static, X: 'static, $($A: 'static,)*> CatFind<S> for Row<X, ($($A,)*)> {
+            const P: usize = {
+                let mut p = usize::MAX;
+                $(if p == usize::MAX && TypeId::of::<S>() == TypeId::of::<M<X, $A>>() { p = $i; })*
+                p
+            };
+        }
+    };
+}
+dataflow_macros::cat_leaf!(row_find_leaf);
+macro_rules! row_find_inner {
+    ([$($K:ident $L:ident $pre:tt)*]) => {
+        impl<S: 'static, X: 'static, $($K: Catalog,)*> CatFind<S> for Row<X, ($($K,)*)>
+        where $(Row<X, $K>: CatFind<S> + Catalog,)*
+        {
+            const P: usize = {
+                let mut p = usize::MAX;
+                $(if p == usize::MAX { p = at(<Row<X, $K> as CatFind<S>>::P, $pre); })*
+                p
+            };
+        }
+    };
+}
+dataflow_macros::cat_inner!(row_find_inner);
+
+macro_rules! product_find_leaf {
+    ([$($A:ident $B:ident $i:tt)*] [$($pad:tt)*]) => {
+        impl<S: 'static, Bc: Catalog, $($A: 'static,)*> CatFind<S> for Product<($($A,)*), Bc>
+        where $(Row<$A, Bc>: CatFind<S>,)*
+        {
+            const P: usize = {
+                let mut p = usize::MAX;
+                $(if p == usize::MAX { p = at(<Row<$A, Bc> as CatFind<S>>::P, $i * <Bc as Catalog>::LEN); })*
+                p
+            };
+        }
+    };
+}
+dataflow_macros::cat_leaf!(product_find_leaf);
+macro_rules! product_find_inner {
+    ([$($K:ident $L:ident $pre:tt)*]) => {
+        impl<S: 'static, Bc: Catalog, $($K: Catalog,)*> CatFind<S> for Product<($($K,)*), Bc>
+        where $(Product<$K, Bc>: CatFind<S>,)*
+        {
+            const P: usize = {
+                let mut p = usize::MAX;
+                $(if p == usize::MAX { p = at(<Product<$K, Bc> as CatFind<S>>::P, $pre * <Bc as Catalog>::LEN); })*
+                p
+            };
+        }
+    };
+}
+dataflow_macros::cat_inner!(product_find_inner);

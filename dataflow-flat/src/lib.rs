@@ -134,6 +134,7 @@ mod node;
 mod pipeline;
 mod plan;
 mod select;
+mod set;
 mod sinks;
 mod store;
 mod split;
@@ -159,8 +160,11 @@ pub use select::{SelectChain, ViewC, ViewChain, ViewChainOn, ViewWalk};
 pub use sinks::{SinkList, Sinks};
 pub use handler::{HandledEdge, UpdateHandler};
 pub use catalog::{Catalog, Concat, Product, Zip, M};
+pub use set::SetIn;
 #[doc(hidden)]
-pub use catalog::{Map, MapDeps, Row};
+pub use set::{InitPh, RunPh};
+#[doc(hidden)]
+pub use catalog::{CatFind, ChainFor, Map, MapDeps, Named, Row, Unnamed};
 #[doc(hidden)]
 pub use handler::{By, Hd};
 

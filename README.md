@@ -517,6 +517,35 @@ Checked by building `Oms2` above. It works and the expansion is as cheap as the 
 
     (compiled in `tests/for_form.rs`, `enum_is_a_catalog_of_its_markers`.) A catalog of another enum's markers works the same through `markers = path`; the catalog still has to be the one whose elements the body accepts.
 * **The body is one node type, and that stays.** ``for S in All { Some(S(_)): Ws }`` is rejected: ``a `for` body is one node type, ..: a named entry (`x: Ws`) or a selected one (`Some(S(_)): Ws`) is not supported in it yet``. A selected handled entry is keyed by a generated `<struct>_edges::<Name>` marker; one per element would be a generic marker `Name<S>` that `Map` must also return (with the chain, instead of the fixed `Hd<Node, ()>` of `MapDeps`), that the derive declares and the user's impl names (`UpdateHandler<oms_edges::Sel<S>>`), plus a way to give each element's entry an `Initial` for an unread input. The workaround is the one in the example above: put the selector in a component generic over the marker (`Leg<S>`), which is also what the other examples do.
+* **Set entries: `name: for S in Catalog { Node<S> }`.** The same `for`, with a name before it, makes the elements one input called `name` that `update` reads as a whole (and `new` too), instead of one handled call per element. Each element is still one entry: the component runs if any element fired (the OR rule), the execution order is the catalog order (listing order), the values are the stored outputs and persist between pushes (an element that did not fire this step reads its last output), every element needs its `UpdateHandler` impl (`#[derive(UpdateHandler)]` covers all; a generic `impl<S: ..> UpdateHandler<Quoter<S>>` covers the family, and then `on_update` is called per fired element as for an unnamed `for`), and exclusivity and absorption are unchanged. A component can have any number of named and unnamed entries and sets, in any order.
+
+    ```rust
+    #[derive(ComponentSubscription, UpdateHandler)]
+    #[subscribe(limits: Limits, quotes: for S: Symbol in AllSymbols { Quoter<S> })]
+    pub struct Risk { .. }
+    impl Component for Risk {
+        // ..
+        fn update(&mut self, i: Self::Input<'_>) -> f64 {
+            let btc: &Quote = i.quotes.get::<Btc>();                 // one element by its catalog marker
+            let total = i.quotes.fold(0.0, |acc, q| acc + q.mid());   // every element, fired or not
+            // ..
+        }
+    }
+    ```
+
+    `i.quotes` is a `SetIn`, a `Copy` value (when the elements' reads are) with these methods, none of which looks anything up at run time:
+
+    * `get::<S>()` is the read of one element, `S` being the type the catalog lists (`Btc`, or `M<Venue, Btc>` for a product), as the element would be as a plain entry: `&Output` for a component, the `View<'a>` for a handle component (an owned view is returned by `get_ref::<S>()` as a reference, or taken by `fold`/`for_each`). `S` is found among the catalog's elements by `TypeId` in constant evaluation (`CatFind`) and the entry by the same constant descent the handler lookup uses, so it is a field offset. An `S` that is not in the set is ``error[E0277]: `Foo` is not an element of this set``.
+    * `fold(init, |acc, read| ..)` and `for_each(|read| ..)` visit every element in listing order, unrolled at compile time and inlined, with no index and no jump; the closure gets each element's read as it is. All elements must be read as one type (the same `Output`): otherwise ``error[E0277]: `fold`/`for_each` on a set need every element to be read as the same type``; elements of different output types are read with `get`. Rust has no generic closures, so a visitor over mixed types is not possible without a trait the user writes.
+    * `len()`.
+
+    There is no `iter()`. Storage is in execution order, so the elements' outputs are not contiguous (an element's upstream sits between it and the next); an iterator would carry a run-time index and dispatch on it, or the framework would have to build an array of references on every run, which is the cost this design avoids.
+
+    **What the field holds, and what it costs.** The field is the elements' reads in the shape of the catalog's subscription tree: for a by-value element a `&'a Output`, exactly what a list of named entries would give `update`. The gather forms those references in the push (constant offsets from the storage base) and, since a set reader has one call site for `update`, LLVM inlines `update` and the references disappear: a set reader of 16 or 300 elements compiles to the same instructions as the same component with 16 or 300 named entries (`run_wide`, byte for byte identical machine code in `scripts/gen_setbench.py`'s crate; 18.1 instructions per push at 16, 151 at 300 for both), vectorized sums included. What the design does not do is keep the references out of an `update` that LLVM decides not to inline (an `#[inline(never)]` on `update`, say): there the aggregate is built per run, exactly as for named entries. A set's elements count as inputs for `WIDE_INPUTS` (they are entries of `DepList::LEN`), so a set reader of 24 or more elements runs through `drive::run_wide` like a wide list.
+
+    **`new`.** `init.quotes` is the same type of field with the elements' first outputs (what a named entry gives `new`): `get`, `fold` and `for_each` work in `new`.
+
+    **Limits.** The catalog must not depend on the component's own type parameters (the field type names the catalog's tree). Selected elements are out (`name: for S in C { Some(S(_)): Ws }` gives the `a `for` body is one node type` error of an unnamed `for`); put the selector in a component generic over the marker (`Gated<S>` in `tests/sets.rs`, which makes the set's elements fire conditionally while the others keep their stale values). Compiled and run in `tests/sets.rs`.
 
 Nobody outside the tests has used it yet.
 

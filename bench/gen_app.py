@@ -582,6 +582,10 @@ def ALLOW(M):
     return "#![allow(long_running_const_eval)]\n" if M.components() > 1500 else ""
 
 
+RISK_SET = "none"
+SENDER_SET = "none"
+
+
 def gen_app(out, M, MODE, uinl):
     app = f"{out}/app"
     write(f"{app}/Cargo.toml", f"""[package]
@@ -638,11 +642,24 @@ pub fn run_batch(p: &mut Pipe, pkts: &[Wire]) {{
         write(f"{app}/src/{mod}/mod.rs", "\n".join(al) + "\n")
         subs = ",\n    ".join(f"q{k}: crate::{mod}::Q{k}" for k in range(M.n[e]))
         digest = sender_sum(M, e, lambda k: f"i.q{k}")
+        sender_defs = ""
+        if SENDER_SET != "none":
+            # The quoters as one set: `qs: for S: Mk in QCat { <S as Mk>::Node }`, the marker `Qm<I>` standing for `Q<I>`.
+            n = M.n[e]
+            sender_defs = "pub trait Mk: 'static { type Node: dataflow_flat::Vertex; }\npub struct Qm<const I: usize>;\n" + "".join(
+                f"impl Mk for Qm<{k}> {{ type Node = crate::{mod}::Q{k}; }}\n" for k in range(n)
+            ) + "pub type QCat = dataflow_flat::catalog![" + ", ".join(f"Qm<{k}>" for k in range(n)) + "];\n"
+            subs = "qs: for S: Mk in QCat { <S as Mk>::Node }"
+            if SENDER_SET == "get":
+                digest = sender_sum(M, e, lambda k: f"i.qs.get::<Qm<{k}>>()")
+            else:
+                assert M.scan == "all", "--sender-set fold needs --sink-scan all"
+                digest = "i.qs.fold((0u64, 0u32), |(a, j), x| (a ^ x.bid ^ x.ask.rotate_left((j % 13) + 1), j + 1)).0"
         write(f"{app}/src/{mod}/sender.rs", f"""//! Order sender for {mod}: subscribes to every quoter of the exchange (wide).
 use dataflow_flat::{{Component, ComponentSubscription, UpdateHandler}};
 use marketlib::DigestCore;
 use marketlib::stats::SENT;
-
+{sender_defs}
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(
     {subs}
@@ -666,11 +683,25 @@ impl Component for Sender {{
     for ix, d in enumerate(M.risk_deps):
         rsubs.append(f"x{ix}: crate::cross::X{d[1]}" if d[0] == "x" else f"x{ix}: crate::{EX[d[1]][0]}::Q{d[2]}")
     rsum = risk_sum(M, lambda i: f"i.x{i}", lambda e, k: f"i.x{M.risk_deps.index(('q', e, k))}")
+    risk_pre = ""
+    risk_defs = ""
+    if RISK_SET != "none" and M.risk_deps and M.risk_deps[0][0] == "x":
+        # The crosses as one set: `xs: for S: Mk in XCat { <S as Mk>::Node }` (the marker `Xm<I>` stands for the node `X<I>`).
+        n = len(M.risk_deps)
+        risk_defs = "pub trait Mk: 'static { type Node: dataflow_flat::Vertex; }\npub struct Xm<const I: usize>;\n" + "".join(
+            f"impl Mk for Xm<{i}> {{ type Node = crate::cross::X{i}; }}\n" for i in range(n)
+        ) + "pub type XCat = dataflow_flat::catalog![" + ", ".join(f"Xm<{i}>" for i in range(n)) + "];\n"
+        rsubs = ["xs: for S: Mk in XCat { <S as Mk>::Node }"]
+        if RISK_SET == "get":
+            rsum = risk_sum(M, lambda i: f"i.xs.get::<Xm<{i}>>()", None)
+        else:
+            assert M.scan == "all", "--risk-set fold needs --sink-scan all"
+            rsum = "i.xs.fold((0u64, 0u32), |(a, j), x| (a ^ x.px ^ x.spread.rotate_left((j % 13) + 1), j + 1)).0"
     write(f"{app}/src/risk.rs", f"""//! Risk sink: reads every cross-venue join.
 use dataflow_flat::{{Component, ComponentSubscription, UpdateHandler}};
 use marketlib::DigestCore;
 use marketlib::stats::RISK;
-
+{risk_defs}
 #[derive(ComponentSubscription, UpdateHandler)]
 #[subscribe(
     {(",\n    ").join(rsubs)}
@@ -1121,6 +1152,10 @@ def main():
                          "(the hand-written digest/step fns): always = #[inline(always)] on both (default, fair), none = no attribute on either")
     ap.add_argument("--big-inline", action="store_true", help="with --user-inline none: #[inline(always)] on Big only (framework Big::update and big_digest/step_big)")
     ap.add_argument("--core-inline", default="hint", choices=["none", "hint"])
+    ap.add_argument("--sender-set", default="none", choices=["none", "get", "fold"],
+                    help="each order sender subscribes to its quoters as one set entry (see --risk-set)")
+    ap.add_argument("--risk-set", default="none", choices=["none", "get", "fold"],
+                    help="Risk subscribes to the crosses as one set entry: `get` reads the sampled ones by marker, `fold` folds over all (needs --sink-scan all)")
     a = ap.parse_args()
     if a.markets:
         counts = tuple(int(x) for x in a.markets.split(","))
@@ -1130,7 +1165,9 @@ def main():
         counts = tuple(int(x) for x in a.size[1:].split("-"))
     assert len(counts) == 3 and all(c >= 1 for c in counts)
     out = os.path.abspath(a.out or f"gen/{a.size}-{a.mode}")
-    global LIB, REQ
+    global LIB, REQ, RISK_SET, SENDER_SET
+    RISK_SET = a.risk_set
+    SENDER_SET = a.sender_set
     REQ = a.mode == "req"
     if REQ:
         a.mode = "enum"
