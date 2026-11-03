@@ -362,7 +362,7 @@ On master be2c3dc: `#[handle]` and `HandleComponent` (`Handle`, `View<'a>`, `vie
 
 Chain, 64 links, by value / handle / hand-written in place: 64 B 103 / 99 / 98 ns; 512 B 274 / 272 / 274; 4 KB 5,480 / 2,513 / 2,548. Switch on a handle source, hand-written / by value / handle: 7 feeds 8.0 / 9.8 / 9.5 ns; 15 feeds 17.4 / 23.4 / 23.5 (instructions +2.5%; gap not explained).
 
-`perps` release on be2c3dc: 416.3 s, 9.06 GB; 6 runs on cpu 9, framework min 96.35, baseline min 91.33, per-run gap 2.9 to 6.0. `full` cold check on afca850: 359 s, 11.53 GB. `full` release not rebuilt since d9d4423: only about 20.7 GB is free with the desktop session running, and it needs about 21 GB or more.
+`perps` release on be2c3dc: 416.3 s, 9.06 GB; 6 runs on cpu 9, framework min 96.35, baseline min 91.33, per-run gap 2.9 to 5.7. `full` cold check on afca850: 359 s, 11.53 GB. `full` release not rebuilt since d9d4423: only about 20.7 GB is free with the desktop session running, and it needs about 21 GB or more.
 
 Zero-cost survey at 4,079 (branch `zero-cost`, not merged): no flags, guarded runs or stored slots in generated apps. Extra stores are mostly call overhead from outlined functions, and removing them doesn't change time. At tiny the gap was the baseline's `#[inline(always)]` on `big_digest` that `Big::update` lacks; at 4,079 it follows the wide components through `run_wide`. Rebuilding the same baseline code moves it 2 to 4 ns from layout alone.
 
