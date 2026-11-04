@@ -1,0 +1,8 @@
+[package]
+name = "dataflow-trading"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dataflow-flat = { path = "../dataflow-flat" }
+dataflow-trading-macros = { path = "../dataflow-trading-macros" }

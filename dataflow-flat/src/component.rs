@@ -96,6 +96,20 @@ pub trait Component: ComponentSubscription + Sized {
     /// subscribes to. The returned output (handle) replaces the stored one.
     fn update(&mut self, input: Self::Input<'_>) -> Self::Handle;
 
+    /// Recover the previous stored output before inputs are borrowed. Leave a
+    /// valid placeholder. Acyclic dependencies cannot observe this node's slot
+    /// during its own update. Ordinary components need not implement this.
+    #[inline]
+    fn take_output(_output: &mut Self::Handle) -> Option<Self::Handle> { None }
+
+    /// Update while reusing an output recovered by `take_output`. This permits
+    /// state adapters to mutate owned buffers without cloning or reallocating.
+    /// The default preserves the ordinary `update` API.
+    #[inline]
+    fn update_recycled(&mut self, input: Self::Input<'_>, _previous: Option<Self::Handle>) -> Self::Handle {
+        self.update(input)
+    }
+
     /// Handle components only: the view of the state and the stored handle that subscribers read,
     /// evaluated at each use (a subscriber runs or is constructed). Nothing is cached, so it
     /// should be cheap (an index, a reference into the state). A subscriber of a handle component
