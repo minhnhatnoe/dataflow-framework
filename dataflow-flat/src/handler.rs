@@ -537,6 +537,7 @@ impl<A: Layout, const P: usize, const N: usize, Gs> HVia<A, P, N, Gs> for HVal
 where
     A: NthT<P>,
     <A as NthT<P>>::T: Comp,
+    A::Outs: AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>,
     <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherIn<A, P>,
     A::States: AtPos<<A as NthT<P>>::T, P>,
     HItems<A, N>: RgCl,
@@ -547,14 +548,17 @@ where
     fn via(ctx: &mut PushCtx<'_, A>) -> <<A as NthT<P>>::T as Vertex>::Stored {
         <HItems<A, N> as HDrive<A, HVal, <A as NthT<P>>::T, P, Gs, <HItems<A, N> as RgCl>::Cl>>::items(ctx);
         let me = <A::States as AtPos<<A as NthT<P>>::T, P>>::at_mut(&mut *ctx.states);
+        let previous = <<A as NthT<P>>::T as Component>::take_output(
+            <A::Outs as AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>>::at_mut(&mut *ctx.outs));
         let inputs = <<<A as NthT<P>>::T as ComponentSubscription>::Deps as GatherIn<A, P>>::gather(ctx.root, &*ctx.outs);
-        me.update(<<A as NthT<P>>::T as ComponentSubscription>::input(inputs))
+        me.update_recycled(<<A as NthT<P>>::T as ComponentSubscription>::input(inputs), previous)
     }
 }
 impl<A: Layout, const P: usize, const N: usize, Gs> HVia<A, P, N, Gs> for HVw
 where
     A: NthT<P>,
     <A as NthT<P>>::T: Comp,
+    A::Outs: AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>,
     <<A as NthT<P>>::T as ComponentSubscription>::Deps: GatherCx<A, P>,
     A::States: SplitAt<P, Child = <A as NthT<P>>::T>,
     HItems<A, N>: RgCl,
@@ -565,8 +569,10 @@ where
     fn via(ctx: &mut PushCtx<'_, A>) -> <<A as NthT<P>>::T as Vertex>::Stored {
         <HItems<A, N> as HDrive<A, HVw, <A as NthT<P>>::T, P, Gs, <HItems<A, N> as RgCl>::Cl>>::items(ctx);
         let (cx, me) = <A::States as SplitAt<P>>::split_at(&mut *ctx.states);
+        let previous = <<A as NthT<P>>::T as Component>::take_output(
+            <A::Outs as AtPos<<<A as NthT<P>>::T as Vertex>::Stored, P>>::at_mut(&mut *ctx.outs));
         let inputs = <<<A as NthT<P>>::T as ComponentSubscription>::Deps as GatherCx<A, P>>::gather(ctx.root, &*ctx.outs, &cx);
-        me.update(<<A as NthT<P>>::T as ComponentSubscription>::input(inputs))
+        me.update_recycled(<<A as NthT<P>>::T as ComponentSubscription>::input(inputs), previous)
     }
 }
 

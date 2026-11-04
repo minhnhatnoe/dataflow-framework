@@ -6,6 +6,8 @@ A framework for building programs out of many small components (designed for hun
 
 **Status:** working prototype; the focus is the design rather than polish. Everything here was built and checked on the pinned nightly (see [Toolchain](#toolchain)). Code blocks in this file were compiled as a scratch crate against this tree; the output shown is what they printed.
 
+The initial trading layer is documented in [dataflow-trading](dataflow-trading/README.md): Books, signals, quote engines, OMSs, and a runnable two-symbol example.
+
 ## Contents
 
 1. [Requirements that shaped the design](#requirements-that-shaped-the-design)

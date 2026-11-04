@@ -28,6 +28,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "dataflow-trading"
+version = "0.1.0"
+dependencies = [
+ "dataflow-flat",
+ "dataflow-trading-macros",
+]
+
+[[package]]
+name = "dataflow-trading-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "foo-v1"
 version = "0.1.0"
 dependencies = [

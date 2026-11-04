@@ -253,8 +253,10 @@ macro_rules! run_body_pre {
 macro_rules! upd_val {
     ($A:ident, $P:tt, $ctx:ident) => {{
         type C<A, const P: usize> = <A as NthT<P>>::T;
+        let previous = <C<$A, $P> as Component>::take_output(
+            <$A::Outs as AtPos<<C<$A, $P> as Vertex>::Stored, $P>>::at_mut(&mut *$ctx.outs));
         let inputs = <<C<$A, $P> as ComponentSubscription>::Deps as GatherIn<$A, $P>>::gather($ctx.root, &*$ctx.outs);
-        <$A::States as AtPos<C<$A, $P>, $P>>::at_mut(&mut *$ctx.states).update(<C<$A, $P> as ComponentSubscription>::input(inputs))
+        <$A::States as AtPos<C<$A, $P>, $P>>::at_mut(&mut *$ctx.states).update_recycled(<C<$A, $P> as ComponentSubscription>::input(inputs), previous)
     }};
 }
 /// As `upd_val`, for a component with a handle parent: its own state is split off from the states
@@ -263,8 +265,10 @@ macro_rules! upd_view {
     ($A:ident, $P:tt, $ctx:ident) => {{
         type C<A, const P: usize> = <A as NthT<P>>::T;
         let (cx, me) = <$A::States as SplitAt<$P>>::split_at(&mut *$ctx.states);
+        let previous = <C<$A, $P> as Component>::take_output(
+            <$A::Outs as AtPos<<C<$A, $P> as Vertex>::Stored, $P>>::at_mut(&mut *$ctx.outs));
         let inputs = <<C<$A, $P> as ComponentSubscription>::Deps as GatherCx<$A, $P>>::gather($ctx.root, &*$ctx.outs, &cx);
-        <C<$A, $P> as Component>::update(me, <C<$A, $P> as ComponentSubscription>::input(inputs))
+        <C<$A, $P> as Component>::update_recycled(me, <C<$A, $P> as ComponentSubscription>::input(inputs), previous)
     }};
 }
 
